@@ -1,0 +1,307 @@
+#!/usr/bin/env python3
+"""fleet: see, reattach and stop the coding agents (Claude, Codex, Cursor) on this machine.
+
+START & RETURN
+  fleet new NAME         start a protected session called NAME in this folder, then run claude/codex/agent in it
+  fleet resume [NAME]    go back into NAME (no name: the only session, or a list if there are several)
+  fleet peek NAME        print the last 40 lines of NAME's screen without going into it
+
+SEE
+  fleet                  the agents you started, what they're doing, and any follow-up waiters
+  fleet all              same, plus background helpers (desktop apps, Codex service, chrome bridge, claude-mem)
+
+STOP
+  fleet kill PID|NAME    stop one agent or waiter (by PID) or a whole session (by NAME)
+  fleet kill --all       stop every agent and waiter you started, after a y/N prompt
+                         (never touches background helpers or the agent that ran it)
+
+INSIDE A SESSION (tmux keys: press Ctrl-b, let go, then the key)
+  Ctrl-b d               leave the session; the agent keeps running (fleet resume to come back)
+  Ctrl-b [               scroll mode: arrows/PgUp to scroll, q to exit
+
+WHERE column
+  safe · NAME · background   protected, keeps running with no window open
+  safe · NAME · on screen    protected, currently open in a window
+  dies with window           not protected: closing that window or a Termius drop kills it
+
+Agents only survive a dropped connection when started with `fleet new`. `fleet help` shows this.
+"""
+import glob
+import json
+import os
+import re
+import shutil
+import signal
+import sqlite3
+import subprocess
+import sys
+import time
+
+HOME = os.path.expanduser('~')
+# basename of argv[0], or of an argv[1] path (`node /…/codex`) -> tool; `agent` is Cursor's CLI here
+TOOLS = {'claude': 'claude', 'codex': 'codex', 'cursor-agent': 'cursor', 'agent': 'cursor'}
+WAITER = re.compile(r'\buntil\b.*\bsleep\b|codex exec resume')
+
+
+def out(*cmd):
+    return subprocess.run(cmd, capture_output=True, text=True).stdout
+
+
+def snapshot():
+    procs = {}
+    for line in out('ps', '-axo', 'pid=,ppid=,etime=,tty=,command=').splitlines():
+        pid, ppid, age, tty, cmd = line.split(None, 4)
+        procs[int(pid)] = dict(pid=int(pid), ppid=int(ppid), age=age, tty=tty, cmd=cmd)
+    return procs
+
+
+def tool(cmd):
+    # ponytail: splits on spaces, fine while agent binaries live in space-free paths
+    argv = cmd.split()
+    for arg in argv[:1] + [a for a in argv[1:2] if '/' in a]:  # `distnoted agent` is not Cursor
+        if os.path.basename(arg) in TOOLS:
+            return TOOLS[os.path.basename(arg)]
+
+
+def ancestors(procs, pid):
+    pid = procs[pid]['ppid'] if pid in procs else 0
+    while pid in procs and pid > 1:
+        yield pid
+        pid = procs[pid]['ppid']
+
+
+def find(procs):
+    """Top-level agents and waiters (a match nested under another match is part of its parent)."""
+    agents = {p: tool(v['cmd']) for p, v in procs.items() if tool(v['cmd'])}
+    waiters = {p for p, v in procs.items() if WAITER.search(v['cmd'])}
+    top_agents = [p for p in agents if not any(a in agents for a in ancestors(procs, p))]
+    top_waiters = [p for p in waiters if not any(a in waiters for a in ancestors(procs, p))]
+    return agents, sorted(top_agents), sorted(top_waiters)
+
+
+def service(procs, pid):
+    """Label for agent processes that belong to an app or tool rather than a session you started."""
+    cmd, parent = procs[pid]['cmd'], procs.get(procs[pid]['ppid'], {}).get('cmd', '')
+    if '.app/' in cmd or 'app-server' in cmd:
+        return 'app/service'
+    if '--chrome-native-host' in cmd:
+        return 'chrome bridge'
+    if 'claude-mem' in parent:
+        return 'claude-mem observer'
+
+
+def panes():
+    """pane pid -> (session, attached client count)"""
+    res = {}
+    for line in out('tmux', 'list-panes', '-a', '-F', '#{pane_pid} #{session_attached} #{session_name}').splitlines():
+        pid, attached, name = line.split(' ', 2)
+        res[int(pid)] = (name, int(attached))
+    return res
+
+
+def cwds(pids):
+    res, pid = {}, None
+    if pids:
+        for line in out('lsof', '-a', '-d', 'cwd', '-Fn', '-p', ','.join(map(str, pids))).splitlines():
+            if line[:1] == 'p':
+                pid = int(line[1:])
+            elif line[:1] == 'n':
+                res[pid] = line[1:]
+    return res
+
+
+def secs(etime):
+    days, _, hms = etime.rpartition('-')
+    total = 0
+    for part in hms.split(':'):
+        total = total * 60 + int(part)
+    return total + int(days or 0) * 86400
+
+
+def claude_task(pid):
+    """Claude Code writes ~/.claude/sessions/<pid>.json; the session's transcript carries its title."""
+    try:
+        with open(f'{HOME}/.claude/sessions/{pid}.json') as f:
+            meta = json.load(f)
+    except (OSError, ValueError):
+        return ''
+    title = meta.get('name', '')
+    for path in glob.glob(f'{HOME}/.claude/projects/*/{meta.get("sessionId")}.jsonl'):
+        with open(path, 'rb') as f:
+            f.seek(0, 2)
+            f.seek(max(0, f.tell() - 2_000_000))  # titles are re-written often; the tail has the latest
+            for line in f:
+                if b'-title"' in line:
+                    try:
+                        d = json.loads(line)
+                    except ValueError:
+                        continue
+                    title = d.get('customTitle') or d.get('aiTitle') or title
+    return f"[{meta.get('status', '?')}] {title}"
+
+
+def codex_task(cwd, started_ms):
+    # ponytail: Codex doesn't record which process owns a thread, so this picks the newest thread in the
+    # same folder touched since the process started; two Codex agents in one folder can show the same task.
+    dbs = sorted(glob.glob(f'{HOME}/.codex/state_*.sqlite'))
+    if not dbs:
+        return ''
+    try:
+        con = sqlite3.connect(f'file:{dbs[-1]}?mode=ro', uri=True)
+        row = con.execute(
+            "SELECT coalesce(nullif(name, ''), nullif(title, ''), first_user_message) FROM threads"
+            " WHERE cwd = ? AND archived = 0 AND updated_at_ms >= ? ORDER BY updated_at_ms DESC LIMIT 1",
+            (cwd, started_ms)).fetchone()
+    except sqlite3.Error:
+        return ''
+    return row[0] if row else '(no prompt yet)'
+
+
+def task(procs, pid, tool_name, cwd):
+    if service(procs, pid) in ('app/service', 'chrome bridge'):  # services host many threads; a guess would mislead
+        return ''
+    if tool_name == 'claude':
+        return claude_task(pid)
+    if tool_name == 'codex' and cwd:
+        return codex_task(cwd, int((time.time() - secs(procs[pid]['age'])) * 1000))
+    return ''
+
+
+def where(procs, pid, pane_map):
+    if service(procs, pid):
+        return service(procs, pid)
+    for a in [pid, *ancestors(procs, pid)]:
+        if a in pane_map:
+            name, attached = pane_map[a]
+            return f"safe · {name} · {'on screen' if attached else 'background'}"
+    return 'dies with window'
+
+
+def owner(procs, pid, agents):
+    return next((f'{agents[a]} {a}' for a in ancestors(procs, pid) if a in agents), 'detached')
+
+
+def show(procs, everything=False):
+    agents, top, waiters = find(procs)
+    hidden = [p for p in top if service(procs, p)]
+    top = top if everything else [p for p in top if p not in hidden]
+    pane_map, dirs, mine = panes(), cwds(top), set(ancestors(procs, os.getpid()))
+    print(f'{"PID":>6}  {"TOOL":<7}{"AGE":>12}  {"WHERE":<30}{"DIR":<16}TASK')
+    for p in top:
+        cwd = dirs.get(p, '')
+        label = os.path.basename(cwd) or cwd or '?'
+        what = task(procs, p, agents[p], cwd).replace('\n', ' ')[:60] + ('  <- ran fleet' if p in mine else '')
+        print(f'{p:>6}  {agents[p]:<7}{procs[p]["age"]:>12}  {where(procs, p, pane_map):<30}{label[:15]:<16}{what}')
+    if not top:
+        print('  (no agents running)')
+    if hidden and not everything:
+        print(f'  + {len(hidden)} background helpers (fleet all)')
+    if waiters:
+        print(f'\nWAITERS\n{"PID":>6}  {"OWNER":<14}{"AGE":>12}  COMMAND')
+        for p in waiters:
+            print(f'{p:>6}  {owner(procs, p, agents):<14}{procs[p]["age"]:>12}  {procs[p]["cmd"][:90]}')
+
+
+def kill_tree(procs, pid):
+    for child in [c for c, v in procs.items() if v['ppid'] == pid]:
+        kill_tree(procs, child)
+    try:
+        os.kill(pid, signal.SIGTERM)
+    except ProcessLookupError:
+        pass
+
+
+def kill(procs, target):
+    agents, top, waiters = find(procs)
+    if target == '--all':
+        mine = set(ancestors(procs, os.getpid()))
+        doomed = [p for p in top + waiters if p not in mine and not service(procs, p)]
+        if not doomed:
+            return print('Nothing to kill.')
+        for p in doomed:
+            print(f'{p:>6}  {agents.get(p, "waiter"):<7}{procs[p]["cmd"][:80]}')
+        if input(f'Kill these {len(doomed)}? [y/N] ').strip().lower() != 'y':
+            return print('Cancelled.')
+        for p in doomed:
+            kill_tree(procs, p)
+        return print(f'Sent SIGTERM to {len(doomed)}.')
+    if target.isdigit():
+        pid = int(target)
+        if pid not in agents and pid not in waiters:
+            sys.exit(f'{pid} is not an agent or waiter (see `fleet`).')
+        kill_tree(procs, pid)
+        return print(f'Sent SIGTERM to {pid} and its children.')
+    if subprocess.run(['tmux', 'kill-session', '-t', f'={target}'], capture_output=True).returncode:
+        sys.exit(f'No tmux session named {target}.')
+    print(f'Killed tmux session {target}.')
+
+
+def open_session(name):
+    if subprocess.run(['tmux', 'has-session', '-t', f'={name}'], capture_output=True).returncode:
+        # caffeinate keeps the Mac from idle/system sleep (system sleep only on AC power) while the session lives
+        shell = os.environ.get('SHELL', '/bin/zsh')
+        keepawake = ['caffeinate', '-ims'] if shutil.which('caffeinate') else []  # macOS only; Linux just gets the shell
+        subprocess.run(['tmux', 'new-session', '-d', '-s', name, '-c', os.getcwd(), *keepawake, shell], check=True)
+    verb = 'switch-client' if os.environ.get('TMUX') else 'attach-session'
+    os.execvp('tmux', ['tmux', verb, '-t', f'={name}'])
+
+
+def selftest():
+    procs = {
+        10: dict(pid=10, ppid=1, age='1', tty='s0', cmd='tmux'),
+        11: dict(pid=11, ppid=10, age='1', tty='s1', cmd='caffeinate -ims /bin/zsh'),
+        12: dict(pid=12, ppid=11, age='1', tty='s1', cmd='/bin/zsh'),
+        20: dict(pid=20, ppid=12, age='1', tty='s1', cmd='claude'),
+        21: dict(pid=21, ppid=20, age='1', tty='s1', cmd='/bin/zsh -c until done; do sleep 300; done'),
+        22: dict(pid=22, ppid=21, age='1', tty='s1', cmd='sleep 300'),
+        30: dict(pid=30, ppid=1, age='1', tty='s2', cmd='node /opt/homebrew/bin/codex'),
+        31: dict(pid=31, ppid=30, age='1', tty='s2', cmd='/x/vendor/bin/codex'),
+        40: dict(pid=40, ppid=1, age='1', tty='s3', cmd='bash /Users/w/.local/bin/agent'),
+        50: dict(pid=50, ppid=1, age='1', tty='??', cmd='/Applications/X.app/Contents/codex app-server'),
+        51: dict(pid=51, ppid=1, age='1', tty='??', cmd='/usr/sbin/distnoted agent'),
+        52: dict(pid=52, ppid=1, age='1', tty='??', cmd='bun /x/claude-mem/worker-service.cjs --daemon'),
+        53: dict(pid=53, ppid=52, age='1', tty='??', cmd='/opt/homebrew/bin/claude --output-format stream-json'),
+        60: dict(pid=60, ppid=1, age='1', tty='??', cmd='node -e require("claude")'),
+    }
+    agents, top, waiters = find(procs)
+    assert top == [20, 30, 40, 50, 53], top
+    assert agents[40] == 'cursor' and agents[30] == 'codex'
+    assert waiters == [21], waiters
+    assert owner(procs, 21, agents) == 'claude 20'
+    assert where(procs, 20, {11: ('scraper', 0)}) == 'safe · scraper · background'
+    assert where(procs, 30, {}) == 'dies with window' and where(procs, 50, {}) == 'app/service'
+    assert where(procs, 53, {}) == 'claude-mem observer'
+    assert secs('1-02:03:04') == 93784 and secs('05:06') == 306
+    print('ok')
+
+
+def main(args):
+    if not args:
+        return show(snapshot())
+    if args == ['all']:
+        return show(snapshot(), everything=True)
+    cmd, rest = args[0], args[1:]
+    if cmd in ('new', 'resume', 'attach', 'a') and len(rest) == 1:
+        return open_session(rest[0])
+    if cmd in ('resume', 'attach', 'a') and not rest:
+        names = out('tmux', 'list-sessions', '-F', '#{session_name}').split()
+        if len(names) == 1:
+            return open_session(names[0])
+        sys.exit('Sessions: ' + ', '.join(names) + '\nfleet resume NAME' if names else 'No tmux sessions.')
+    if cmd == 'peek' and len(rest) == 1:
+        screen = subprocess.run(['tmux', 'capture-pane', '-p', '-t', f'={rest[0]}:', '-S', '-200'],
+                                capture_output=True, text=True)
+        if screen.returncode:
+            sys.exit(f'No tmux session named {rest[0]}.')
+        return print('\n'.join(screen.stdout.rstrip().splitlines()[-40:]))
+    if cmd in ('help', '-h', '--help'):
+        return print(__doc__)
+    if cmd == 'kill' and len(rest) == 1:
+        return kill(snapshot(), rest[0])
+    if cmd == 'selftest':
+        return selftest()
+    sys.exit(__doc__)
+
+
+if __name__ == '__main__':
+    main(sys.argv[1:])
