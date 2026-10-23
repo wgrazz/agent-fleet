@@ -1,7 +1,7 @@
 // The agent list and each agent's status. `fleet json` is the source of truth for which agents exist; tmux panes
 // add the screen and the exit code; Claude Code hooks (via `fleet hook`) give exact status for Claude.
 import { EventEmitter } from 'node:events'
-import { detect, quickReplies, type QuickReply, type Status } from './detect.ts'
+import { detect, question, quickReplies, type QuickReply, type Status } from './detect.ts'
 import { FLEET_BIN, REPO } from './store.ts'
 import { capture, panes, run } from './tmux.ts'
 
@@ -64,7 +64,7 @@ export function ingestHook(body: Record<string, unknown>) {
 
 const lastLine = (screen: string) => screen.split('\n').map(l => l.trim()).filter(Boolean).at(-1) ?? ''
 
-export async function poll() {
+async function refresh() {
   const [rows, paneList] = await Promise.all([
     run(FLEET_BIN, ['json'], REPO).then(out => JSON.parse(out) as FleetRow[]).catch(() => null),
     panes(),
@@ -99,7 +99,7 @@ export async function poll() {
     next.push({
       name, controllable: !!r.session, tool: r.tool, pid: r.pid, cwd: r.cwd, task: r.task, age_s: r.age_s,
       session_id: r.session_id, status, status_since: now, quick_replies: status === 'needs_you' ? quickReplies(screen) : [],
-      last_line: lastLine(screen), message: status === 'needs_you' ? (hook?.message ?? '') : '', exit: '',
+      last_line: lastLine(screen), message: status === 'needs_you' ? (hook?.message || question(screen)) : '', exit: '',
     })
   }
 
@@ -129,6 +129,14 @@ export async function poll() {
   }
   for (const name of screens.keys()) if (!next.some(a => a.name === name)) screens.delete(name)
   agents = next
+}
+
+// One refresh at a time: the timer and actions (new, pause, kill) both call this.
+let inflight: Promise<void> | null = null
+export async function poll() {
+  while (inflight) await inflight.catch(() => {})
+  inflight = refresh().finally(() => (inflight = null))
+  return inflight
 }
 
 export function startPolling(ms = 2000) {

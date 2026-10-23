@@ -30,6 +30,9 @@ export async function panes(): Promise<Pane[]> {
 export const capture = (name: string, ansi = false) =>
   tmux('capture-pane', '-p', ...(ansi ? ['-e'] : []), '-t', target(name), '-S', '-200')
 
+export const paneWidth = async (name: string) =>
+  Number((await tmux('display-message', '-p', '-t', target(name), '#{pane_width}')).trim())
+
 // Text goes in as a bracketed paste so multi-line replies land as one message, then Enter submits it.
 export async function sendText(name: string, text: string) {
   await tmux('set-buffer', '-b', 'fleet-reply', '--', text)

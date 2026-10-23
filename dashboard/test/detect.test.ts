@@ -1,7 +1,7 @@
 import { readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { detect, quickReplies } from '../server/detect.ts'
+import { detect, question, quickReplies } from '../server/detect.ts'
 
 // fixtures/<tool>/<expected state>-<label>.txt, captured with `tmux capture-pane -p` from real sessions
 const root = join(import.meta.dirname, 'fixtures')
@@ -40,5 +40,14 @@ describe('quickReplies', () => {
   it('nothing when the agent is not asking', () => {
     expect(quickReplies(fx('claude/done-1.txt'))).toEqual([])
     expect(quickReplies(fx('codex/working-1.txt'))).toEqual([])
+  })
+})
+
+describe('question', () => {
+  const fx = (p: string) => readFileSync(join(root, p), 'utf8')
+  it('finds what the agent is asking', () => {
+    expect(question(fx('copilot/needs_you-trust.txt'))).toBe('Do you trust the files in this folder?')
+    expect(question(fx('codex/needs_you-trust.txt'))).toBe('Trust this folder? Codex can read, edit, and run files here, subject to your')
+    expect(question('Pick one:\n❯ 1. Yes\n  2. No\n')).toBe('Pick one:')
   })
 })

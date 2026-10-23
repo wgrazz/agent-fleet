@@ -6,7 +6,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from 'node:ht
 import { homedir } from 'node:os'
 import { extname, join, normalize } from 'node:path'
 import { notify, publicKey, subscribe } from './push.ts'
-import { alerts, ingestHook, list, startPolling } from './state.ts'
+import { alerts, ingestHook, list, poll, startPolling } from './state.ts'
 import { config, db, FLEET_BIN } from './store.ts'
 import { run, sendKey, sendText } from './tmux.ts'
 import { attach } from './ws.ts'
@@ -87,6 +87,7 @@ const routes: [string, RegExp, Route][] = [
     const prompt = str(b.prompt, 100_000)
     if (prompt) args.push('--', prompt)
     await fleet(args, cwd)
+    await poll() // so the next list the page sees already reflects this
     return { name }
   }],
 
@@ -102,12 +103,14 @@ const routes: [string, RegExp, Route][] = [
   ['POST', /^\/api\/agents\/([^/]+)\/pause$/, async (_req, [name]) => {
     agentOr404(name)
     await fleet(['pause', name])
+    await poll() // so the next list the page sees already reflects this
     return { ok: true }
   }],
 
   ['DELETE', /^\/api\/agents\/([^/]+)$/, async (_req, [name]) => {
     agentOr404(name)
     await fleet(['kill', name])
+    await poll() // so the next list the page sees already reflects this
     return { ok: true }
   }],
 
@@ -115,6 +118,7 @@ const routes: [string, RegExp, Route][] = [
 
   ['POST', /^\/api\/paused\/(\d+)\/resume$/, async (_req, [id]) => {
     await fleet(['unpause', id, '--detach'])
+    await poll() // so the next list the page sees already reflects this
     return { ok: true }
   }],
 

@@ -42,3 +42,12 @@ export function quickReplies(screen: string): QuickReply[] {
   }
   return found
 }
+
+// The line a waiting agent is asking about: the last line with a question mark above its menu, else the line
+// just above the menu.
+export function question(screen: string): string {
+  const lines = tail(screen, 25).split('\n').map(l => l.replace(/^[\s│╭╰─]+|[\s│╮╯─]+$/g, ''))
+  const menu = lines.findIndex(l => /^(?:[❯›>▶]\s*)?(?:[1-9]\.|\[[a-z]\])\s/.test(l))
+  const above = menu >= 0 ? lines.slice(0, menu) : lines
+  return above.filter(l => l.includes('?')).at(-1) ?? above.filter(Boolean).at(-1) ?? ''
+}

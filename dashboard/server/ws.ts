@@ -5,16 +5,21 @@ import type { Duplex } from 'node:stream'
 import pty from 'node-pty'
 import { WebSocketServer, type WebSocket } from 'ws'
 import { list } from './state.ts'
-import { capture } from './tmux.ts'
+import { capture, paneWidth } from './tmux.ts'
 
 const wss = new WebSocketServer({ noServer: true, maxPayload: 1 << 20 })
 
+// Frames are the raw screen (with colors); a JSON {"cols": N} message comes first and whenever the pane width
+// changes, so the page can lay the screen out at the agent's real width instead of re-wrapping it.
 function screen(ws: WebSocket, name: string) {
   let last = ''
+  let lastCols = 0
   const tick = async () => {
-    const now = await capture(name, true).catch(() => null)
+    const [now, cols] = await Promise.all([capture(name, true).catch(() => null), paneWidth(name).catch(() => 0)])
     if (now === null) return ws.close(4404, 'session gone')
-    if (now !== last && ws.readyState === ws.OPEN) ws.send((last = now))
+    if (ws.readyState !== ws.OPEN) return
+    if (cols && cols !== lastCols) ws.send(JSON.stringify({ cols: (lastCols = cols) }))
+    if (now !== last) ws.send((last = now))
   }
   tick()
   const timer = setInterval(tick, 500)
