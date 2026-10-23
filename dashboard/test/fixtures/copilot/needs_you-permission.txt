@@ -1,0 +1,24 @@
+  Session   Issues   Pull requests   Gists
+
+ ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄ ┃
+  ↓ Run this exact shell command and then tell me what it printed: …   18:46   ┃
+ ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀ ┃
+ $ Shell Run the exact shell command requested by the user and capture its ou… ┃
+   sleep 6 && echo fleet-test-ok > out.txt && cat out.txt                      ┃
+                                                                               ┃
+╭──────────────────────────────────────────────────────────────────────────────╮
+│ Run the exact shell command requested by the user and capture its output.    │
+│ ──────────────────────────────────────────────────────────────────────────── │
+│ ╭──────────────────────────────────────────────────────────────────────────╮ │
+│ │ sleep 6 && echo fleet-test-ok > out.txt && cat out.txt                   │ │
+│ ╰──────────────────────────────────────────────────────────────────────────╯ │
+│                                                                              │
+│ Do you want to run this command?                                             │
+│                                                                              │
+│ ❯ 1. Yes                                                                     │
+│   2. Yes, and don't ask again for `sleep` in this repo                       │
+│   (/private/tmp/.../work-copilot.yuJI)                                       │
+│   3. No, and tell Copilot what to do differently (Esc to stop)               │
+│                                                                              │
+│ ↑/↓ to navigate · enter to select · esc to cancel                            │
+╰──────────────────────────────────────────────────────────────────────────────╯

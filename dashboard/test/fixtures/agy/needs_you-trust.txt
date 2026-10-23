@@ -1,0 +1,24 @@
+Accessing workspace:
+
+/private/tmp/claude-501/-Users-will-Desktop-Optimal-Data-Inc-optimal/5309df96-
+c45e-4b5e-b7d2-67a734478ef7/scratchpad/work-agy.eXgM
+
+Do you trust the contents of this project?
+
+Antigravity CLI requires permission to read, edit, and execute files here.
+
+> Yes, I trust this folder
+  No, exit
+
+  ↑/↓ Navigate · enter Confirm
+                                                         Gemini 3.8 Flash · high
+
+
+
+
+
+
+
+
+
+

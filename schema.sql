@@ -6,6 +6,7 @@ CREATE TABLE IF NOT EXISTS profiles (
   model TEXT,
   effort TEXT,
   args TEXT,
+  cwd TEXT,
   is_default INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS paused (

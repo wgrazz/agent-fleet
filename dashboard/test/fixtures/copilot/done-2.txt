@@ -1,0 +1,24 @@
+ [Current]  Sessions   Issues   Pull requests   Gists
+
+  █ ▘▝ █  Check for mistakes.                                                  ┃
+   ▔▔▔▔                                                                        ┃
+                                                                               ┃
+ ● Tip: /instructions                                                          ┃
+   └ View and toggle custom instruction files                                  ┃
+                                                                               ┃
+ ❯ Say hi                                                                18:53 ┃
+                                                                               ┃
+ ● Hi!                                                                         ┃
+                                                                               ┃
+ ❯ Now say bye                                                           18:53 ┃
+   in one word                                                                 ┃
+                                                                               ┃
+ ● Bye                                                                         ┃
+                                                                               ┃
+ ● MCP Servers reloaded: 1 server connected                                    ┃
+                                                                               ┃
+ /private/tmp/.../api2.xZmg+0 -0  Plan: 1/200 (0% used)· Session: 0.43 AIC used
+────────────────────────────────────────────────────────────────────────────────
+❯
+────────────────────────────────────────────────────────────────────────────────
+ Interactive · Manual Approval · / commands         Auto → gpt-5.6-luna · (10%)

@@ -1,0 +1,24 @@
+
+     Live activity: http://localhost:37780
+     How it works: `/how-it-works`
+
+     This message disappears once the first observation lands.
+
+     View Observations Live @ http://localhost:37780
+
+❯ Run this exact shell command and then tell me what it printed: sleep 8 &&
+  echo fleet-test-ok
+
+  Ran 1 shell command
+
+⏺ It printed:
+
+  fleet-test-ok
+
+✻ Crunched for 13s · done 6:47 PM
+                        Update available! Run: brew upgrade claude-code@latest
+────────────────────────────────────────────────────────────────────────────────
+❯ 
+────────────────────────────────────────────────────────────────────────────────
+  [PONYTAIL:FULL] | Opus 5.5 | effort:high | $0.21 | ctx:5% | 5h:33% | wk:16%
+  ⏵⏵ auto mode on (shift+tab to cycle)

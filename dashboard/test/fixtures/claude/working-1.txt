@@ -1,0 +1,24 @@
+     `/learn-codebase` is available if the user wants to front-load the entire
+     repo into memory in a single pass (~5 minutes on a typical repo, optional).
+     Otherwise memory builds passively as work happens.
+
+     Live activity: http://localhost:37780
+     How it works: `/how-it-works`
+
+     This message disappears once the first observation lands.
+
+     View Observations Live @ http://localhost:37780
+
+❯ Run this exact shell command and then tell me what it printed: sleep 8 &&
+  echo fleet-test-ok
+
+⏺ Waiting 8 seconds then printing test string
+  ⎿  $ sleep 8 && echo fleet-test-ok
+
+✶ Catapulting… (4s · ↓ 24 tokens)
+                                                              ● high · /effort
+────────────────────────────────────────────────────────────────────────────────
+❯ 
+────────────────────────────────────────────────────────────────────────────────
+  [PONYTAIL:FULL] | Opus 5.5 | effort:high | $0.00 | ctx:5% | 5h:33% | wk:16%
+  ⏵⏵ auto mode on (shift+tab to cycle) · ← for agents

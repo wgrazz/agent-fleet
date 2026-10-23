@@ -1,0 +1,14 @@
+{
+  "name": "fleet-dashboard",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node server/index.ts",
+    "dev": "vite",
+    "build": "vite build",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "vitest": "^5.0.5"
+  }
+}
