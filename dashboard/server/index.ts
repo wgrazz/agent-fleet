@@ -5,9 +5,11 @@ import { createReadStream, existsSync, statSync } from 'node:fs'
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import { homedir } from 'node:os'
 import { extname, join, normalize } from 'node:path'
-import { ingestHook, list, startPolling } from './state.ts'
+import { notify, publicKey, subscribe } from './push.ts'
+import { alerts, ingestHook, list, startPolling } from './state.ts'
 import { config, db, FLEET_BIN } from './store.ts'
 import { run, sendKey, sendText } from './tmux.ts'
+import { attach } from './ws.ts'
 
 const NAME = /^[A-Za-z0-9._-]{1,40}$/ // same rule as the fleet CLI
 const TOOLS = new Set(['claude', 'codex', 'cursor', 'copilot', 'agy', ...(process.env.FLEET_EXTRA_TOOLS ?? '')
@@ -141,6 +143,17 @@ const routes: [string, RegExp, Route][] = [
     return { ok: true }
   }],
 
+  ['GET', /^\/api\/push\/key$/, async () => ({ key: publicKey })],
+
+  ['POST', /^\/api\/push\/subscribe$/, async req => {
+    try {
+      subscribe(await body(req))
+    } catch (e) {
+      throw new HttpError(400, (e as Error).message)
+    }
+    return { ok: true }
+  }],
+
   ['POST', /^\/api\/hook$/, async req => {
     try {
       ingestHook(await body(req))
@@ -205,6 +218,8 @@ export const server = createServer(async (req, res) => {
 })
 
 if (import.meta.main) {
+  attach(server, authorized)
+  alerts.on('alert', a => notify(a).catch(e => console.error('notify failed:', e)))
   startPolling()
   server.listen(config.port, '127.0.0.1', () => console.log(`fleet dashboard on http://127.0.0.1:${config.port}`))
 }
