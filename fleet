@@ -1,14 +1,27 @@
 #!/usr/bin/env python3
-"""fleet: see, reattach and stop the coding agents (Claude, Codex, Cursor) on this machine.
+"""fleet: see, reattach and stop the coding agents (Claude, Codex, Cursor, Copilot, Antigravity) on this machine.
 
 START & RETURN
   fleet new NAME         start a protected session called NAME in this folder, then run claude/codex/agent in it
+  fleet new NAME --tool claude|codex|cursor|copilot|agy [--model M] [--effort E] [--profile P] [--detach] [PROMPT]
+                         start NAME already running that tool, optionally with a first prompt
   fleet resume [NAME]    go back into NAME (no name: the only session, or a list if there are several)
   fleet peek NAME        print the last 40 lines of NAME's screen without going into it
 
 SEE
-  fleet                  the agents you started, what they're doing, and any follow-up waiters
+  fleet                  the agents you started, their status, what they're doing, and any follow-up waiters
   fleet all              same, plus background helpers (desktop apps, Codex service, chrome bridge, claude-mem)
+  fleet json             the same agents as JSON (what the dashboard reads)
+
+LATER
+  fleet pause NAME       stop NAME's agent but keep its conversation, to pick up later
+  fleet paused           list paused agents
+  fleet unpause ID|NAME  bring a paused agent back in a new session with its conversation
+  fleet idea [-l LIST] TEXT   jot an idea (lands in Brain Dump unless you name a list)
+
+DASHBOARD
+  fleet dash             open the dashboard in your browser
+  fleet hooks install    let Claude Code report its status to the dashboard instantly (uninstall to undo)
 
 STOP
   fleet kill PID|NAME    stop one agent or waiter (by PID) or a whole session (by NAME)
@@ -26,21 +39,45 @@ WHERE column
 
 Agents only survive a dropped connection when started with `fleet new`. `fleet help` shows this.
 """
+import argparse
 import glob
 import json
 import os
 import re
+import secrets
+import shlex
 import shutil
 import signal
 import sqlite3
 import subprocess
 import sys
 import time
+import urllib.request
 
 HOME = os.path.expanduser('~')
+FLEET = os.path.realpath(__file__)
+FLEET_DIR = os.environ.get('FLEET_DIR', f'{HOME}/.fleet')
+CLAUDE_SETTINGS = os.environ.get('FLEET_CLAUDE_SETTINGS', f'{HOME}/.claude/settings.json')
+NAME_RE = re.compile(r'^[A-Za-z0-9._-]{1,40}$')
 # basename of argv[0], or of an argv[1] path (`node /…/codex`) -> tool; `agent` is Cursor's CLI here
-TOOLS = {'claude': 'claude', 'codex': 'codex', 'cursor-agent': 'cursor', 'agent': 'cursor'}
+TOOLS = {'claude': 'claude', 'codex': 'codex', 'cursor-agent': 'cursor', 'agent': 'cursor',
+         'copilot': 'copilot', 'agy': 'agy'}
 WAITER = re.compile(r'\buntil\b.*\bsleep\b|codex exec resume')
+
+# How to launch each tool. '{}' is replaced by the value; None means the tool has no such option.
+# Flags come from each tool's --help (2026-10-23).
+LAUNCH = {
+    'claude':  dict(bin='claude', prompt=[], model=['--model', '{}'], effort=['--effort', '{}'], resume=['--resume', '{}']),
+    'codex':   dict(bin='codex', prompt=[], model=['-m', '{}'], effort=['-c', 'model_reasoning_effort={}'], resume=['resume', '{}']),
+    'cursor':  dict(bin='cursor-agent', prompt=[], model=['--model', '{}'], effort=None, resume=['--resume', '{}']),
+    'copilot': dict(bin='copilot', prompt=['-i'], model=['--model', '{}'], effort=None, resume=['--resume={}']),
+    'agy':     dict(bin='agy', prompt=['-i'], model=['--model', '{}'], effort=['--effort', '{}'], resume=['--conversation', '{}']),
+}
+# Test-only tools: FLEET_EXTRA_TOOLS="fake=/abs/fake-agent.sh,other=/abs/x"
+for _spec in filter(None, os.environ.get('FLEET_EXTRA_TOOLS', '').split(',')):
+    _name, _bin = _spec.split('=', 1)
+    LAUNCH[_name] = dict(bin=_bin, prompt=[], model=None, effort=None, resume=None)
+    TOOLS[os.path.basename(_bin)] = _name
 
 
 def out(*cmd):
@@ -157,6 +194,39 @@ def codex_task(cwd, started_ms):
     return row[0] if row else '(no prompt yet)'
 
 
+def newest_since(pattern, started_s, strip=''):
+    # ponytail: these tools don't record which process owns a session, so this takes the newest one touched since the
+    # process started; two agents of the same tool started together can resolve to the same id.
+    hits = [(os.path.getmtime(p), p) for p in glob.glob(pattern) if os.path.getmtime(p) >= started_s]
+    return os.path.basename(max(hits)[1]).removesuffix(strip) if hits else ''
+
+
+def session_id(tool_name, pid, cwd, started_s):
+    """The id each tool's own resume flag takes, or '' when it can't be found."""
+    if tool_name == 'claude':
+        try:
+            with open(f'{HOME}/.claude/sessions/{pid}.json') as f:
+                return json.load(f).get('sessionId', '')
+        except (OSError, ValueError):
+            return ''
+    if tool_name == 'codex':
+        dbs = sorted(glob.glob(f'{HOME}/.codex/state_*.sqlite'))
+        try:
+            row = dbs and sqlite3.connect(f'file:{dbs[-1]}?mode=ro', uri=True).execute(
+                'SELECT id FROM threads WHERE cwd = ? AND archived = 0 AND updated_at_ms >= ?'
+                ' ORDER BY updated_at_ms DESC LIMIT 1', (cwd, int(started_s * 1000))).fetchone()
+        except sqlite3.Error:
+            return ''
+        return row[0] if row else ''
+    if tool_name == 'cursor':
+        return newest_since(f'{HOME}/.cursor/chats/*/*', started_s)
+    if tool_name == 'copilot':
+        return newest_since(f'{HOME}/.copilot/session-state/*', started_s)
+    if tool_name == 'agy':
+        return newest_since(f'{HOME}/.gemini/antigravity-cli/conversations/*.db', started_s, '.db')
+    return ''
+
+
 def task(procs, pid, tool_name, cwd):
     if service(procs, pid) in ('app/service', 'chrome bridge'):  # services host many threads; a guess would mislead
         return ''
@@ -167,13 +237,16 @@ def task(procs, pid, tool_name, cwd):
     return ''
 
 
+def pane_of(procs, pid, pane_map):
+    return next((pane_map[a] for a in [pid, *ancestors(procs, pid)] if a in pane_map), None)
+
+
 def where(procs, pid, pane_map):
     if service(procs, pid):
         return service(procs, pid)
-    for a in [pid, *ancestors(procs, pid)]:
-        if a in pane_map:
-            name, attached = pane_map[a]
-            return f"safe · {name} · {'on screen' if attached else 'background'}"
+    pane = pane_of(procs, pid, pane_map)
+    if pane:
+        return f"safe · {pane[0]} · {'on screen' if pane[1] else 'background'}"
     return 'dies with window'
 
 
@@ -181,18 +254,65 @@ def owner(procs, pid, agents):
     return next((f'{agents[a]} {a}' for a in ancestors(procs, pid) if a in agents), 'detached')
 
 
+def rows(procs, everything=False):
+    """One dict per top-level agent; feeds both the table and `fleet json`."""
+    agents, top, _ = find(procs)
+    top = top if everything else [p for p in top if not service(procs, p)]
+    pane_map, dirs, mine = panes(), cwds(top), set(ancestors(procs, os.getpid()))
+    res = []
+    for p in top:
+        cwd, age_s, pane = dirs.get(p, ''), secs(procs[p]['age']), pane_of(procs, p, pane_map)
+        res.append(dict(pid=p, tool=agents[p], age=procs[p]['age'], age_s=age_s, cwd=cwd,
+                        session=pane[0] if pane else None, where=where(procs, p, pane_map),
+                        task=task(procs, p, agents[p], cwd).replace('\n', ' '),
+                        session_id=session_id(agents[p], p, cwd, time.time() - age_s),
+                        service=service(procs, p), mine=p in mine))
+    return res
+
+
+def config():
+    """~/.fleet/config.json: the dashboard's port and access key (created on first use, readable only by you)."""
+    path = f'{FLEET_DIR}/config.json'
+    try:
+        with open(path) as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        os.makedirs(FLEET_DIR, mode=0o700, exist_ok=True)
+        cfg = {'port': 7878, 'key': secrets.token_hex(24)}
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(fd, 'w') as f:
+            json.dump(cfg, f)
+        return cfg
+
+
+def api(method, path, body=None, timeout=2.0):
+    cfg = config()
+    req = urllib.request.Request(f'http://127.0.0.1:{cfg["port"]}{path}', method=method,
+                                 data=None if body is None else json.dumps(body).encode(),
+                                 headers={'X-Fleet-Key': cfg['key'], 'Content-Type': 'application/json'})
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        return json.loads(r.read() or 'null')
+
+
+def statuses():
+    # ponytail: status lives in the dashboard server; without it the column shows '–'
+    try:
+        return {a['pid']: a['status'] for a in api('GET', '/api/agents', timeout=0.3)}
+    except Exception:
+        return {}
+
+
 def show(procs, everything=False):
     agents, top, waiters = find(procs)
     hidden = [p for p in top if service(procs, p)]
-    top = top if everything else [p for p in top if p not in hidden]
-    pane_map, dirs, mine = panes(), cwds(top), set(ancestors(procs, os.getpid()))
-    print(f'{"PID":>6}  {"TOOL":<7}{"AGE":>12}  {"WHERE":<30}{"DIR":<16}TASK')
-    for p in top:
-        cwd = dirs.get(p, '')
-        label = os.path.basename(cwd) or cwd or '?'
-        what = task(procs, p, agents[p], cwd).replace('\n', ' ')[:60] + ('  <- ran fleet' if p in mine else '')
-        print(f'{p:>6}  {agents[p]:<7}{procs[p]["age"]:>12}  {where(procs, p, pane_map):<30}{label[:15]:<16}{what}')
-    if not top:
+    listed, status = rows(procs, everything), statuses()
+    print(f'{"PID":>6}  {"TOOL":<8}{"STATUS":<10}{"AGE":>11}  {"WHERE":<30}{"DIR":<16}TASK')
+    for r in listed:
+        label = os.path.basename(r['cwd']) or r['cwd'] or '?'
+        what = r['task'][:60] + ('  <- ran fleet' if r['mine'] else '')
+        st = (status.get(r['pid']) or '–').replace('_', ' ')
+        print(f'{r["pid"]:>6}  {r["tool"]:<8}{st:<10}{r["age"]:>11}  {r["where"]:<30}{label[:15]:<16}{what}')
+    if not listed:
         print('  (no agents running)')
     if hidden and not everything:
         print(f'  + {len(hidden)} background helpers (fleet all)')
@@ -236,14 +356,208 @@ def kill(procs, target):
     print(f'Killed tmux session {target}.')
 
 
-def open_session(name):
-    if subprocess.run(['tmux', 'has-session', '-t', f'={name}'], capture_output=True).returncode:
-        # caffeinate keeps the Mac from idle/system sleep (system sleep only on AC power) while the session lives
-        shell = os.environ.get('SHELL', '/bin/zsh')
-        keepawake = ['caffeinate', '-ims'] if shutil.which('caffeinate') else []  # macOS only; Linux just gets the shell
-        subprocess.run(['tmux', 'new-session', '-d', '-s', name, '-c', os.getcwd(), *keepawake, shell], check=True)
+def has_session(name):
+    return not subprocess.run(['tmux', 'has-session', '-t', f'={name}'], capture_output=True).returncode
+
+
+def attach(name):
     verb = 'switch-client' if os.environ.get('TMUX') else 'attach-session'
     os.execvp('tmux', ['tmux', verb, '-t', f'={name}'])
+
+
+def start(name, cwd, argv=None):
+    """New detached session NAME in CWD: a plain shell, or ARGV run through a login shell (for PATH).
+    With ARGV the pane stays after the agent exits so the dashboard can read the exit code."""
+    # caffeinate keeps the Mac from idle/system sleep (system sleep only on AC power) while the session lives
+    shell = os.environ.get('SHELL', '/bin/zsh')
+    keepawake = ['caffeinate', '-ims'] if shutil.which('caffeinate') else []  # macOS only; Linux just gets the shell
+    cmd = [shell, '-lic', shlex.join(argv)] if argv else [shell]
+    remain = [';', 'set-option', '-w', '-t', f'={name}:', 'remain-on-exit', 'on'] if argv else []
+    subprocess.run(['tmux', 'new-session', '-d', '-s', name, '-c', cwd, *keepawake, *cmd, *remain], check=True)
+
+
+def open_session(name):
+    if not has_session(name):
+        start(name, os.getcwd())
+    attach(name)
+
+
+def db():
+    os.makedirs(FLEET_DIR, mode=0o700, exist_ok=True)
+    con = sqlite3.connect(f'{FLEET_DIR}/fleet.db')
+    con.row_factory = sqlite3.Row
+    con.execute('PRAGMA journal_mode=WAL')
+    with open(os.path.join(os.path.dirname(FLEET), 'schema.sql')) as f:
+        con.executescript(f.read())
+    return con
+
+
+def launch_argv(tool_name, prompt='', model='', effort='', resume='', extra=''):
+    spec = LAUNCH.get(tool_name)
+    if not spec:
+        sys.exit(f'Unknown tool {tool_name!r}. Tools: {", ".join(LAUNCH)}.')
+    argv = [spec['bin']]
+    for value, key in ((resume, 'resume'), (model, 'model'), (effort, 'effort')):
+        if value and spec[key] is None:
+            sys.exit(f'{tool_name} has no {key} option.')
+        if value:
+            argv += [part.replace('{}', value) for part in spec[key]]
+    argv += shlex.split(extra or '')
+    if prompt:
+        argv += [*spec['prompt'], prompt]
+    return argv
+
+
+def check_name(name):
+    if not NAME_RE.match(name):
+        sys.exit(f'Bad name {name!r}: use letters, digits, . _ - (up to 40).')
+    if has_session(name):
+        sys.exit(f'A session named {name} already exists (fleet resume {name}).')
+
+
+def new(args):
+    p = argparse.ArgumentParser(prog='fleet new')
+    p.add_argument('name')
+    p.add_argument('--tool')
+    p.add_argument('--profile')
+    p.add_argument('--model', default='')
+    p.add_argument('--effort', default='')
+    p.add_argument('--detach', action='store_true')
+    p.add_argument('prompt', nargs='*')
+    a = p.parse_args(args)
+    if not a.tool and not a.profile:
+        if a.detach:
+            check_name(a.name)
+            return start(a.name, os.getcwd())
+        return open_session(a.name)
+    check_name(a.name)
+    prof = {}
+    if a.profile:
+        prof = db().execute('SELECT * FROM profiles WHERE name = ?', (a.profile,)).fetchone()
+        if not prof:
+            sys.exit(f'No profile named {a.profile}.')
+    argv = launch_argv(a.tool or prof['tool'], ' '.join(a.prompt), a.model or (prof and prof['model']) or '',
+                       a.effort or (prof and prof['effort']) or '', extra=(prof and prof['args']) or '')
+    start(a.name, os.getcwd(), argv)
+    if a.detach:
+        return print(f'Started {a.name}.')
+    attach(a.name)
+
+
+def pause(name):
+    row = next((r for r in rows(snapshot()) if r['session'] == name), None)
+    if not row:
+        sys.exit(f'No agent running in a session named {name}.')
+    if not row['session_id']:
+        sys.exit(f"Can't pause {name}: no resumable session id found for {row['tool']}.")
+    con = db()
+    with con:
+        con.execute('INSERT INTO paused (name, tool, session_id, cwd, paused_at) VALUES (?, ?, ?, ?, ?)',
+                    (name, row['tool'], row['session_id'], row['cwd'] or HOME, int(time.time())))
+    subprocess.run(['tmux', 'kill-session', '-t', f'={name}'], capture_output=True)
+    print(f'Paused {name}. fleet unpause {name} brings it back.')
+
+
+def paused_list():
+    found = db().execute('SELECT * FROM paused ORDER BY paused_at DESC').fetchall()
+    for r in found:
+        when = time.strftime('%b %d %H:%M', time.localtime(r['paused_at']))
+        print(f'{r["id"]:>4}  {r["name"]:<24}{r["tool"]:<9}{when:<14}{r["cwd"]}')
+    if not found:
+        print('  (nothing paused)')
+
+
+def unpause(target, detach=False):
+    con = db()
+    row = con.execute('SELECT * FROM paused WHERE id = ? OR name = ? ORDER BY paused_at DESC LIMIT 1',
+                      (int(target) if target.isdigit() else -1, target)).fetchone()
+    if not row:
+        sys.exit(f'Nothing paused matches {target} (fleet paused).')
+    check_name(row['name'])
+    start(row['name'], row['cwd'], launch_argv(row['tool'], resume=row['session_id']))
+    with con:
+        con.execute('DELETE FROM paused WHERE id = ?', (row['id'],))
+    if detach:
+        return print(f'Resumed {row["name"]}.')
+    attach(row['name'])
+
+
+def idea(args):
+    lst = 'Brain Dump'
+    if args[:1] == ['-l'] and len(args) > 1:
+        lst, args = args[1], args[2:]
+    text = ' '.join(args).strip()
+    if not text:
+        sys.exit('fleet idea [-l LIST] TEXT')
+    con = db()
+    with con:
+        con.execute('INSERT INTO ideas (list, text, created_at) VALUES (?, ?, ?)', (lst, text, int(time.time())))
+    print(f'Added to {lst}.')
+
+
+def hook(event):
+    """Called by Claude Code hooks. Forwards the hook JSON to the dashboard; never fails, never prints."""
+    try:
+        body = json.loads(sys.stdin.read() or '{}')
+        body.update(event=event, tmux_pane=os.environ.get('TMUX_PANE'))
+        api('POST', '/api/hook', body)
+    except BaseException:
+        pass
+    os._exit(0)
+
+
+HOOK_EVENTS = {'UserPromptSubmit': 'working', 'PreToolUse': 'working', 'Notification': 'notify',
+               'Stop': 'done', 'SessionEnd': 'end'}
+
+
+def is_fleet_hook(h):
+    return re.search(r'fleet["\']? hook ', h.get('command', '')) is not None
+
+
+def hooks(action, path=None):
+    path = path or CLAUDE_SETTINGS
+    try:
+        with open(path) as f:
+            settings = json.load(f)
+    except FileNotFoundError:
+        settings = {}
+    groups = settings.setdefault('hooks', {})
+    changed = 0
+    for ev, arg in HOOK_EVENTS.items():
+        lst = groups.setdefault(ev, [])
+        mine = [g for g in lst if any(is_fleet_hook(h) for h in g.get('hooks', []))]
+        if action == 'install' and not mine:
+            lst.append({'hooks': [{'type': 'command', 'command': f'{shlex.quote(FLEET)} hook {arg}',
+                                   'timeout': 5, 'async': True}]})
+            changed += 1
+        if action == 'uninstall' and mine:
+            for g in mine:
+                g['hooks'] = [h for h in g['hooks'] if not is_fleet_hook(h)]
+            lst[:] = [g for g in lst if g.get('hooks')]
+            changed += 1
+        if not lst:
+            del groups[ev]
+    if not groups:
+        del settings['hooks']
+    if changed:
+        if os.path.exists(path):
+            shutil.copy2(path, path + '.fleet-bak')
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path + '.tmp', 'w') as f:
+            json.dump(settings, f, indent=2)
+            f.write('\n')
+        os.replace(path + '.tmp', path)
+    verb = 'Installed' if action == 'install' else 'Removed'
+    print(f'{verb} {changed} Claude Code hook(s) in {path}.' if changed else 'Nothing to change.')
+
+
+def dash():
+    cfg = config()
+    url = f'http://127.0.0.1:{cfg["port"]}/?key={cfg["key"]}'
+    if shutil.which('open'):
+        subprocess.run(['open', url])
+    else:
+        print(url)
 
 
 def selftest():
@@ -272,6 +586,47 @@ def selftest():
     assert where(procs, 30, {}) == 'dies with window' and where(procs, 50, {}) == 'app/service'
     assert where(procs, 53, {}) == 'claude-mem observer'
     assert secs('1-02:03:04') == 93784 and secs('05:06') == 306
+    assert tool('node /opt/homebrew/bin/copilot') == 'copilot' and tool('/Users/w/.local/bin/agy') == 'agy'
+
+    # launch argv for every tool
+    assert launch_argv('claude', 'hi there', 'opus', 'high') == ['claude', '--model', 'opus', '--effort', 'high', 'hi there']
+    assert launch_argv('codex', 'go', 'gpt-5', 'high') == ['codex', '-m', 'gpt-5', '-c', 'model_reasoning_effort=high', 'go']
+    assert launch_argv('codex', resume='abc') == ['codex', 'resume', 'abc']
+    assert launch_argv('cursor', 'go', 'sonnet') == ['cursor-agent', '--model', 'sonnet', 'go']
+    assert launch_argv('copilot', 'go', resume='s1') == ['copilot', '--resume=s1', '-i', 'go']
+    assert launch_argv('agy', 'go', effort='max') == ['agy', '--effort', 'max', '-i', 'go']
+    assert launch_argv('agy', resume='c1') == ['agy', '--conversation', 'c1']
+    assert launch_argv('claude', extra='--add-dir /x') == ['claude', '--add-dir', '/x']
+    for bad in (lambda: launch_argv('cursor', effort='high'), lambda: launch_argv('nope')):
+        try:
+            bad()
+            raise AssertionError('expected exit')
+        except SystemExit:
+            pass
+    assert NAME_RE.match('target-px.2_a') and not NAME_RE.match('a b') and not NAME_RE.match('x;rm') \
+        and not NAME_RE.match('')
+
+    # hooks install keeps existing hooks, is idempotent, and uninstall restores the original
+    import tempfile
+    with tempfile.TemporaryDirectory() as d:
+        path = f'{d}/settings.json'
+        orig = {'model': 'opus', 'hooks': {'Stop': [{'hooks': [{'type': 'command', 'command': 'say done'}]}]}}
+        with open(path, 'w') as f:
+            json.dump(orig, f)
+        sys.stdout, real = open(os.devnull, 'w'), sys.stdout
+        try:
+            hooks('install', path)
+            hooks('install', path)
+            with open(path) as f:
+                s = json.load(f)
+            hooks('uninstall', path)
+        finally:
+            sys.stdout = real
+        assert s['model'] == 'opus' and len(s['hooks']) == 5, s
+        assert len(s['hooks']['Stop']) == 2 and s['hooks']['Stop'][0]['hooks'][0]['command'] == 'say done'
+        assert s['hooks']['PreToolUse'][0]['hooks'][0]['async'] is True
+        with open(path) as f:
+            assert json.load(f) == orig
     print('ok')
 
 
@@ -281,8 +636,26 @@ def main(args):
     if args == ['all']:
         return show(snapshot(), everything=True)
     cmd, rest = args[0], args[1:]
-    if cmd in ('new', 'resume', 'attach', 'a') and len(rest) == 1:
+    if cmd == 'json':
+        return print(json.dumps(rows(snapshot(), everything=rest == ['all'])))
+    if cmd == 'new' and rest:
+        return new(rest)
+    if cmd in ('resume', 'attach', 'a') and len(rest) == 1:
         return open_session(rest[0])
+    if cmd == 'pause' and len(rest) == 1:
+        return pause(rest[0])
+    if cmd == 'paused' and not rest:
+        return paused_list()
+    if cmd == 'unpause' and rest and rest[0] != '--detach':
+        return unpause(rest[0], detach='--detach' in rest[1:])
+    if cmd == 'idea':
+        return idea(rest)
+    if cmd == 'hook' and len(rest) == 1:
+        return hook(rest[0])
+    if cmd == 'hooks' and rest in (['install'], ['uninstall']):
+        return hooks(rest[0])
+    if cmd == 'dash' and not rest:
+        return dash()
     if cmd in ('resume', 'attach', 'a') and not rest:
         names = out('tmux', 'list-sessions', '-F', '#{session_name}').split()
         if len(names) == 1:

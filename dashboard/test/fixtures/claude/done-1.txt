@@ -1,0 +1,24 @@
+     Memory injection starts on your second session in a project.
+
+     `/learn-codebase` is available if the user wants to front-load the entire
+     repo into memory in a single pass (~5 minutes on a typical repo, optional).
+     Otherwise memory builds passively as work happens.
+
+     Live activity: http://localhost:37780
+     How it works: `/how-it-works`
+
+     This message disappears once the first observation lands.
+
+     View Observations Live @ http://localhost:37780
+
+❯ Reply with just the word hi.
+
+⏺ hi
+
+✻ Churned for 2s · done 6:44 PM
+                        Update available! Run: brew upgrade claude-code@latest
+────────────────────────────────────────────────────────────────────────────────
+❯ 
+────────────────────────────────────────────────────────────────────────────────
+  [PONYTAIL:FULL] | Opus 5.5 | effort:high | $0.18 | ctx:5% | 5h:31% | wk:15%
+  ⏵⏵ auto mode on (shift+tab to cycle)

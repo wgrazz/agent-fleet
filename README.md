@@ -1,7 +1,7 @@
 # agent-fleet
 
 See, reattach and stop every coding agent running on your machine — Claude Code, Codex,
-Cursor — and keep them alive when the terminal (or your SSH session) drops.
+Cursor, Copilot, Antigravity — and keep them alive when the terminal (or your SSH session) drops.
 
 ```
 $ fleet
@@ -30,7 +30,7 @@ git clone https://github.com/wgrazz/agent-fleet
 ln -s "$PWD/agent-fleet/fleet" ~/.local/bin/fleet     # anywhere on PATH
 ```
 
-Needs Python 3.8+, tmux, and `lsof`/`ps` (present on macOS and Linux). `caffeinate` is used
+Needs Python 3.9+, tmux, and `lsof`/`ps` (present on macOS and Linux). `caffeinate` is used
 when present, so Linux works too; it just doesn't block sleep.
 
 ## Commands
@@ -38,6 +38,12 @@ when present, so Linux works too; it just doesn't block sleep.
 | Command | What it does |
 | --- | --- |
 | `fleet new NAME` | Start a protected session called NAME in the current folder, then run `claude` / `codex` / `agent` inside it |
+| `fleet new NAME --tool T [--model M] [--effort E] [--profile P] [--detach] [PROMPT]` | Start NAME already running `claude`, `codex`, `cursor`, `copilot` or `agy`, optionally with a first prompt |
+| `fleet pause NAME` | Stop NAME's agent but keep its conversation; `fleet paused` lists, `fleet unpause ID\|NAME` brings it back |
+| `fleet idea [-l LIST] TEXT` | Jot an idea into `~/.fleet/fleet.db` (Brain Dump unless you name a list) |
+| `fleet json` | The agent list as JSON (what the dashboard reads) |
+| `fleet dash` | Open the dashboard |
+| `fleet hooks install` / `uninstall` | Add or remove the Claude Code hooks that report status to the dashboard |
 | `fleet resume [NAME]` | Reattach (no name: the only session, or a list) |
 | `fleet peek NAME` | Print the last 40 lines of NAME's screen without attaching |
 | `fleet` | Agents you started, what they're doing, and any waiters |
