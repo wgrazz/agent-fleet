@@ -5,6 +5,6 @@ import { defineConfig } from 'vite'
 export default defineConfig({
   root: 'web',
   plugins: [react()],
-  build: { outDir: '../dist', emptyOutDir: true },
+  build: { outDir: '../dist', emptyOutDir: true, chunkSizeWarningLimit: 1000 }, // xterm is most of it; fine for a local page
   server: { proxy: { '/api': 'http://127.0.0.1:7878', '/ws': { target: 'ws://127.0.0.1:7878', ws: true } } },
 })

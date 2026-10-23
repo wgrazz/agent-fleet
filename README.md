@@ -66,6 +66,7 @@ their menus, a reply box, a full terminal, pause and resume, and push notificati
 fleet dash install       # runs the server at login (launchd) and publishes it to your tailnet
 fleet hooks install      # optional: exact status from Claude Code instead of reading its screen
 fleet dash               # open it on this Mac
+fleet dash update        # after changing the dashboard's code: rebuild + restart
 ```
 
 `fleet dash install` prints two links that end in `?key=…`. Open one once per device and the key

@@ -22,6 +22,7 @@ LATER
 DASHBOARD
   fleet dash             open the dashboard in your browser
   fleet dash install     run the dashboard at login and put it on your tailnet for your phone (--local: Mac only)
+  fleet dash update      after changing the dashboard's code: rebuild the page and restart the server
   fleet dash uninstall   stop it and remove it from login items
   fleet hooks install    let Claude Code report its status to the dashboard instantly (uninstall to undo)
 
@@ -607,6 +608,18 @@ def dash_install(local=False):
     print(f'On your phone (Safari → Share → Add to Home Screen): https://{host}/?key={cfg["key"]}')
 
 
+def dash_update():
+    """After code changes: reinstall packages if the lockfile changed, rebuild the page, restart the server."""
+    dash_dir = os.path.join(os.path.dirname(FLEET), 'dashboard')
+    lock, installed = f'{dash_dir}/package-lock.json', f'{dash_dir}/node_modules/.package-lock.json'
+    if not os.path.exists(installed) or os.path.getmtime(lock) > os.path.getmtime(installed):
+        subprocess.run(['npm', 'ci'], cwd=dash_dir, check=True)
+    subprocess.run(['npm', 'run', 'build', '--silent'], cwd=dash_dir, check=True, stdout=subprocess.DEVNULL)
+    if subprocess.run(['launchctl', 'kickstart', '-k', f'gui/{os.getuid()}/{LABEL}'], capture_output=True).returncode:
+        sys.exit('Page rebuilt, but the dashboard server is not installed (fleet dash install).')
+    print('Updated and restarted. On your phone, swipe Fleet away and reopen it.')
+
+
 def dash_uninstall():
     subprocess.run(['launchctl', 'bootout', f'gui/{os.getuid()}/{LABEL}'], capture_output=True)
     if os.path.exists(PLIST):
@@ -715,6 +728,8 @@ def main(args):
         return dash()
     if cmd == 'dash' and rest[:1] == ['install'] and set(rest[1:]) <= {'--local'}:
         return dash_install(local='--local' in rest)
+    if cmd == 'dash' and rest == ['update']:
+        return dash_update()
     if cmd == 'dash' and rest == ['uninstall']:
         return dash_uninstall()
     if cmd in ('resume', 'attach', 'a') and not rest:
