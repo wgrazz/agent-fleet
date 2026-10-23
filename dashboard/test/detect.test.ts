@@ -51,3 +51,19 @@ describe('question', () => {
     expect(question('Pick one:\n❯ 1. Yes\n  2. No\n')).toBe('Pick one:')
   })
 })
+
+describe('hookStatus', async () => {
+  process.env.FLEET_DIR ??= (await import('node:fs')).mkdtempSync(join((await import('node:os')).tmpdir(), 'fleet-hook-'))
+  const { hookStatus } = await import('../server/state.ts')
+  it('maps Claude hook events', () => {
+    expect(hookStatus({ event: 'working' })).toBe('working')
+    expect(hookStatus({ event: 'done' })).toBe('done')
+    expect(hookStatus({ event: 'end' })).toBe('end')
+    expect(hookStatus({ event: 'notify', notification_type: 'permission_prompt' })).toBe('needs_you')
+    expect(hookStatus({ event: 'notify', notification_type: 'agent_completed' })).toBe('done')
+  })
+  it('ignores the idle reminder Claude sends a minute after finishing', () => {
+    expect(hookStatus({ event: 'notify', notification_type: 'idle_prompt' })).toBeNull()
+    expect(hookStatus({ event: 'bogus' })).toBeNull()
+  })
+})

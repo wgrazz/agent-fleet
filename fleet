@@ -21,6 +21,8 @@ LATER
 
 DASHBOARD
   fleet dash             open the dashboard in your browser
+  fleet dash install     run the dashboard at login and put it on your tailnet for your phone (--local: Mac only)
+  fleet dash uninstall   stop it and remove it from login items
   fleet hooks install    let Claude Code report its status to the dashboard instantly (uninstall to undo)
 
 STOP
@@ -560,6 +562,61 @@ def dash():
         print(url)
 
 
+LABEL = 'com.wgrazz.fleet-dashboard'
+PLIST = f'{HOME}/Library/LaunchAgents/{LABEL}.plist'
+
+
+def tailscale():
+    app = '/Applications/Tailscale.app/Contents/MacOS/Tailscale'
+    return shutil.which('tailscale') or (app if os.path.exists(app) else None)
+
+
+def dash_install(local=False):
+    """Run the dashboard server at login (launchd) and publish it to your tailnet over HTTPS (tailscale serve)."""
+    import plistlib
+    dash_dir = os.path.join(os.path.dirname(FLEET), 'dashboard')
+    node = shutil.which('node') or sys.exit('The dashboard needs Node.js 24+ (brew install node).')
+    if not os.path.isdir(f'{dash_dir}/node_modules'):
+        subprocess.run(['npm', 'ci'], cwd=dash_dir, check=True)
+    if not os.path.exists(f'{dash_dir}/dist/index.html'):
+        subprocess.run(['npm', 'run', 'build'], cwd=dash_dir, check=True)
+    cfg = config()
+    env = {'PATH': f'{os.path.dirname(node)}:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:{HOME}/.local/bin'}
+    if 'FLEET_DIR' in os.environ:
+        env['FLEET_DIR'] = FLEET_DIR
+    os.makedirs(os.path.dirname(PLIST), exist_ok=True)
+    with open(PLIST, 'wb') as f:
+        plistlib.dump({'Label': LABEL, 'ProgramArguments': [node, f'{dash_dir}/server/index.ts'], 'WorkingDirectory': dash_dir,
+                       'RunAtLoad': True, 'KeepAlive': True, 'EnvironmentVariables': env,
+                       'StandardOutPath': f'{FLEET_DIR}/server.log', 'StandardErrorPath': f'{FLEET_DIR}/server.log'}, f)
+    domain = f'gui/{os.getuid()}'
+    subprocess.run(['launchctl', 'bootout', f'{domain}/{LABEL}'], capture_output=True)  # restart if already loaded
+    subprocess.run(['launchctl', 'bootstrap', domain, PLIST], check=True)
+    print(f'Dashboard running at login: http://127.0.0.1:{cfg["port"]}/?key={cfg["key"]}')
+    ts = None if local else tailscale()
+    if not ts:
+        return print('Not published to Tailscale (--local, or Tailscale not found).' if local or not tailscale() else '')
+    current = json.loads(out(ts, 'serve', 'status', '--json') or '{}')
+    if current and f'127.0.0.1:{cfg["port"]}' not in json.dumps(current):
+        return print('Tailscale serve already has another config, so it was left alone.\n'
+                     f'Publish the dashboard yourself, e.g.: tailscale serve --bg --https=8443 {cfg["port"]}')
+    if subprocess.run([ts, 'serve', '--bg', str(cfg['port'])]).returncode:
+        return print('tailscale serve failed. If it mentions HTTPS, enable HTTPS certificates in the Tailscale admin '
+                     'console (DNS page), then run fleet dash install again.')
+    host = json.loads(out(ts, 'status', '--json'))['Self']['DNSName'].rstrip('.')
+    print(f'On your phone (Safari → Share → Add to Home Screen): https://{host}/?key={cfg["key"]}')
+
+
+def dash_uninstall():
+    subprocess.run(['launchctl', 'bootout', f'gui/{os.getuid()}/{LABEL}'], capture_output=True)
+    if os.path.exists(PLIST):
+        os.remove(PLIST)
+    ts, port = tailscale(), config()['port']
+    if ts and f'127.0.0.1:{port}' in out(ts, 'serve', 'status', '--json'):
+        subprocess.run([ts, 'serve', '--https=443', 'off'], capture_output=True)
+    print('Dashboard stopped and removed from login items.')
+
+
 def selftest():
     procs = {
         10: dict(pid=10, ppid=1, age='1', tty='s0', cmd='tmux'),
@@ -656,6 +713,10 @@ def main(args):
         return hooks(rest[0])
     if cmd == 'dash' and not rest:
         return dash()
+    if cmd == 'dash' and rest[:1] == ['install'] and set(rest[1:]) <= {'--local'}:
+        return dash_install(local='--local' in rest)
+    if cmd == 'dash' and rest == ['uninstall']:
+        return dash_uninstall()
     if cmd in ('resume', 'attach', 'a') and not rest:
         names = out('tmux', 'list-sessions', '-F', '#{session_name}').split()
         if len(names) == 1:

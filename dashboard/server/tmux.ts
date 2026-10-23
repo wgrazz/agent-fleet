@@ -42,7 +42,7 @@ export async function sendText(name: string, text: string) {
 
 export const KEYS = /^(Escape|Enter|Up|Down|Tab|BTab|Space|[1-9]|[a-z])$/
 
-export function sendKey(name: string, key: string) {
+export async function sendKey(name: string, key: string) {
   if (!KEYS.test(key)) throw new Error(`key not allowed: ${key}`)
   return tmux('send-keys', '-t', target(name), key)
 }

@@ -57,6 +57,37 @@ Inside a session: `Ctrl-b d` detaches (the agent keeps running), `Ctrl-b [` scro
 The TASK column reads Claude Code's session files (`~/.claude/sessions/<pid>.json` and the
 transcript title) and Codex's thread database (`~/.codex/state_*.sqlite`). Cursor shows no task.
 
+## Dashboard
+
+A web page for the same agents: who needs you, a live view of each screen, one-tap answers to
+their menus, a reply box, a full terminal, pause and resume, and push notifications on your phone.
+
+```
+fleet dash install       # runs the server at login (launchd) and publishes it to your tailnet
+fleet hooks install      # optional: exact status from Claude Code instead of reading its screen
+fleet dash               # open it on this Mac
+```
+
+`fleet dash install` prints two links that end in `?key=…`. Open one once per device and the key
+is remembered. Without it the page shows "Fleet is locked". The key, push keys, profiles, paused
+sessions and ideas live in `~/.fleet/` (readable only by you). None of it is in this repo.
+
+**iPhone:** open the tailnet link in Safari, then Share → Add to Home Screen, open Fleet from the
+new icon and tap **Enable notifications**. You get a push when an agent needs you, finishes, or
+crashes, and tapping it opens that agent. iOS only allows web push over HTTPS, so enable HTTPS
+certificates in the Tailscale admin console (DNS page) before running `fleet dash install`.
+Without Tailscale, use `fleet dash install --local` for a Mac-only dashboard.
+
+**How status works:** Claude Code reports exactly through its hooks. Codex, Cursor, Copilot and
+Antigravity are read from their screens every 2 seconds, using patterns taken from real captures
+(`dashboard/test/fixtures/`). A guess will sometimes be wrong. When one is, save the screen
+(`tmux capture-pane -p -t =NAME: > dashboard/test/fixtures/<tool>/<state>-<label>.txt`) and fix the
+pattern in `dashboard/server/detect.ts`. Agents started in a plain terminal window show up, but
+only agents in tmux (`fleet new` or the dashboard) can be answered from it.
+
+Needs Node.js 24+. `cd dashboard && npm test` runs the detector tests and an end-to-end test
+against a fake agent. `npm run dev` serves the page with hot reload against a running server.
+
 ## agent-notify.sh
 
 A nine-line companion: agents call it when a long job finishes, blocks, or gives up, so you get

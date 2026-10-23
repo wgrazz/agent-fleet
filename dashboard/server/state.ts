@@ -38,20 +38,26 @@ export const list = () => agents
 
 const NOTIFY_NEEDS = new Set(['permission_prompt', 'elicitation_dialog', 'agent_needs_input'])
 
-export function ingestHook(body: Record<string, unknown>) {
+// What a `fleet hook` event means for the agent's status; null = no change, 'end' = forget this session.
+export function hookStatus(body: Record<string, unknown>): Status | 'end' | null {
   const event = String(body.event ?? '')
-  const sid = String(body.session_id ?? '')
-  const pane = typeof body.tmux_pane === 'string' ? body.tmux_pane : ''
-  let status: Status | null = null
-  if (event === 'working') status = 'working'
-  if (event === 'done') status = 'done'
+  if (event === 'working') return 'working'
+  if (event === 'done') return 'done'
+  if (event === 'end') return 'end'
   if (event === 'notify') {
     const type = String(body.notification_type ?? '')
     // idle_prompt fires ~60 s after Claude finishes; that is still "done", not "needs you"
-    if (NOTIFY_NEEDS.has(type)) status = 'needs_you'
-    if (type === 'agent_completed') status = 'done'
+    if (NOTIFY_NEEDS.has(type)) return 'needs_you'
+    if (type === 'agent_completed') return 'done'
   }
-  if (event === 'end') {
+  return null
+}
+
+export function ingestHook(body: Record<string, unknown>) {
+  const sid = String(body.session_id ?? '')
+  const pane = typeof body.tmux_pane === 'string' ? body.tmux_pane : ''
+  const status = hookStatus(body)
+  if (status === 'end') {
     hooksBySession.delete(sid)
     if (pane) hooksByPane.delete(pane)
     return
