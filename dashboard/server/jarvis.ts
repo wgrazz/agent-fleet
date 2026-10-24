@@ -144,11 +144,13 @@ export function findAgent(agents: Agent[], said: string): Agent | null | 'ambigu
 export function summary(agents: Agent[]): string {
   const needs = agents.filter(a => a.status === 'needs_you')
   const working = agents.filter(a => a.status === 'working')
+  const waiting = agents.filter(a => a.status === 'waiting')
   const crashed = agents.filter(a => a.status === 'crashed')
   const parts: string[] = []
   if (needs.length === 0) parts.push('Nothing needs you right now.')
   else parts.push(`${needs.length === 1 ? 'One agent needs' : `${needs.length} agents need`} you: ${needs.map(a => `${a.name}${a.message ? `, asking ${a.message.replace(/[?.]+$/, '')}` : ''}`).join('; ')}.`)
   if (working.length) parts.push(`${working.length} working${working.length <= 3 ? `: ${working.map(a => a.name).join(', ')}` : ''}.`)
+  if (waiting.length) parts.push(`${waiting.map(a => a.name).join(' and ')} ${waiting.length === 1 ? 'is' : 'are'} waiting on a background job.`)
   if (crashed.length) parts.push(`${crashed.map(a => a.name).join(' and ')} crashed.`)
   return parts.join(' ')
 }

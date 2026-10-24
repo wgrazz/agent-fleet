@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 
-export type Status = 'working' | 'needs_you' | 'done' | 'crashed' | 'unknown'
+export type Status = 'working' | 'needs_you' | 'waiting' | 'done' | 'crashed' | 'unknown'
 export type Agent = {
   name: string
   controllable: boolean

@@ -107,6 +107,7 @@ async function refresh() {
       const stale = (hook.status === 'needs_you' && (screens.get(name)?.changedAt ?? 0) > hook.at + 1000)
         || (hook.status === 'working' && seen === 'done' && quietMs > 8000 && Date.now() - hook.at > 8000)
       if (!stale) status = hook.status
+      if (status === 'done' && seen === 'waiting') status = 'waiting' // Stop hook fired, but a background job will wake it
     }
     next.push({
       name, controllable: !!r.session, tool: r.tool, pid: r.pid, cwd: r.cwd, task: r.task, age_s: r.age_s,

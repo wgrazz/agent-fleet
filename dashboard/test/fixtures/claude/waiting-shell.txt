@@ -1,0 +1,14 @@
+⏺ Collection started for the next store. I'll check the container every 10
+  minutes and pick this back up when it exits.
+
+  Armed: polling the container every 10 min, resuming when done, giving up
+  at 9h.
+
+✻ Cooked for 1m 12s
+
+                        Update available! Run: brew upgrade claude-code@latest
+────────────────────────────────────────────────────────────────────────────────
+❯ 
+────────────────────────────────────────────────────────────────────────────────
+  [PONYTAIL:FULL] | Fable 5.1 | effort:high | $61.59 | ctx:25% | 5h:17% | wk:…
+  ⏵⏵ auto mode on · 1 shell

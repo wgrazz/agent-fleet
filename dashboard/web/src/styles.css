@@ -107,7 +107,7 @@ kbd { font: 600 10.5px var(--mono); opacity: .6; margin-right: 5px; }
 .av-agy { background: linear-gradient(135deg, #4285f4, #9b72cb); } .av-copilot { background: #6e40c9; }
 .st { position: absolute; right: -2px; bottom: -2px; width: 10px; height: 10px; border-radius: 50%; border: 2px solid var(--panel); }
 .it.on .st { border-color: var(--accent); }
-.st-needs_you { background: var(--need); } .st-done { background: var(--done); } .st-crashed { background: var(--dead); } .st-unknown { background: var(--idle); }
+.st-needs_you { background: var(--need); } .st-waiting { background: var(--work); opacity: .55; } .st-done { background: var(--done); } .st-crashed { background: var(--dead); } .st-unknown { background: var(--idle); }
 .st-working { background: var(--work); animation: pulse 1.6s ease-in-out infinite; }
 @keyframes pulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(34, 197, 94, .55); } 50% { box-shadow: 0 0 0 4px rgba(34, 197, 94, 0); } }
 @media (prefers-reduced-motion: reduce) { .st-working { animation: none; } }
@@ -123,7 +123,7 @@ kbd { font: 600 10.5px var(--mono); opacity: .6; margin-right: 5px; }
 .back { display: none; font-size: 26px; line-height: 1; color: var(--accent); padding: 0 6px 2px 0; }
 .pill { font-size: 11.5px; font-weight: 600; padding: 2px 8px 2px 7px; border-radius: 99px; display: inline-flex; gap: 5px; align-items: center; flex-shrink: 0; }
 .pill::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
-.pill-needs_you { background: var(--need-bg); color: var(--need-text); } .pill-working { background: var(--work-bg); color: var(--work-text); }
+.pill-needs_you { background: var(--need-bg); color: var(--need-text); } .pill-working, .pill-waiting { background: var(--work-bg); color: var(--work-text); }
 .pill-done { background: var(--done-bg); color: var(--done-text); } .pill-crashed { background: var(--dead-bg); color: var(--dead-text); }
 .pill-unknown { background: var(--idle-bg); color: var(--idle-text); }
 .acts { display: flex; gap: 6px; flex-shrink: 0; }
@@ -303,7 +303,7 @@ details.ai-note { display: block; }
 .check.big { width: 26px; height: 26px; }
 .done-toggle { width: 100%; text-align: left; }
 .st-inline { width: 7px; height: 7px; border-radius: 50%; display: inline-block; background: var(--idle); margin-right: 4px; }
-.st-inline.st-working { background: var(--work); } .st-inline.st-needs_you { background: var(--need); } .st-inline.st-done { background: var(--done); } .st-inline.st-crashed { background: var(--dead); }
+.st-inline.st-working { background: var(--work); } .st-inline.st-needs_you { background: var(--need); } .st-inline.st-done { background: var(--done); } .st-inline.st-waiting { background: var(--work); opacity: .55; } .st-inline.st-crashed { background: var(--dead); }
 .idea-detail .idea-form { padding: 16px 18px; display: flex; flex-direction: column; gap: 12px; overflow-y: auto; }
 .idea-form label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; font-weight: 500; color: var(--dim); flex: 1; }
 .idea-form textarea, .idea-form select, .idea-form input { border: 1px solid var(--line); background: var(--bg); border-radius: 8px; padding: 7px 9px; font-size: 13.5px; resize: vertical; }
@@ -404,7 +404,7 @@ details.ai-note { display: block; }
 }
 
 /* Holding a row opens Fleet's own menu: stop iOS from also showing its link preview and selecting text */
-.it, .idea-body, .chip-f, .ni, .hit, .q, .tabs a {
+.it, .it *, .idea-body, .idea-body *, .chip-f, .ni, .hit, .q, .tabs a {
   -webkit-touch-callout: none;
   -webkit-user-select: none;
   user-select: none;
@@ -538,3 +538,14 @@ details.ai-note { display: block; }
 .access-text { flex: 1; display: flex; flex-direction: column; gap: 1px; font-size: 13px; }
 .access-text span { color: var(--dim); font-size: 12px; }
 .access-text .ok { color: var(--work-text); font-weight: 600; } .access-text .bad { color: var(--need-text); }
+
+/* a held row lifts out of the dimmed page and its menu grows from it, like iOS context menus */
+.menu-overlay.lifted { background: rgba(0, 0, 0, .28); -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px); animation: fade .18s ease-out; }
+.menu-ghost { position: fixed; pointer-events: none; animation: lift .22s cubic-bezier(.2, .9, .3, 1.2) forwards; }
+.menu-ghost > * { box-sizing: border-box; width: 100%; height: 100%; margin: 0; background: var(--pop); border-radius: 12px; box-shadow: 0 10px 30px rgba(0, 0, 0, .25); }
+.menu.ctx.pop { border-radius: 14px; padding: 5px; animation: grow .22s cubic-bezier(.2, .9, .3, 1.15); }
+.menu.ctx.pop button[role=menuitem] { padding: 11px 12px; font-size: 16px; }
+@keyframes lift { to { transform: scale(1.03); } }
+@keyframes grow { from { opacity: 0; transform: scale(.6); } }
+@keyframes fade { from { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .menu-ghost, .menu.ctx.pop, .menu-overlay.lifted { animation: none; } }

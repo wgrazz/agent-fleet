@@ -41,10 +41,13 @@ export function AgentList({ agents, selected, header, past, onMenu, empty }: {
   )
 }
 
+// drag-to-folder is a mouse thing; on a touch screen a draggable link fights the long-press menu
+const touch = matchMedia('(pointer: coarse)').matches
+
 function AgentRow({ a, on, onMenu }: { a: LiveAgent; on: boolean; onMenu: (x: number, y: number) => void }) {
   const hold = useHold(onMenu)
   return (
-    <a href={`#/agent/${encodeURIComponent(a.name)}`} draggable onDragStart={e => e.dataTransfer.setData('fleet/key', a.key)}
+    <a href={`#/agent/${encodeURIComponent(a.name)}`} draggable={!touch} onDragStart={e => e.dataTransfer.setData('fleet/key', a.key)}
       className={`it ${on ? 'on' : ''} ${a.status === 'needs_you' && a.controllable ? 'need' : ''} ${a.controllable ? '' : 'outside-row'}`} {...hold}>
       <Avatar tool={a.tool} status={a.status} />
       <span className="nm">{a.name}</span>
@@ -58,7 +61,7 @@ export function ConversationRow({ c, on, onMenu }: { c: Conversation; on?: boole
   const hold = useHold(onMenu ?? (() => {}))
   const href = c.running ? `#/agent/${encodeURIComponent(c.running)}` : `#/history/${c.tool}/${c.id}`
   return (
-    <a href={href} draggable onDragStart={e => e.dataTransfer.setData('fleet/key', c.key)} className={`it ${on ? 'on' : ''}`} {...(onMenu ? hold : {})}>
+    <a href={href} draggable={!touch} onDragStart={e => e.dataTransfer.setData('fleet/key', c.key)} className={`it ${on ? 'on' : ''}`} {...(onMenu ? hold : {})}>
       <Avatar tool={c.tool} status={c.running ? 'working' : undefined} />
       <span className="nm">{c.title || c.prompt || 'Untitled'}</span>
       <span className="tm">{ago(c.updated)}</span>
@@ -146,7 +149,7 @@ export function AgentView({ agent, onBack, onTerminal, onPause, onMenu, onAdopt,
       {!agent.controllable ? (
         chat ? (
           <>
-            <ChatView tool={agent.tool} id={agent.session_id} live working={agent.status === 'working' ? agent.working_line || 'Working…' : ''} />
+            <ChatView tool={agent.tool} id={agent.session_id} live working={agent.status === 'working' ? agent.working_line || 'Working…' : agent.status === 'waiting' ? 'Waiting on a background job, it picks up again when that finishes' : ''} />
             <div className="ended">This one runs in a plain terminal window, so it's read-only here. <b>Add to Fleet</b> moves it into Fleet with the same conversation, so you can answer it from anywhere.</div>
           </>
         ) : (
@@ -157,7 +160,7 @@ export function AgentView({ agent, onBack, onTerminal, onPause, onMenu, onAdopt,
         )
       ) : shown === 'chat' ? (
         <ChatView tool={agent.tool} id={agent.session_id} live waiting={agent.status === 'needs_you' ? agent.message : ''}
-          working={agent.status === 'working' ? agent.working_line || 'Working…' : ''} pending={pending} onSeen={() => setPending('')} peek={agent.name} />
+          working={agent.status === 'working' ? agent.working_line || 'Working…' : agent.status === 'waiting' ? 'Waiting on a background job, it picks up again when that finishes' : ''} pending={pending} onSeen={() => setPending('')} peek={agent.name} />
       ) : shown === 'changes' ? (
         <ChangesView name={agent.name} />
       ) : (

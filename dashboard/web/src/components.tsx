@@ -5,9 +5,9 @@ export const TOOLS = ['claude', 'codex', 'cursor', 'copilot', 'agy'] as const
 const TOOL_LABEL: Record<string, string> = { claude: 'Claude', codex: 'Codex', cursor: 'Cursor', copilot: 'Copilot', agy: 'Antigravity' }
 const GLYPH: Record<string, string> = { claude: '✳', codex: '❯', cursor: '◢', copilot: '◉', agy: 'A' }
 export const STATUS_LABEL: Record<Status, string> = {
-  needs_you: 'Needs you', working: 'Working', done: 'Done', crashed: 'Crashed', unknown: 'Outside tmux',
+  needs_you: 'Needs you', working: 'Working', waiting: 'Waiting on a job', done: 'Done', crashed: 'Crashed', unknown: 'Outside tmux',
 }
-export const ORDER: Status[] = ['needs_you', 'working', 'done', 'crashed', 'unknown']
+export const ORDER: Status[] = ['needs_you', 'working', 'waiting', 'done', 'crashed', 'unknown']
 export const COLORS = ['#8e8e93', '#ff3b30', '#ff9500', '#ffcc00', '#34c759', '#00c7be', '#007aff', '#5856d6', '#af52de', '#ff2d55']
 
 export const toolLabel = (t: string) => TOOL_LABEL[t] ?? t
@@ -88,10 +88,11 @@ export function Confirm({ title, text, action, onYes, onClose }: { title: string
 // ---------- hold / right-click menus ----------
 
 export type MenuItem = { label: string; onClick?: () => void; danger?: boolean; disabled?: boolean; items?: MenuItem[]; swatch?: string; checked?: boolean } | 'sep'
-type MenuState = { x: number; y: number; items: MenuItem[]; title?: string } | null
+type MenuState = { x: number; y: number; items: MenuItem[]; title?: string; from?: HTMLElement } | null
 let showMenu: (m: MenuState) => void = () => {}
+let held: HTMLElement | null = null // the row a long press is on: the menu pops out of it, iOS style
 
-export const openMenu = (x: number, y: number, items: MenuItem[], title?: string) => showMenu({ x, y, items, title })
+export const openMenu = (x: number, y: number, items: MenuItem[], title?: string) => { showMenu({ x, y, items, title, from: held ?? undefined }); held = null }
 
 /** Long-press on touch, right-click with a mouse. The click that follows a long press is swallowed. */
 export function useHold(onHold: (x: number, y: number) => void) {
@@ -103,12 +104,16 @@ export function useHold(onHold: (x: number, y: number) => void) {
     onTouchStart: (e: React.TouchEvent) => {
       fired.current = false
       const t = e.touches[0]
+      const el = e.currentTarget as HTMLElement
       start.current = { x: t.clientX, y: t.clientY }
       timer.current = window.setTimeout(() => {
         fired.current = true
         navigator.vibrate?.(10)
+        getSelection()?.removeAllRanges()
+        held = el
         onHold(start.current.x, start.current.y)
-      }, 480)
+        held = null
+      }, 450)
     },
     onTouchMove: (e: React.TouchEvent) => {
       const t = e.touches[0]
@@ -119,9 +124,21 @@ export function useHold(onHold: (x: number, y: number) => void) {
   }
 }
 
+/** Where a menu popped from a held row goes: under the row, or above it when there's no room below. */
+function anchored(from: HTMLElement, items: number) {
+  const r = from.getBoundingClientRect()
+  const w = Math.min(260, innerWidth - 24)
+  const h = Math.min(innerHeight * 0.6, 16 + items * 44)
+  const left = Math.max(12, Math.min(r.left + 8, innerWidth - w - 12))
+  if (innerHeight - r.bottom - 12 >= h) return { rect: r, style: { left, top: r.bottom + 8, width: w, transformOrigin: 'top left' } }
+  if (r.top - 12 >= h) return { rect: r, style: { left, bottom: innerHeight - r.top + 8, width: w, transformOrigin: 'bottom left' } }
+  return null // a tall menu on a small screen: use the bottom sheet
+}
+
 export function MenuHost() {
   const [stack, setStack] = useState<MenuState[]>([])
   const openedAt = useRef(0)
+  const ghost = useRef<HTMLDivElement>(null)
   useEffect(() => {
     showMenu = m => { openedAt.current = Date.now(); setStack(m ? [m] : []) }
     return () => { showMenu = () => {} }
@@ -135,12 +152,23 @@ export function MenuHost() {
     addEventListener('keydown', esc)
     return () => removeEventListener('keydown', esc)
   }, [top])
+  const root = stack[0]
+  const pop = root?.from && isPhone() ? anchored(root.from, Math.max(...stack.map(m => m!.items.length)) + 1) : null
+  // a lifted copy of the held row sits above the dimmed page
+  useEffect(() => {
+    const box = ghost.current
+    if (!box || !root?.from) return
+    const copy = root.from.cloneNode(true) as HTMLElement
+    copy.removeAttribute('href')
+    box.replaceChildren(copy)
+  }, [root, pop])
   if (!top) return null
-  const phone = isPhone()
-  const style = phone ? {} : { left: Math.min(top.x, innerWidth - 240), top: Math.min(top.y, innerHeight - 40 - top.items.length * 34) }
+  const sheet = isPhone() && !pop
+  const style = pop ? pop.style : sheet ? {} : { left: Math.min(top.x, innerWidth - 240), top: Math.min(top.y, innerHeight - 40 - top.items.length * 34) }
   return (
-    <div className="menu-overlay" onMouseDown={dismiss} onTouchEnd={dismiss}>
-      <div className={`menu ctx ${phone ? 'sheet' : ''}`} role="menu" style={style}>
+    <div className={`menu-overlay ${pop ? 'lifted' : ''}`} onMouseDown={dismiss} onTouchEnd={dismiss}>
+      {pop && <div className="menu-ghost" ref={ghost} aria-hidden style={{ left: pop.rect.left, top: pop.rect.top, width: pop.rect.width, height: pop.rect.height }} />}
+      <div className={`menu ctx ${sheet ? 'sheet' : ''} ${pop ? 'pop' : ''}`} role="menu" style={style}>
         {(top.title || stack.length > 1) && (
           <div className="menu-title">
             {stack.length > 1 && <button className="menu-back" onClick={() => setStack(stack.slice(0, -1))}>‹</button>}
@@ -159,7 +187,7 @@ export function MenuHost() {
             {it.items && <span className="chev">›</span>}
           </button>
         ))}
-        {phone && <button className="menu-cancel" onClick={() => setStack([])}>Cancel</button>}
+        {sheet && <button className="menu-cancel" onClick={() => setStack([])}>Cancel</button>}
       </div>
     </div>
   )

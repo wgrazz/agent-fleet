@@ -1,4 +1,5 @@
 import { mkdtempSync } from 'node:fs'
+import { joinResults, speechChunks } from '../web/src/speech.ts'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
@@ -112,5 +113,18 @@ describe('Mac abilities', () => {
   })
   it('approval cards say exactly what will happen', () => {
     expect(summarize(mac({ command: 'event', title: 'Dentist', when: '2026-10-30 15:00', minutes: '45' }))).toBe('Add to your calendar: “Dentist”, 2026-10-30 15:00 for 45 min')
+  })
+})
+
+describe('voice text', () => {
+  it('joins recognition results, whether iOS repeats the phrase or adds to it', () => {
+    expect(joinResults(['what needs', ' me today'])).toBe('what needs me today')
+    expect(joinResults(['what needs', 'what needs me', 'what needs me today'])).toBe('what needs me today')
+  })
+
+  it('speaks the first sentence alone so it starts sooner, then groups the rest', () => {
+    expect(speechChunks('Done. Walmart is working. Target needs you. Shall I approve it?'))
+      .toEqual(['Done.', 'Walmart is working. Target needs you. Shall I approve it?'])
+    expect(speechChunks('No punctuation here')).toEqual(['No punctuation here'])
   })
 })

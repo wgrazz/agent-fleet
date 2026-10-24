@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { joinResults, speechChunks } from './speech.ts'
 import { api, remember, type AiBudget, type Conversation, type Idea, type List, type LiveAgent, type Settings } from './api.ts'
 import { ChatView, ConversationRow } from './agents.tsx'
 import { activity, ago, Avatar, MicIcon, SearchIcon, toolLabel } from './components.tsx'
@@ -149,29 +150,40 @@ let voiceSettings: Settings | null = null
 export const setVoiceSettings = (s: Settings) => { voiceSettings = s }
 const loadVoiceSettings = () => voiceSettings ? Promise.resolve(voiceSettings) : api.get<Settings>('/api/settings').then(s => (voiceSettings = s)).catch(() => null)
 
+let speaking = 0 // bumped by stopSpeaking so a reply that's still being made doesn't start playing
+
 export async function speak(text: string, override?: { engine: string; voice: string; speed: number }): Promise<void> {
   if (!text) return
+  const me = ++speaking
   const s = override ?? await loadVoiceSettings().then(v => v && { engine: v.voice_engine, voice: v.voice, speed: v.voice_speed })
   if (!s || s.engine === 'device' || !player) return speakOnDevice(text)
+  const make = (chunk: string) => fetch('/api/tts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: chunk, engine: s.engine, voice: s.voice, speed: s.speed }) })
+    .then(async res => { if (!res.ok) throw new Error(await res.text()); return URL.createObjectURL(await res.blob()) })
+  const chunks = speechChunks(text)
   try {
     window.speechSynthesis?.cancel()
-    const res = await fetch('/api/tts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text, engine: s.engine, voice: s.voice, speed: s.speed }) })
-    if (!res.ok) throw new Error(await res.text())
-    const url = URL.createObjectURL(await res.blob())
-    player.pause()
-    player.src = url
-    await new Promise<void>((resolve, reject) => {
-      player.onended = () => { URL.revokeObjectURL(url); resolve() }
-      player.onpause = () => resolve() // interrupted
-      player.onerror = () => reject(new Error('playback failed'))
-      player.play().catch(reject)
-    })
+    let next = make(chunks[0])
+    for (let i = 0; i < chunks.length; i++) {
+      const url = await next
+      if (i + 1 < chunks.length) next = make(chunks[i + 1])
+      if (me !== speaking) return
+      player.pause()
+      player.src = url
+      await new Promise<void>((resolve, reject) => {
+        player.onended = () => { URL.revokeObjectURL(url); resolve() }
+        player.onpause = () => resolve() // interrupted
+        player.onerror = () => reject(new Error('playback failed'))
+        player.play().catch(reject)
+      })
+      if (me !== speaking || (player.paused && !player.ended)) return
+    }
   } catch {
-    return speakOnDevice(text) // the Mac voice isn't available right now: still answer out loud
+    if (me === speaking) return speakOnDevice(text) // the Mac voice isn't available right now: still answer out loud
   }
 }
 
-export const stopSpeaking = () => { player?.pause(); window.speechSynthesis?.cancel() }
+export const stopSpeaking = () => { speaking++; player?.pause(); window.speechSynthesis?.cancel() }
+
 
 export const spokenAlerts = { get: () => remember.get('jarvis.alerts') === '1', set: (on: boolean) => remember.set('jarvis.alerts', on ? '1' : '') }
 export const spokenReplies = { get: () => remember.get('jarvis.quiet') !== '1', set: (on: boolean) => remember.set('jarvis.quiet', on ? '' : '1') }
@@ -181,7 +193,7 @@ type Line = { who: 'you' | 'bot'; text: string; meta?: { done?: string[]; mode?:
 type Thread = { id: number; title: string; updated_at: number; count?: number }
 
 const IDLE_MS = 2 * 3600 * 1000
-type VoiceState = 'off' | 'listening' | 'thinking' | 'speaking'
+type VoiceState = 'off' | 'listening' | 'thinking' | 'speaking' | 'tap'
 
 export function Jarvis({ onClose, onChanged, asPage, autoTalk }: { onClose: () => void; onChanged: () => void; asPage?: boolean; autoTalk?: boolean }) {
   const [threadId, setThreadId] = useState<number | null>(null)
@@ -265,48 +277,75 @@ export function Jarvis({ onClose, onChanged, asPage, autoTalk }: { onClose: () =
   }
 
   // ---------- voice mode: listen → think → speak → listen again ----------
+  // iPhones are the hard case: Safari often ends listening without marking anything "final", may refuse to restart
+  // the mic without a fresh tap, and sometimes never fires onend at all. So: keep what was heard even if it never
+  // went final, decide "done talking" ourselves after a pause, and when the mic won't come back, wait for a tap
+  // ('tap' state) instead of silently giving up.
+  const talked = useRef(false) // a turn has worked this session, so a mic refusal now means "needs a tap", not "blocked"
   const listenOnce = () => {
     if (voiceRef.current === 'off') return
     let r: any
     try { r = new Recognition() } catch { return endVoice("Voice input isn't available here. Use the keyboard's mic key to dictate instead.") }
     r.lang = navigator.language || 'en-US'
     r.interimResults = true
-    r.continuous = false
-    let final = ''
+    r.continuous = true // we end the turn on a pause ourselves; Safari's own end-of-speech cuts people off mid-sentence
+    let heard = ''
+    let finished = false
+    let started = false
+    let pause = 0
+    const timers: number[] = []
+    const finish = (said: string) => {
+      if (finished) return
+      finished = true
+      timers.forEach(clearTimeout)
+      clearTimeout(pause)
+      try { r.abort() } catch {}
+      setCaption('')
+      if (voiceRef.current === 'listening') turn(said.trim())
+    }
+    const stopSoon = (ms: number) => { clearTimeout(pause); pause = window.setTimeout(() => { try { r.stop() } catch {} ; timers.push(window.setTimeout(() => finish(heard), 1200)) }, ms) }
+    r.onstart = () => { started = true }
     r.onresult = (e: any) => {
-      let text = ''
-      for (const res of e.results) text += res[0].transcript
-      setCaption(text)
-      if (e.results[e.results.length - 1].isFinal) final = text
+      heard = joinResults(Array.from(e.results, (x: any) => x[0].transcript as string))
+      setCaption(heard)
+      stopSoon(1400) // 1.4 s without new words = done talking
     }
     r.onerror = (e: any) => {
-      if (e?.error === 'not-allowed' || e?.error === 'service-not-allowed') endVoice("I can't use the microphone here. Allow it in Settings, or type instead.")
+      const err = e?.error ?? ''
+      if (err === 'no-speech' || err === 'aborted') return // onend follows
+      if ((err === 'not-allowed' || err === 'service-not-allowed') && !talked.current)
+        return (finished = true, endVoice("I can't use the microphone here. Allow it in Settings, or type instead."))
+      finished = true
+      needTap() // the mic is busy or iOS wants a tap before listening again
     }
-    r.onend = async () => {
-      if (voiceRef.current !== 'listening') return
-      const said = final.trim()
-      setCaption('')
-      if (!said) {
-        // two silences in a row ends the conversation instead of listening forever
-        if (++quiet.current >= 2) return endVoice()
-        return listenOnce()
-      }
-      quiet.current = 0
-      if (/^(stop|that'?s all|that is all|goodbye|bye|thanks jarvis|end( conversation)?)[.!]*$/i.test(said)) return endVoice()
-      setVoice('thinking')
-      const reply = await ask(said)
-      if (voiceNow() === 'off') return
-      if (!mutedRef.current) {
-        setVoice('speaking')
-        await speak(reply)
-      }
-      if (voiceNow() === 'off') return
-      setVoice('listening')
-      listenOnce()
-    }
+    r.onend = () => finish(heard)
     rec.current = r
-    try { r.start() } catch { endVoice() }
+    try { r.start() } catch { return needTap() }
+    timers.push(window.setTimeout(() => { if (!started && !finished) { finished = true; try { r.abort() } catch {} ; needTap() } }, 2500))
+    timers.push(window.setTimeout(() => { if (!heard) stopSoon(0) }, 9000)) // nothing said: count it as a silence
   }
+  const turn = async (said: string) => {
+    if (!said) {
+      // two silences in a row: stop listening, but stay in the conversation until you tap
+      if (++quiet.current >= 2) return needTap()
+      return listenOnce()
+    }
+    quiet.current = 0
+    talked.current = true
+    if (/^(stop|that'?s all|that is all|goodbye|bye|thanks jarvis|end( conversation)?)[.!]*$/i.test(said)) return endVoice()
+    setVoice('thinking')
+    const reply = await ask(said)
+    if (voiceNow() === 'off') return
+    if (!mutedRef.current) {
+      setVoice('speaking')
+      await speak(reply)
+    }
+    const now = voiceNow()
+    if (now !== 'speaking' && now !== 'thinking') return // ended, or you tapped to interrupt (that already started listening)
+    setVoice('listening')
+    setTimeout(listenOnce, 250) // let the speaker go quiet so the mic doesn't hear the end of the reply
+  }
+  const needTap = () => { if (voiceRef.current !== 'off') { setCaption(''); setVoice('tap') } }
   const startVoice = () => {
     if (!Recognition) return setLines(l => [...l, { who: 'bot', text: "Voice conversations aren't available in this browser. Type, or use the keyboard's mic key." }])
     unlockAudio()
@@ -325,6 +364,7 @@ export function Jarvis({ onClose, onChanged, asPage, autoTalk }: { onClose: () =
   const tapOrb = () => {
     if (voice === 'speaking') { stopSpeaking(); setVoice('listening'); listenOnce() } // interrupt and talk
     else if (voice === 'listening') { try { rec.current?.stop() } catch {} } // done talking: send now
+    else if (voice === 'tap') { unlockAudio(); quiet.current = 0; setVoice('listening'); listenOnce() } // this tap lets iOS open the mic
   }
   const close = () => { endVoice(); onClose() }
   const toggleMute = () => { const m = !muted; setMuted(m); spokenReplies.set(!m); if (m) stopSpeaking() }
@@ -391,10 +431,10 @@ export function Jarvis({ onClose, onChanged, asPage, autoTalk }: { onClose: () =
       )}
       {voice !== 'off' ? (
         <div className="voice-mode">
-          <button className={`orb ${voice}`} onClick={tapOrb} aria-label={voice === 'speaking' ? 'Interrupt' : voice === 'listening' ? 'Done talking' : 'Thinking'}>
+          <button className={`orb ${voice}`} onClick={tapOrb} aria-label={voice === 'speaking' ? 'Interrupt' : voice === 'listening' ? 'Done talking' : voice === 'tap' ? 'Talk' : 'Thinking'}>
             <span /><span /><span />
           </button>
-          <div className="voice-state">{voice === 'listening' ? (caption || 'Listening…') : voice === 'thinking' ? 'Thinking…' : 'Speaking · tap to interrupt'}</div>
+          <div className="voice-state">{voice === 'listening' ? (caption || 'Listening…') : voice === 'thinking' ? 'Thinking…' : voice === 'tap' ? 'Tap to talk' : 'Speaking · tap to interrupt'}</div>
           <button className="btn" onClick={() => endVoice()}>End</button>
         </div>
       ) : (
