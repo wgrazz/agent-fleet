@@ -12,7 +12,8 @@ import * as ideas from './ideas.ts'
 import { notify, publicKey, subscribe } from './push.ts'
 import { alerts, ingestHook, list, poll, startPolling } from './state.ts'
 import { config, db, FLEET_BIN } from './store.ts'
-import { run, sendKey, sendText } from './tmux.ts'
+import { capture, run, sendKey, sendText } from './tmux.ts'
+import { liveTail } from './detect.ts'
 import { aiBudget, usage } from './usage.ts'
 import * as J from './jarvis.ts'
 import { attach } from './ws.ts'
@@ -245,6 +246,11 @@ const routes: [string, RegExp, Route][] = [
     await poll()
     const moved = out.match(/into Fleet as (\S+)\./)?.[1]
     return { name: moved ?? name }
+  }],
+
+  ['GET', /^\/api\/agents\/([^/]+)\/peek$/, async (_req, [name]) => {
+    agentOr404(name)
+    return { lines: liveTail(await capture(name).catch(() => '')) }
   }],
 
   ['GET', /^\/api\/agents\/([^/]+)\/changes$/, async (_req, [name]) => {

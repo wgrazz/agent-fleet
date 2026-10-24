@@ -157,7 +157,7 @@ export function AgentView({ agent, onBack, onTerminal, onPause, onMenu, onAdopt,
         )
       ) : shown === 'chat' ? (
         <ChatView tool={agent.tool} id={agent.session_id} live waiting={agent.status === 'needs_you' ? agent.message : ''}
-          working={agent.status === 'working' ? agent.working_line || 'Working…' : ''} pending={pending} onSeen={() => setPending('')} />
+          working={agent.status === 'working' ? agent.working_line || 'Working…' : ''} pending={pending} onSeen={() => setPending('')} peek={agent.name} />
       ) : shown === 'changes' ? (
         <ChangesView name={agent.name} />
       ) : (
@@ -215,8 +215,8 @@ function Composer({ agent, send }: { agent: LiveAgent; send: (body: { text?: str
 // ---------- chat ----------
 
 /** A conversation as chat bubbles, read from the tool's own log. Live views poll and stick to the bottom. */
-export function ChatView({ tool, id, live, waiting, working, pending, onSeen }: {
-  tool: string; id: string; live?: boolean; waiting?: string; working?: string; pending?: string; onSeen?: () => void
+export function ChatView({ tool, id, live, waiting, working, pending, onSeen, peek }: {
+  tool: string; id: string; live?: boolean; waiting?: string; working?: string; pending?: string; onSeen?: () => void; peek?: string
 }) {
   const [messages, setMessages] = useState<Message[] | null>(null)
   const [error, setError] = useState('')
@@ -260,9 +260,30 @@ export function ChatView({ tool, id, live, waiting, working, pending, onSeen }: 
       ))}
       {pending && !seen && <div className="bubble user sending">{pending}</div>}
       {working && <div className="bubble working"><span className="dots"><i /><i /><i /></span>{working}</div>}
+      {working && peek && <LivePeek name={peek} />}
       {waiting && <div className="bubble waiting">Waiting for you: {waiting}</div>}
       {!messages.length && <div className="empty">No messages yet.</div>}
     </div>
+  )
+}
+
+/** The last lines of the agent's screen while it works: the closest thing to watching it think. */
+function LivePeek({ name }: { name: string }) {
+  const [lines, setLines] = useState<string[]>([])
+  const [open, setOpen] = useState(false)
+  useEffect(() => {
+    let stop = false
+    const load = () => api.get<{ lines: string[] }>(`/api/agents/${encodeURIComponent(name)}/peek`).then(r => !stop && setLines(r.lines)).catch(() => {})
+    load()
+    const t = setInterval(load, 1500)
+    return () => { stop = true; clearInterval(t) }
+  }, [name])
+  if (!lines.length) return null
+  return (
+    <button className={`peek ${open ? 'open' : ''}`} onClick={() => setOpen(!open)} aria-label={open ? 'Show less' : 'Show more of the live screen'}>
+      <span className="peek-label">Live</span>
+      <pre>{lines.slice(open ? -20 : -5).join('\n')}</pre>
+    </button>
   )
 }
 

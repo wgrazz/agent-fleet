@@ -34,8 +34,15 @@ const parse = (line: string) => {
 }
 
 // Claude's own wrappers (<command-name>, <system-reminder>, …) aren't things you typed
-const typed = (text: string) => text.replace(/<system-reminder>[\s\S]*?<\/system-reminder>/g, '').trim()
-const isWrapper = (text: string) => /^<[a-z_-]+[ >]/.test(text.trim())
+// What you typed, minus Claude's own notes. Pasted text (and everything sent from the dashboard, which arrives as
+// a paste) is wrapped in <pasted_content …>; keep its contents.
+const typed = (text: string) => text
+  .replace(/<system-reminder>[\s\S]*?<\/system-reminder>/g, '')
+  .replace(/<pasted_content[^>]*>\n?([\s\S]*?)\n?<\/pasted_content[^>]*>/g, '$1')
+  .trim()
+// Claude Code / Codex bookkeeping that isn't something you said
+const WRAPPERS = /^<(command-name|command-message|command-args|local-command-stdout|local-command-stderr|local-command-caveat|bash-input|bash-stdout|bash-stderr|user-prompt-submit-hook|task-notification|system-reminder|environment_context|user_instructions|turn_aborted)[ >]/
+const isWrapper = (text: string) => WRAPPERS.test(text.trim())
 
 const claudeCache = new Map<string, { key: string; conv: Conversation | null }>()
 
@@ -130,7 +137,8 @@ function claudeMessages(path: string): Message[] {
       continue
     }
     for (const b of Array.isArray(c) ? c : []) {
-      if (b.type === 'text' && b.text?.trim() && !(d.type === 'user' && isWrapper(b.text)))
+      if (d.type === 'user' && b.type === 'text' && /^\[Request interrupted/.test(b.text ?? '')) push(out, { role: 'tool', text: 'Interrupted' })
+      else if (b.type === 'text' && b.text?.trim() && !(d.type === 'user' && isWrapper(b.text)))
         push(out, { role: d.type === 'user' ? 'user' : 'assistant', text: d.type === 'user' ? typed(b.text) : b.text.trim() })
       else if (b.type === 'tool_use') push(out, { role: 'tool', text: summarizeTool(b.name, b.input) })
     }

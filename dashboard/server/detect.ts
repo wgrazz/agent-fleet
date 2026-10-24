@@ -69,3 +69,14 @@ export function workingLine(tool: string, screen: string): string {
     ? line.replace(/^[\s\W⠀-⣿]+/, '').replace(/\s*[•·]?\s*(esc to interrupt|esc interrupt|ctrl\+c to stop)\)?/i, ')').replace(/\(\)$/, '').replace(/\s+\)$/, ')').trim().slice(0, 90)
     : ''
 }
+
+// The part of the screen above the agent's input box: what it's printing right now, for the chat's live view.
+export function liveTail(screen: string, n = 20): string[] {
+  const lines = screen.split('\n').map(l => l.replace(/\s+$/, ''))
+  const border = (l: string) => /^[\s─━═╭╮╰╯│┃▄▀╻╹]+$/.test(l) && /[─━═▄▀]/.test(l)
+  // drop everything from the input box down (Claude, Codex, Copilot and Antigravity all draw one at the bottom)
+  let end = lines.length
+  for (let i = lines.length - 1, seen = 0; i >= 0 && i > lines.length - 14; i--) if (border(lines[i]) && ++seen === 2) { end = i; break }
+  // right-aligned lines are UI hints ("● high · /effort"), not output
+  return lines.slice(0, end).filter(l => l.trim() && !border(l) && !/^\s{24,}\S/.test(l)).slice(-n)
+}
