@@ -201,6 +201,7 @@ export function Sidebar(props: {
       <div className="sec">Library</div>
       <a className={`ni ${props.route === 'history' ? 'on' : ''}`} href="#/history"><ClockIcon />History</a>
       <a className={`ni ${props.route === 'paused' ? 'on' : ''}`} href="#/paused"><PauseIcon />Paused<b>{props.paused || ''}</b></a>
+      <a className={`ni ${props.route === 'settings' ? 'on' : ''}`} href="#/settings"><GearIcon />Settings</a>
       <div className="foot">
         <UsageMeters usage={props.usage} compact />
         {props.push}
@@ -475,3 +476,4 @@ export function PauseUntil({ name, usage, onClose, onPick }: { name: string; usa
     </Dialog>
   )
 }
+export const GearIcon = () => svg(<><circle cx="8" cy="8" r="2.2" stroke="currentColor" strokeWidth="1.5" fill="none" /><path d="M8 1.8v2M8 12.2v2M1.8 8h2M12.2 8h2M3.6 3.6l1.4 1.4M11 11l1.4 1.4M3.6 12.4 5 11M11 5l1.4-1.4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" /></>)

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { api, remember, type AiBudget, type Conversation, type Idea, type List, type LiveAgent } from './api.ts'
+import { api, remember, type AiBudget, type Conversation, type Idea, type List, type LiveAgent, type Settings } from './api.ts'
 import { ChatView, ConversationRow } from './agents.tsx'
 import { activity, ago, Avatar, MicIcon, SearchIcon, toolLabel } from './components.tsx'
 
@@ -100,14 +100,14 @@ export function Palette({ agents, lists, actions, onClose }: {
 
 // ---------- Jarvis ----------
 
-type Said = { who: 'you' | 'jarvis'; text: string; done?: string[]; instant?: boolean; blocked?: string; warning?: string }
+type Said = { who: 'you' | 'bot'; text: string; done?: string[]; instant?: boolean; blocked?: string; warning?: string }
 
 const Recognition: any = (window as any).SpeechRecognition ?? (window as any).webkitSpeechRecognition
 
 // British voices that ship with macOS/iOS/Chrome, best first: the closest a browser gets to J.A.R.V.I.S.
 const JARVIS_VOICES = ['Daniel (Enhanced)', 'Daniel', 'Arthur', 'Oliver', 'Malcolm', 'Google UK English Male', 'Microsoft Ryan', 'Microsoft George']
 
-function voices(): SpeechSynthesisVoice[] {
+export function voices(): SpeechSynthesisVoice[] {
   return 'speechSynthesis' in window ? speechSynthesis.getVoices().filter(v => v.lang.startsWith('en')) : []
 }
 
@@ -119,7 +119,7 @@ export function pickVoice(): SpeechSynthesisVoice | undefined {
     ?? all.find(v => v.lang === 'en-GB')
 }
 
-export function speak(text: string) {
+function speakOnDevice(text: string) {
   if (!('speechSynthesis' in window) || !text) return
   speechSynthesis.cancel()
   const u = new SpeechSynthesisUtterance(text)
@@ -130,12 +130,49 @@ export function speak(text: string) {
   speechSynthesis.speak(u)
 }
 
+// Natural voices are made on the Mac and played here. iPhones only let a page play sound it started during a tap,
+// so the first tap in Jarvis "unlocks" this player with a silent clip; replies can then play on it.
+const player = typeof Audio !== 'undefined' ? new Audio() : null
+let unlocked = false
+const SILENT = 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQAAAAA='
+export function unlockAudio() {
+  if (!player || unlocked) return
+  unlocked = true
+  player.src = SILENT
+  player.play().catch(() => { unlocked = false })
+}
+
+let voiceSettings: Settings | null = null
+export const setVoiceSettings = (s: Settings) => { voiceSettings = s }
+const loadVoiceSettings = () => voiceSettings ? Promise.resolve(voiceSettings) : api.get<Settings>('/api/settings').then(s => (voiceSettings = s)).catch(() => null)
+
+export async function speak(text: string, override?: { engine: string; voice: string; speed: number }) {
+  if (!text) return
+  const s = override ?? await loadVoiceSettings().then(v => v && { engine: v.voice_engine, voice: v.voice, speed: v.voice_speed })
+  if (!s || s.engine === 'device' || !player) return speakOnDevice(text)
+  try {
+    window.speechSynthesis?.cancel()
+    const res = await fetch('/api/tts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text, engine: s.engine, voice: s.voice, speed: s.speed }) })
+    if (!res.ok) throw new Error(await res.text())
+    const url = URL.createObjectURL(await res.blob())
+    player.pause()
+    player.src = url
+    player.onended = () => URL.revokeObjectURL(url)
+    await player.play()
+  } catch {
+    speakOnDevice(text) // the Mac voice isn't available right now: still answer out loud
+  }
+}
+
+export const stopSpeaking = () => { player?.pause(); window.speechSynthesis?.cancel() }
+
+export const spokenRepliesSetting = () => spokenReplies
 export const spokenAlerts = { get: () => remember.get('jarvis.alerts') === '1', set: (on: boolean) => remember.set('jarvis.alerts', on ? '1' : '') }
-const spokenReplies = { get: () => remember.get('jarvis.quiet') !== '1', set: (on: boolean) => remember.set('jarvis.quiet', on ? '' : '1') }
+export const spokenReplies = { get: () => remember.get('jarvis.quiet') !== '1', set: (on: boolean) => remember.set('jarvis.quiet', on ? '' : '1') }
 
 let keptLog: Said[] = [] // the conversation survives closing the panel
 
-export function Jarvis({ onClose, onChanged }: { onClose: () => void; onChanged: () => void }) {
+export function Jarvis({ onClose, onChanged, asPage }: { onClose: () => void; onChanged: () => void; asPage?: boolean }) {
   const [log, setLogState] = useState<Said[]>(keptLog)
   const setLog = (f: (l: Said[]) => Said[]) => setLogState(l => (keptLog = f(l)))
   const [listening, setListening] = useState(false)
@@ -145,8 +182,6 @@ export function Jarvis({ onClose, onChanged }: { onClose: () => void; onChanged:
   const [alerts, setAlerts] = useState(spokenAlerts.get())
   const [talk, setTalk] = useState(spokenReplies.get())
   const [budget, setBudget] = useState<AiBudget | null>(null)
-  const [voiceList, setVoiceList] = useState(voices())
-  const [voice, setVoice] = useState(pickVoice()?.name ?? '')
   const rec = useRef<any>(null)
   const box = useRef<HTMLDivElement>(null)
 
@@ -154,37 +189,33 @@ export function Jarvis({ onClose, onChanged }: { onClose: () => void; onChanged:
   useEffect(() => { loadBudget() }, [])
   useEffect(() => { box.current?.scrollTo(0, box.current.scrollHeight) }, [log, thinking])
   useEffect(() => () => { try { rec.current?.abort() } catch {} }, [])
-  useEffect(() => {
-    if (!('speechSynthesis' in window)) return
-    const on = () => { setVoiceList(voices()); setVoice(pickVoice()?.name ?? '') }
-    speechSynthesis.addEventListener('voiceschanged', on)
-    return () => speechSynthesis.removeEventListener('voiceschanged', on)
-  }, [])
 
   const ask = async (text: string, override = false) => {
     if (!text.trim()) return
+    if (talk) unlockAudio()
     if (!override) setLog(l => [...l, { who: 'you', text }])
     setThinking(true)
     try {
       const r = await api.post<{ say: string; done: string[]; mode: string; blocked?: boolean; warning?: string }>('/api/jarvis', { text, override })
-      setLog(l => [...l, { who: 'jarvis', text: r.say, done: r.done, instant: r.mode === 'instant', blocked: r.blocked ? text : undefined, warning: r.warning }])
+      setLog(l => [...l, { who: 'bot', text: r.say, done: r.done, instant: r.mode === 'instant', blocked: r.blocked ? text : undefined, warning: r.warning }])
       if (talk) speak(r.say)
       if (r.done.length) onChanged()
       if (r.mode !== 'instant') loadBudget()
     } catch (e) {
-      setLog(l => [...l, { who: 'jarvis', text: `Sorry, that didn't work: ${(e as Error).message}` }])
+      setLog(l => [...l, { who: 'bot', text: `Sorry, that didn't work: ${(e as Error).message}` }])
     }
     setThinking(false)
   }
 
   const listen = () => {
     if (!Recognition) return
+    if (talk) unlockAudio()
     window.speechSynthesis?.cancel()
     let r: any
     try {
       r = new Recognition()
     } catch {
-      return setLog(l => [...l, { who: 'jarvis', text: "Voice input isn't available here. Use the keyboard's mic key to dictate instead." }])
+      return setLog(l => [...l, { who: 'bot', text: "Voice input isn't available here. Use the keyboard's mic key to dictate instead." }])
     }
     r.lang = navigator.language || 'en-US'
     r.interimResults = true
@@ -201,7 +232,7 @@ export function Jarvis({ onClose, onChanged }: { onClose: () => void; onChanged:
       clearTimeout(guard)
       setListening(false)
       if (e?.error === 'not-allowed' || e?.error === 'service-not-allowed')
-        setLog(l => [...l, { who: 'jarvis', text: "I can't use the microphone here. Allow it in Settings, or use the keyboard's mic key to dictate." }])
+        setLog(l => [...l, { who: 'bot', text: "I can't use the microphone here. Allow it in Settings, or use the keyboard's mic key to dictate." }])
     }
     // if the browser never reports back, don't stay stuck "listening"
     const guard = setTimeout(() => { try { r.abort() } catch {} ; setListening(false) }, 15000)
@@ -215,13 +246,13 @@ export function Jarvis({ onClose, onChanged }: { onClose: () => void; onChanged:
     }
   }
   const stop = () => { try { rec.current?.stop() } catch {} ; setListening(false) }
-  const close = () => { try { rec.current?.abort() } catch {} ; window.speechSynthesis?.cancel(); onClose() }
+  const close = () => { try { rec.current?.abort() } catch {} ; stopSpeaking(); onClose() }
 
   const pct = budget ? budget.jarvis_pct : 0
   return (
     <>
-    <div className="jarvis-backdrop" onClick={close} />
-    <div className="jarvis" role="dialog" aria-label="Jarvis">
+    {!asPage && <div className="jarvis-backdrop" onClick={close} />}
+    <div className={`jarvis ${asPage ? 'page' : ''}`} role={asPage ? undefined : 'dialog'} aria-label="Jarvis">
       <div className="jarvis-h">
         <b>Jarvis</b>
         {budget && (
@@ -231,17 +262,13 @@ export function Jarvis({ onClose, onChanged }: { onClose: () => void; onChanged:
           </span>
         )}
         <button className="x small" onClick={() => setSettings(!settings)} aria-label="Jarvis settings">⚙</button>
-        <button className="jarvis-done" onClick={close}>Done</button>
+        <button className="jarvis-done" onClick={close}>{asPage ? 'Close' : 'Done'}</button>
       </div>
       {settings && (
         <div className="jarvis-settings">
           <label className="check small"><input type="checkbox" checked={talk} onChange={e => { setTalk(e.target.checked); spokenReplies.set(e.target.checked) }} />Speak replies</label>
           <label className="check small"><input type="checkbox" checked={alerts} onChange={e => { setAlerts(e.target.checked); spokenAlerts.set(e.target.checked) }} />Speak alerts</label>
-          {voiceList.length > 0 && (
-            <label className="small">Voice <select value={voice} onChange={e => { setVoice(e.target.value); remember.set('jarvis.voice', e.target.value); speak('At your service.') }}>
-              {voiceList.map(v => <option key={v.name} value={v.name}>{v.name} ({v.lang})</option>)}
-            </select></label>
-          )}
+          <a className="btn small" href="#/settings" onClick={() => !asPage && onClose()}>Voice & more settings</a>
           <button className="btn small" onClick={() => api.post('/api/jarvis/reset').then(() => setLog(() => []))}>New conversation</button>
         </div>
       )}
@@ -255,7 +282,7 @@ export function Jarvis({ onClose, onChanged }: { onClose: () => void; onChanged:
             {m.blocked && <button className="btn small" onClick={() => ask(m.blocked!, true)}>Allow once</button>}
           </div>
         ))}
-        {thinking && <div className="said jarvis dim"><span className="dots"><i /><i /><i /></span></div>}
+        {thinking && <div className="said bot dim"><span className="dots"><i /><i /><i /></span></div>}
       </div>
       <form className="jarvis-in" onSubmit={e => { e.preventDefault(); const t = draft; setDraft(''); ask(t) }}>
         {Recognition && <button type="button" className={`mic ${listening ? 'on' : ''}`} onClick={() => (listening ? stop() : listen())} aria-label={listening ? 'Stop listening' : 'Talk'}><MicIcon /></button>}

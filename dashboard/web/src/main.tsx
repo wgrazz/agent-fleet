@@ -8,14 +8,15 @@ import {
 } from './components.tsx'
 import { ConversationView, HistoryPane, Jarvis, Palette, speak, spokenAlerts } from './extras.tsx'
 import { IdeaDetail, IdeasPane, ImportNotes, QuickCapture, SortMode } from './ideas.tsx'
+import { SettingsPage } from './settings.tsx'
 import { FullTerminal } from './terminal.tsx'
 import './styles.css'
 
 // #/ · #/folder/ID · #/agent/NAME (what pushes open) · #/paused · #/ideas/LIST · #/idea/ID · #/history[/TOOL/ID] · #/more
-type View = 'all' | 'folder' | 'agent' | 'paused' | 'ideas' | 'idea' | 'history' | 'more'
+type View = 'all' | 'folder' | 'agent' | 'paused' | 'ideas' | 'idea' | 'history' | 'more' | 'jarvis' | 'settings'
 const parseRoute = () => {
   const [, view = '', a = '', b = ''] = location.hash.split('/')
-  const views: View[] = ['folder', 'agent', 'paused', 'ideas', 'idea', 'history', 'more']
+  const views: View[] = ['folder', 'agent', 'paused', 'ideas', 'idea', 'history', 'more', 'jarvis', 'settings']
   return { view: (views.includes(view as View) ? view : 'all') as View, a: decodeURIComponent(a), b: decodeURIComponent(b) }
 }
 const go = (hash: string) => (location.hash = hash)
@@ -230,7 +231,7 @@ function App() {
       } else if (e.key === 'n') {
         setModal({ kind: 'custom' })
       } else if (e.key === 'j') {
-        setJarvisOpen(true)
+        isPhone() ? go('#/jarvis') : setJarvisOpen(true)
       }
     }
     addEventListener('keydown', onKey)
@@ -290,7 +291,11 @@ function App() {
   }
 
   let detail
-  if (agentFromRoute) {
+  if (route.view === 'settings') {
+    detail = <SettingsPage usage={usage.data ?? []} push={push} onBack={() => go(isPhone() ? '#/more' : lastListRoute.current)} onError={fail} />
+  } else if (route.view === 'jarvis') {
+    detail = <main className="det jarvis-host"><Jarvis asPage onClose={() => go(lastListRoute.current)} onChanged={refreshAll} /></main>
+  } else if (agentFromRoute) {
     detail = <AgentView key={agentFromRoute.name} agent={agentFromRoute} onBack={() => go(lastListRoute.current)} onTerminal={() => setTerminal(agentFromRoute.name)}
       onPause={() => act(api.post(`/api/agents/${enc(agentFromRoute.name)}/pause`), () => go('#/paused'))}
       onMenu={(x, y) => agentMenu(agentFromRoute, x, y)} onAdopt={() => adopt(agentFromRoute)} send={send(agentFromRoute.name)} />
@@ -310,8 +315,8 @@ function App() {
     detail = <main className="det placeholder"><div className="empty big">{msg}<div className="hint">⌘K to jump anywhere · N new agent · J Jarvis</div></div></main>
   }
 
-  const hasDetail = !!(agentFromRoute || (route.view === 'idea' && ideaItem) || conversation)
-  const tab = ['ideas', 'idea'].includes(route.view) ? 'ideas' : route.view === 'history' ? 'history' : ['more', 'paused'].includes(route.view) ? 'more' : 'agents'
+  const hasDetail = !!(agentFromRoute || (route.view === 'idea' && ideaItem) || conversation || route.view === 'settings' || route.view === 'jarvis')
+  const tab = ['ideas', 'idea'].includes(route.view) ? 'ideas' : route.view === 'history' ? 'history' : ['more', 'paused', 'settings'].includes(route.view) ? 'more' : 'agents'
   const brainDump = allLists.find(l => l.name === 'Brain Dump')
 
   return (
@@ -326,14 +331,14 @@ function App() {
       <nav className="tabs" aria-label="Sections">
         <a href={lastListRoute.current.startsWith('#/folder') ? lastListRoute.current : '#/'} className={tab === 'agents' ? 'on' : ''}>Agents{needs > 0 && <span className="badge">{needs}</span>}</a>
         <a href={`#/ideas/${enc(remember.get('lastList') || 'Brain Dump')}`} className={tab === 'ideas' ? 'on' : ''}>Ideas{(brainDump?.unsorted ?? 0) > 0 && <span className="badge gray">{brainDump!.unsorted}</span>}</a>
-        <button className="tab-mic" onClick={() => setJarvisOpen(o => !o)} aria-label="Jarvis"><MicIcon /></button>
+        <button className="tab-mic" onClick={() => go('#/jarvis')} aria-label="Jarvis"><MicIcon /></button>
         <a href="#/history" className={tab === 'history' ? 'on' : ''}>History</a>
         <a href="#/more" className={tab === 'more' ? 'on' : ''}>More</a>
       </nav>
       {(route.view === 'ideas' || route.view === 'idea') && <IdeasListPicker lists={allLists} current={currentListName}
         onNew={() => setModal({ kind: 'name', title: 'New list', color: COLORS[6], action: 'Create', submit: (name, color) => { setModal(null); act(api.post('/api/lists', { name, color }), () => go(`#/ideas/${enc(name)}`)) } })} />}
 
-      {jarvisOpen && <Jarvis onClose={() => setJarvisOpen(false)} onChanged={refreshAll} />}
+      {jarvisOpen && route.view !== 'jarvis' && <Jarvis onClose={() => setJarvisOpen(false)} onChanged={refreshAll} />}
 
       {modal?.kind === 'custom' && <CustomForm title={modal.title} initial={modal.initial} folders={folderList} onClose={() => setModal(null)} onError={fail}
         onStart={async f => {
@@ -404,6 +409,7 @@ function MorePane({ usage, push, paused }: { usage: Usage[]; push: React.ReactNo
     <section className="list more">
       <div className="lh"><h4>More</h4></div>
       <div className="scroll">
+        <a className="it plain" href="#/settings"><span className="nm">Settings</span><span className="tm">Voice, budget, defaults ›</span></a>
         <a className="it plain" href="#/paused"><span className="nm">Paused agents</span><span className="tm">{paused || ''}</span></a>
         <div className="grp">Usage</div>
         <UsageMeters usage={usage} />
@@ -461,6 +467,18 @@ function PushButton({ onError }: { onError: (e: Error) => void }) {
     }
   }
   return <button className="btn small" onClick={enable}>Enable notifications</button>
+}
+
+// iPhone keyboards cover the page instead of resizing it; size the app to what's actually visible so the
+// reply box and Jarvis's input sit just above the keyboard, and keep the page from scrolling under it.
+if (window.visualViewport) {
+  const fit = () => {
+    document.documentElement.style.setProperty('--vvh', `${window.visualViewport!.height}px`)
+    if (window.scrollY) window.scrollTo(0, 0)
+  }
+  window.visualViewport.addEventListener('resize', fit)
+  window.visualViewport.addEventListener('scroll', fit)
+  fit()
 }
 
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {})

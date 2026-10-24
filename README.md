@@ -46,6 +46,7 @@ when present, so Linux works too; it just doesn't block sleep.
 | `fleet json` | The agent list as JSON (what the dashboard reads) |
 | `fleet dash` | Open the dashboard |
 | `fleet hooks install` / `uninstall` | Add or remove the Claude Code hooks that report status to the dashboard |
+| `fleet tts install` | A natural voice for Jarvis (Kokoro, runs on this Mac, ~350 MB in `~/.fleet/tts`) |
 | `fleet resume [NAME]` | Reattach (no name: the only session, or a list) |
 | `fleet peek NAME` | Print the last 40 lines of NAME's screen without attaching |
 | `fleet` | Agents you started, what they're doing, and any waiters |
@@ -129,8 +130,10 @@ folders.
 - **Weekly cost cap.** Jarvis's share of your weekly Claude limit is shown in the panel, with a
   warning at 5% and a stop at 10% (`jarvis_warn_pct` / `jarvis_max_pct` in `~/.fleet/config.json`).
   The share is computed from what every Claude session cost this week.
-- **British voice** where the device has one (Daniel on Apple devices); pick another in the ⚙
-  settings.
+- **Natural voice:** `fleet tts install` adds Kokoro, an open-weight voice model that runs on your
+  Mac. Audio is made there and played on whichever device you're using. Pick a voice (British
+  George, Fable, Daniel, Lewis, and more) under Settings → Jarvis's voice. Mac voices and the
+  device's own voice are there too.
 - It answers out loud and can speak alerts when agents need you (a setting, off by default).
 - Voice input uses the browser's speech recognition, and you can always type instead.
 

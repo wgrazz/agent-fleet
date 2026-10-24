@@ -5,11 +5,11 @@
 import { execFile } from 'node:child_process'
 import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
-import { db, FLEET_DIR } from './store.ts'
+import { config, db, FLEET_DIR } from './store.ts'
 
 const AI_DIR = join(FLEET_DIR, 'ai')
 mkdirSync(AI_DIR, { recursive: true })
-export const AI_MODEL = process.env.FLEET_AI_MODEL ?? 'sonnet'
+export const aiModel = () => process.env.FLEET_AI_MODEL ?? config.ai_model ?? 'sonnet'
 
 type Schema = Record<string, unknown>
 type AskOpts = { tools?: string[]; timeoutMs?: number; cwd?: string; feature?: string; resume?: string; persist?: boolean }
@@ -17,7 +17,7 @@ export type Answer<T> = { value: T; session_id: string; cost: number }
 
 export function askFull<T>(task: string, system: string, schema: Schema, opts: AskOpts = {}): Promise<Answer<T>> {
   const tools = opts.tools ?? []
-  const args = ['-p', '--model', AI_MODEL, '--output-format', 'json', '--strict-mcp-config', '--setting-sources', 'project',
+  const args = ['-p', '--model', aiModel(), '--output-format', 'json', '--strict-mcp-config', '--setting-sources', 'project',
     '--tools', tools.join(','), ...(tools.length ? ['--allowedTools', ...tools] : []),
     ...(opts.persist ? [] : ['--no-session-persistence']), ...(opts.resume ? ['--resume', opts.resume] : []),
     '--system-prompt', system, '--json-schema', JSON.stringify(schema), '--', task]

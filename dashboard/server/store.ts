@@ -10,7 +10,10 @@ export const FLEET_DIR = process.env.FLEET_DIR ?? join(homedir(), '.fleet')
 export const FLEET_BIN = process.env.FLEET_BIN ?? join(REPO, 'fleet')
 mkdirSync(FLEET_DIR, { recursive: true, mode: 0o700 })
 
-export type Config = { port: number; key: string; cwd?: string; jarvis_warn_pct?: number; jarvis_max_pct?: number }
+export type Config = {
+  port: number; key: string; cwd?: string; jarvis_warn_pct?: number; jarvis_max_pct?: number
+  ai_model?: string; voice_engine?: 'kokoro' | 'mac' | 'device'; voice?: string; voice_speed?: number
+}
 
 // Same format and creation rule as config() in the fleet CLI: whoever runs first writes it, readable only by you.
 export function readSecret<T>(file: string, make: () => T): T {
@@ -26,6 +29,12 @@ export function readSecret<T>(file: string, make: () => T): T {
 }
 
 export const config = readSecret<Config>('config.json', () => ({ port: 7878, key: randomBytes(24).toString('hex') }))
+
+/** Save changed settings; the port and key never change from here. */
+export function saveConfig(patch: Partial<Config>) {
+  Object.assign(config, patch)
+  writeFileSync(join(FLEET_DIR, 'config.json'), JSON.stringify(config, null, 2), { mode: 0o600 })
+}
 
 export const db = new DatabaseSync(join(FLEET_DIR, 'fleet.db'))
 db.exec('PRAGMA journal_mode=WAL')

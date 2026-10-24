@@ -29,6 +29,7 @@ DASHBOARD
   fleet dash update      after changing the dashboard's code: rebuild the page and restart the server
   fleet dash uninstall   stop it and remove it from login items
   fleet hooks install    let Claude Code report its status to the dashboard instantly (uninstall to undo)
+  fleet tts install      a natural voice for Jarvis (Kokoro, runs on this Mac, ~350 MB)
 
 STOP
   fleet kill PID|NAME    stop one agent or waiter (by PID) or a whole session (by NAME)
@@ -832,6 +833,22 @@ def dash_update():
     print('Updated and restarted. On your phone, swipe Fleet away and reopen it.')
 
 
+def tts_install():
+    """Natural voice for Jarvis: Kokoro (open-weight, Apache-2.0) in its own Python env under ~/.fleet/tts (~350 MB)."""
+    d = f'{FLEET_DIR}/tts'
+    os.makedirs(d, exist_ok=True)
+    uv = shutil.which('uv') or sys.exit('Needs uv (brew install uv).')
+    if not os.path.exists(f'{d}/venv/bin/python'):
+        subprocess.run([uv, 'venv', '-q', '--python', '3.12', f'{d}/venv'], check=True)
+    subprocess.run([uv, 'pip', 'install', '-q', 'kokoro-onnx', 'soundfile'], check=True, env={**os.environ, 'VIRTUAL_ENV': f'{d}/venv'})
+    base = 'https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0'
+    for f in ('kokoro-v1.0.onnx', 'voices-v1.0.bin'):
+        if not os.path.exists(f'{d}/{f}') or os.path.getsize(f'{d}/{f}') < 1_000_000:
+            print(f'Downloading {f}…')
+            urllib.request.urlretrieve(f'{base}/{f}', f'{d}/{f}')
+    print('Natural voice installed. Pick a voice in the dashboard: Settings → Jarvis voice.')
+
+
 def dash_uninstall():
     subprocess.run(['launchctl', 'bootout', f'gui/{os.getuid()}/{LABEL}'], capture_output=True)
     if os.path.exists(PLIST):
@@ -986,6 +1003,8 @@ def main(args):
         return dash_install(local='--local' in rest)
     if cmd == 'dash' and rest == ['update']:
         return dash_update()
+    if cmd == 'tts' and rest == ['install']:
+        return tts_install()
     if cmd == 'dash' and rest == ['uninstall']:
         return dash_uninstall()
     if cmd in ('resume', 'attach', 'a') and not rest:

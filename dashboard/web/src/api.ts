@@ -91,3 +91,7 @@ export const remember = {
 }
 
 export type AiBudget = { weekly_pct: number | null; jarvis_pct: number; ai_pct: number; jarvis_usd: number; ai_usd: number; claude_usd: number; warn_pct: number; max_pct: number; since: number }
+export type Settings = {
+  cwd: string; ai_model: string; jarvis_warn_pct: number; jarvis_max_pct: number
+  voice_engine: 'kokoro' | 'mac' | 'device'; voice: string; voice_speed: number; kokoro: boolean
+}
