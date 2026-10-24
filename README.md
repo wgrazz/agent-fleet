@@ -79,8 +79,13 @@ sessions, folders and ideas live in `~/.fleet/` (readable only by you). None of 
 - A live **Screen**, a readable **Chat** (Claude and Codex, read from their own logs), and
   **Changes**: git files, commits and push state in the agent's repos.
 - One-tap answers to menus, a reply box, and a full terminal.
-- **Hold** (phone) or **right-click** (Mac) an agent for rename, move to folder, pause, terminal
-  and kill.
+- **Hold** (phone) or **right-click** (Mac) an agent for rename, move to folder, pause, **pause
+  until** a time (it comes back on its own), terminal and kill.
+- **Outside Fleet:** agents running in plain terminal windows are listed in their own section.
+  **Add to Fleet** (or `fleet adopt PID`) stops one and continues the same conversation inside
+  Fleet.
+- While an agent works, the chat shows what it's doing and a **Live** view of its screen. The
+  **Mode** button sends Shift+Tab.
 - **Folders**: you make them, then drag agents in or use the menu. A folder follows the
   conversation, so it survives renames and pause/resume. Past conversations can be filed too.
 
@@ -116,11 +121,37 @@ folders.
 - Copilot: from the plan counter it prints.
 - Cursor and Antigravity don't expose theirs.
 
-**Jarvis.** The mic in the sidebar, the middle of the phone tab bar, or `J`.
-- Ask "what needs me?", "tell walmart-fix yes", "pause the UI agents", "start a Claude agent
-  to …", "idea: …", or a general question; it can search the web.
+**Jarvis.** The mic in the sidebar, the middle of the phone tab bar, or `J`. Type or talk.
+- **Instant, no AI:** "what needs me?", "tell walmart yes", "pause walmart until 18:30",
+  "idea: …", "remember …".
+- **Everything else goes to Claude as your project agent.** It reads the project and the web,
+  keeps one conversation a day, and keeps lasting notes in `~/.fleet/jarvis-memory.md`.
+- **Weekly cost cap.** Jarvis's share of your weekly Claude limit is shown in the panel, with a
+  warning at 5% and a stop at 10% (`jarvis_warn_pct` / `jarvis_max_pct` in `~/.fleet/config.json`).
+  The share is computed from what every Claude session cost this week.
+- **British voice** where the device has one (Daniel on Apple devices); pick another in the ⚙
+  settings.
 - It answers out loud and can speak alerts when agents need you (a setting, off by default).
 - Voice input uses the browser's speech recognition, and you can always type instead.
+
+**Jarvis outside the dashboard.** `fleet ask "what needs me?"` talks to the same Jarvis, with the
+same memory, cost cap and actions, from any terminal or script. That makes it easy to connect to:
+
+- **Siri, hands-free on the iPhone.** In Shortcuts, make a shortcut named "Jarvis":
+  1. **Dictate Text.**
+  2. **Get Contents of URL:**
+     - URL: `https://<your-mac>.<tailnet>.ts.net/api/jarvis`
+     - Method: POST
+     - Header: `X-Fleet-Key: <your key>`
+     - JSON body: `text` = Dictated Text
+  3. **Get Dictionary Value** `say`.
+  4. **Speak Text.**
+
+  Then say "Hey Siri, Jarvis". Tailscale must be on.
+- **[Atticus](https://github.com/SaarthurR/atticus-mac).** A free Mac voice assistant on your
+  Claude plan, with a Mac-wide ⌃⌥Space hotkey and on-device speech. After installing it, tell it:
+  *"Remember: for anything about my coding agents, my ideas or Fleet, run `fleet ask` with what I
+  said, and read me the answer."*
 
 **Keys:**
 
