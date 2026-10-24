@@ -121,10 +121,13 @@ export function useHold(onHold: (x: number, y: number) => void) {
 
 export function MenuHost() {
   const [stack, setStack] = useState<MenuState[]>([])
+  const openedAt = useRef(0)
   useEffect(() => {
-    showMenu = m => setStack(m ? [m] : [])
+    showMenu = m => { openedAt.current = Date.now(); setStack(m ? [m] : []) }
     return () => { showMenu = () => {} }
   }, [])
+  // lifting the finger after a long press sends a tap that lands on the backdrop; don't let it close the menu
+  const dismiss = (e: React.SyntheticEvent) => { if (e.target === e.currentTarget && Date.now() - openedAt.current > 600) setStack([]) }
   const top = stack.at(-1)
   useEffect(() => {
     if (!top) return
@@ -136,7 +139,7 @@ export function MenuHost() {
   const phone = isPhone()
   const style = phone ? {} : { left: Math.min(top.x, innerWidth - 240), top: Math.min(top.y, innerHeight - 40 - top.items.length * 34) }
   return (
-    <div className="menu-overlay" onMouseDown={e => e.target === e.currentTarget && setStack([])} onTouchEnd={e => e.target === e.currentTarget && setStack([])}>
+    <div className="menu-overlay" onMouseDown={dismiss} onTouchEnd={dismiss}>
       <div className={`menu ctx ${phone ? 'sheet' : ''}`} role="menu" style={style}>
         {(top.title || stack.length > 1) && (
           <div className="menu-title">
