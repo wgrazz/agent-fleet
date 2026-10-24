@@ -853,11 +853,13 @@ def dash_app():
 # which asks you first for events, reminders and email drafts. First use of each asks macOS permission on the Mac.
 
 KIT = f'{FLEET_DIR}/bin/fleetkit'
+# Jarvis runs lookups mid-conversation: an unanswered permission prompt shouldn't hold it for 20 s
+PROMPT_WAIT = 4 if os.environ.get('FLEET_NO_WAIT') else 20
 
 
-def osa(script, timeout=20):
+def osa(script, timeout=None):
     try:
-        r = subprocess.run(['osascript', '-e', script], capture_output=True, text=True, timeout=timeout)
+        r = subprocess.run(['osascript', '-e', script], capture_output=True, text=True, timeout=timeout or PROMPT_WAIT)
     except subprocess.TimeoutExpired:
         sys.exit('macOS is waiting for permission: check your Mac for an "allow access" prompt.')
     if r.returncode:
@@ -868,11 +870,11 @@ def osa(script, timeout=20):
     return r.stdout.strip()
 
 
-def kit(*args, timeout=25):
+def kit(*args, timeout=None):
     if not os.path.exists(KIT):
         mac_setup(quiet=True)
     try:
-        r = subprocess.run([KIT, *args], capture_output=True, text=True, timeout=timeout)
+        r = subprocess.run([KIT, *args], capture_output=True, text=True, timeout=timeout or PROMPT_WAIT + 2)
     except subprocess.TimeoutExpired:
         sys.exit('macOS is waiting for permission: check your Mac for a Calendars or Reminders prompt.')
     data = json.loads(r.stdout or '{}')

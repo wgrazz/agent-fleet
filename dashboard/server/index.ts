@@ -130,7 +130,7 @@ function usageText(u: Awaited<ReturnType<typeof usage>>) {
 }
 
 function jarvisContext() {
-  const agents = list().map(a => `- ${a.name} (${a.tool}, ${a.status.replace('_', ' ')})${a.message ? `: asking "${a.message}"` : a.task ? `: ${a.task.replace(/^\[[a-z]+\]\s*/, '')}` : ''}${a.quick_replies.length ? ` options: ${a.quick_replies.map(q => `${q.key}=${q.label}`).join(', ')}` : ''}${a.controllable ? '' : ' (read-only)'}`)
+  const agents = list().map(a => `- ${a.name} (${a.tool}, ${a.status === 'waiting' ? 'turn done, waiting on its own background job, not on you' : a.status.replace('_', ' ')})${a.message ? `: asking "${a.message}"` : a.task ? `: ${a.task.replace(/^\[[a-z]+\]\s*/, '')}` : ''}${a.quick_replies.length ? ` options: ${a.quick_replies.map(q => `${q.key}=${q.label}`).join(', ')}` : ''}${a.controllable ? '' : ' (read-only)'}`)
   const lists = ideas.lists().map(l => `${l.name} (${l.open} open)`).join(', ')
   return `Agents:\n${agents.join('\n') || '- none running'}\nIdea lists: ${lists}\nTime: ${new Date().toLocaleString()}`
 }

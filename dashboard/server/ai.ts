@@ -23,7 +23,8 @@ export function askFull<T>(task: string, system: string, schema: Schema, opts: A
     ...(opts.persist ? [] : ['--no-session-persistence']), ...(opts.resume ? ['--resume', opts.resume] : []),
     '--system-prompt', system, '--json-schema', JSON.stringify(schema), '--', task]
   return new Promise((resolve, reject) => {
-    execFile('claude', args, { cwd: opts.cwd ?? AI_DIR, timeout: opts.timeoutMs ?? 120_000, maxBuffer: 16 << 20 }, (err, stdout) => {
+    // FLEET_NO_WAIT: a `fleet mac` lookup Claude runs gives up fast on a permission prompt nobody has answered yet
+    const child = execFile('claude', args, { cwd: opts.cwd ?? AI_DIR, timeout: opts.timeoutMs ?? 120_000, maxBuffer: 16 << 20, env: { ...process.env, FLEET_NO_WAIT: '1' } }, (err, stdout) => {
       if (err && !stdout) return reject(new Error(err.killed ? 'Claude took too long' : `claude failed: ${err.message.split('\n')[0]}`))
       try {
         const out = JSON.parse(stdout)
@@ -37,6 +38,7 @@ export function askFull<T>(task: string, system: string, schema: Schema, opts: A
         reject(new Error('could not read Claude’s answer'))
       }
     })
+    child.stdin?.end() // left open, `claude -p` waits 3 s for piped input on every call
   })
 }
 

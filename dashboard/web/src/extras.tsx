@@ -193,6 +193,7 @@ type Line = { who: 'you' | 'bot'; text: string; meta?: { done?: string[]; mode?:
 type Thread = { id: number; title: string; updated_at: number; count?: number }
 
 const IDLE_MS = 2 * 3600 * 1000
+const HOLD_LINES = ['One moment.', 'Let me check.', 'Just a second.', 'Looking into it.']
 type VoiceState = 'off' | 'listening' | 'thinking' | 'speaking' | 'tap'
 
 export function Jarvis({ onClose, onChanged, asPage, autoTalk }: { onClose: () => void; onChanged: () => void; asPage?: boolean; autoTalk?: boolean }) {
@@ -334,7 +335,10 @@ export function Jarvis({ onClose, onChanged, asPage, autoTalk }: { onClose: () =
     talked.current = true
     if (/^(stop|that'?s all|that is all|goodbye|bye|thanks jarvis|end( conversation)?)[.!]*$/i.test(said)) return endVoice()
     setVoice('thinking')
+    // a lookup can take a while: say so, like a person would, instead of going quiet
+    const hold = mutedRef.current ? 0 : window.setTimeout(() => { if (voiceNow() === 'thinking') speak(HOLD_LINES[Math.floor(Math.random() * HOLD_LINES.length)]) }, 2500)
     const reply = await ask(said)
+    clearTimeout(hold)
     if (voiceNow() === 'off') return
     if (!mutedRef.current) {
       setVoice('speaking')
