@@ -153,7 +153,7 @@ export function Jarvis({ onClose, onChanged }: { onClose: () => void; onChanged:
   const loadBudget = () => api.get<{ budget: AiBudget }>('/api/jarvis/status').then(r => setBudget(r.budget)).catch(() => {})
   useEffect(() => { loadBudget() }, [])
   useEffect(() => { box.current?.scrollTo(0, box.current.scrollHeight) }, [log, thinking])
-  useEffect(() => () => rec.current?.abort?.(), [])
+  useEffect(() => () => { try { rec.current?.abort() } catch {} }, [])
   useEffect(() => {
     if (!('speechSynthesis' in window)) return
     const on = () => { setVoiceList(voices()); setVoice(pickVoice()?.name ?? '') }
@@ -179,8 +179,13 @@ export function Jarvis({ onClose, onChanged }: { onClose: () => void; onChanged:
 
   const listen = () => {
     if (!Recognition) return
-    speechSynthesis?.cancel()
-    const r = new Recognition()
+    window.speechSynthesis?.cancel()
+    let r: any
+    try {
+      r = new Recognition()
+    } catch {
+      return setLog(l => [...l, { who: 'jarvis', text: "Voice input isn't available here. Use the keyboard's mic key to dictate instead." }])
+    }
     r.lang = navigator.language || 'en-US'
     r.interimResults = true
     r.continuous = false
@@ -191,15 +196,31 @@ export function Jarvis({ onClose, onChanged }: { onClose: () => void; onChanged:
       setDraft(text)
       if (e.results[e.results.length - 1].isFinal) final = text
     }
-    r.onend = () => { setListening(false); if (final) { setDraft(''); ask(final) } }
-    r.onerror = () => setListening(false)
+    r.onend = () => { clearTimeout(guard); setListening(false); if (final) { setDraft(''); ask(final) } }
+    r.onerror = (e: any) => {
+      clearTimeout(guard)
+      setListening(false)
+      if (e?.error === 'not-allowed' || e?.error === 'service-not-allowed')
+        setLog(l => [...l, { who: 'jarvis', text: "I can't use the microphone here. Allow it in Settings, or use the keyboard's mic key to dictate." }])
+    }
+    // if the browser never reports back, don't stay stuck "listening"
+    const guard = setTimeout(() => { try { r.abort() } catch {} ; setListening(false) }, 15000)
     rec.current = r
     setListening(true)
-    r.start()
+    try {
+      r.start()
+    } catch {
+      clearTimeout(guard)
+      setListening(false)
+    }
   }
+  const stop = () => { try { rec.current?.stop() } catch {} ; setListening(false) }
+  const close = () => { try { rec.current?.abort() } catch {} ; window.speechSynthesis?.cancel(); onClose() }
 
   const pct = budget ? budget.jarvis_pct : 0
   return (
+    <>
+    <div className="jarvis-backdrop" onClick={close} />
     <div className="jarvis" role="dialog" aria-label="Jarvis">
       <div className="jarvis-h">
         <b>Jarvis</b>
@@ -210,7 +231,7 @@ export function Jarvis({ onClose, onChanged }: { onClose: () => void; onChanged:
           </span>
         )}
         <button className="x small" onClick={() => setSettings(!settings)} aria-label="Jarvis settings">⚙</button>
-        <button className="x" onClick={onClose} aria-label="Close">×</button>
+        <button className="jarvis-done" onClick={close}>Done</button>
       </div>
       {settings && (
         <div className="jarvis-settings">
@@ -237,9 +258,11 @@ export function Jarvis({ onClose, onChanged }: { onClose: () => void; onChanged:
         {thinking && <div className="said jarvis dim"><span className="dots"><i /><i /><i /></span></div>}
       </div>
       <form className="jarvis-in" onSubmit={e => { e.preventDefault(); const t = draft; setDraft(''); ask(t) }}>
-        {Recognition && <button type="button" className={`mic ${listening ? 'on' : ''}`} onClick={() => (listening ? rec.current?.stop() : listen())} aria-label={listening ? 'Stop listening' : 'Talk'}><MicIcon /></button>}
+        {Recognition && <button type="button" className={`mic ${listening ? 'on' : ''}`} onClick={() => (listening ? stop() : listen())} aria-label={listening ? 'Stop listening' : 'Talk'}><MicIcon /></button>}
         <input value={draft} onChange={e => setDraft(e.target.value)} placeholder={listening ? 'Listening…' : 'Ask Jarvis anything'} enterKeyHint="send" />
       </form>
+      {listening && <button className="listening-bar" onClick={stop}>Listening… tap to stop</button>}
     </div>
+    </>
   )
 }

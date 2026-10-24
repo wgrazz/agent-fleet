@@ -326,7 +326,7 @@ function App() {
       <nav className="tabs" aria-label="Sections">
         <a href={lastListRoute.current.startsWith('#/folder') ? lastListRoute.current : '#/'} className={tab === 'agents' ? 'on' : ''}>Agents{needs > 0 && <span className="badge">{needs}</span>}</a>
         <a href={`#/ideas/${enc(remember.get('lastList') || 'Brain Dump')}`} className={tab === 'ideas' ? 'on' : ''}>Ideas{(brainDump?.unsorted ?? 0) > 0 && <span className="badge gray">{brainDump!.unsorted}</span>}</a>
-        <button className="tab-mic" onClick={() => setJarvisOpen(true)} aria-label="Jarvis"><MicIcon /></button>
+        <button className="tab-mic" onClick={() => setJarvisOpen(o => !o)} aria-label="Jarvis"><MicIcon /></button>
         <a href="#/history" className={tab === 'history' ? 'on' : ''}>History</a>
         <a href="#/more" className={tab === 'more' ? 'on' : ''}>More</a>
       </nav>

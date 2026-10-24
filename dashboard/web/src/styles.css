@@ -440,3 +440,15 @@ details.ai-note { display: block; }
 .peek pre { margin: 0; font: 11.5px/1.45 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 7.5em; overflow: hidden; }
 .peek.open pre { max-height: 30em; overflow-y: auto; }
 .peek-label { position: absolute; top: 6px; right: 9px; font: 600 10px var(--font); color: var(--work); letter-spacing: .04em; text-transform: uppercase; }
+
+/* Jarvis: desktop floats beside the sidebar; phone is a bottom sheet that never sits under the status bar */
+.jarvis-backdrop { display: none; }
+.jarvis-done { font-weight: 600; color: var(--accent); padding: 4px 6px; border-radius: 6px; }
+.listening-bar { margin: 0 10px 10px; padding: 10px; border-radius: 10px; background: var(--dead); color: #fff; font-weight: 600; }
+@media (max-width: 700px) {
+  .jarvis-backdrop { display: block; position: fixed; inset: 0; z-index: 54; background: rgba(0,0,0,.3); }
+  .jarvis { top: auto; left: 0; right: 0; bottom: 0; width: auto; height: min(78vh, calc(100dvh - env(safe-area-inset-top) - 24px));
+    border-radius: 16px 16px 0 0; padding-bottom: env(safe-area-inset-bottom); }
+  .jarvis-h { padding: 12px 14px; }
+  .jarvis-done { font-size: 16px; padding: 6px 8px; }
+}
