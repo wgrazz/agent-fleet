@@ -20,7 +20,7 @@ export type Agent = {
   working_line: string
 }
 export type Placed = { key: string; folder_id: number | null }
-export type LiveAgent = Agent & Placed
+export type LiveAgent = Agent & Placed & { queued: { id: number; text: string }[] }
 export type Folder = { id: number; name: string; color: string; position: number }
 export type List = { id: number; name: string; color: string; position: number; archived: number; open: number; done: number; unsorted: number }
 export type Idea = {

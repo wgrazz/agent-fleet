@@ -5,10 +5,13 @@ import { ScreenView } from './terminal.tsx'
 
 // ---------- list ----------
 
-export function AgentList({ agents, selected, header, past, onMenu, empty }: {
+export function AgentList({ agents, selected, header, past, onMenu, empty, paused }: {
   agents: LiveAgent[]; selected: string; header: ReactNode; past?: Conversation[]; empty?: ReactNode
   onMenu: (a: LiveAgent, x: number, y: number) => void
+  paused?: { items: Paused[]; onResume: (p: Paused) => void; onForget: (p: Paused) => void }
 }) {
+  const [showPaused, setShowPaused] = useState(remember.get('list.paused') !== 'hide')
+  const togglePaused = () => { setShowPaused(!showPaused); remember.set('list.paused', showPaused ? 'hide' : '') }
   return (
     <section className="list">
       {header}
@@ -23,6 +26,14 @@ export function AgentList({ agents, selected, header, past, onMenu, empty }: {
             </div>
           )
         })}
+        {paused && paused.items.length > 0 && (
+          <div>
+            <button className="grp grp-toggle" onClick={togglePaused} aria-expanded={showPaused}>
+              Paused · {paused.items.length}<span className="grp-hint">{showPaused ? '▾' : '▸'}</span>
+            </button>
+            {showPaused && paused.items.map(p => <PausedRow key={p.id} p={p} onResume={paused.onResume} onForget={paused.onForget} />)}
+          </div>
+        )}
         {agents.some(a => !a.controllable) && (
           <div className="outside">
             <div className="grp">Outside Fleet<span className="grp-hint">plain terminal windows · hold one to add it</span></div>
@@ -77,21 +88,25 @@ export function PausedList({ items, header, onResume, onForget }: {
     <section className="list">
       {header}
       <div className="scroll">
-        {items.map(p => (
-          <div className="it paused" key={p.id}>
-            <Avatar tool={p.tool} />
-            <span className="nm">{p.name}</span>
-            <span className="tm">{new Date(p.paused_at * 1000).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}</span>
-            <span className="pv">{p.resume_at ? `Back ${new Date(p.resume_at * 1000).toLocaleString([], { weekday: 'short', hour: 'numeric', minute: '2-digit' })}` : p.cwd.split('/').slice(-2).join('/')}</span>
-            <span className="row-actions">
-              <button className="btn small primary" onClick={() => onResume(p)}>Resume</button>
-              <button className="btn small" onClick={() => onForget(p)}>Forget</button>
-            </span>
-          </div>
-        ))}
+        {items.map(p => <PausedRow key={p.id} p={p} onResume={onResume} onForget={onForget} />)}
         {!items.length && <div className="empty">Nothing paused. Pause an agent to park it here with its conversation.</div>}
       </div>
     </section>
+  )
+}
+
+function PausedRow({ p, onResume, onForget }: { p: Paused; onResume: (p: Paused) => void; onForget: (p: Paused) => void }) {
+  return (
+    <div className="it paused">
+      <Avatar tool={p.tool} />
+      <span className="nm">{p.name}</span>
+      <span className="tm">{new Date(p.paused_at * 1000).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}</span>
+      <span className="pv">{p.resume_at ? `Back ${new Date(p.resume_at * 1000).toLocaleString([], { weekday: 'short', hour: 'numeric', minute: '2-digit' })}` : p.cwd.split('/').slice(-2).join('/')}</span>
+      <span className="row-actions">
+        <button className="btn small primary" onClick={() => onResume(p)}>Resume</button>
+        <button className="btn small" onClick={() => onForget(p)}>Forget</button>
+      </span>
+    </div>
   )
 }
 
@@ -177,14 +192,34 @@ function Composer({ agent, send }: { agent: LiveAgent; send: (body: { text?: str
   const replies = agent.quick_replies
   const nav = agent.status === 'needs_you' && !replies.length
   const keep = (t: string) => { setText(t); remember.set(`draft.${agent.name}`, t) }
+  // while it's busy, a reply waits its turn instead of landing mid-task; it goes out when the agent finishes
+  const busy = agent.status === 'working'
+  const [queuing, setQueuing] = useState<string[]>([]) // shown until the next poll lists them
+  useEffect(() => setQueuing([]), [agent.queued.length])
   const submit = () => {
     if (!text.trim()) return
     const t = text
     keep('')
-    send({ text: t }).catch(() => keep(t))
+    if (busy || agent.queued.length) {
+      setQueuing(q => [...q, t])
+      api.post(`/api/agents/${encodeURIComponent(agent.name)}/queue`, { text: t }).catch(() => { keep(t); setQueuing(q => q.filter(x => x !== t)) })
+    } else send({ text: t }).catch(() => keep(t))
   }
   return (
     <div className="comp">
+      {(agent.queued.length > 0 || queuing.length > 0) && (
+        <div className="queued">
+          <div className="queued-h">Queued · sends when {agent.name} finishes</div>
+          {agent.queued.map(q => (
+            <div className="queued-it" key={q.id}>
+              <span className="queued-text">{q.text}</span>
+              <button className="btn small" onClick={() => api.post(`/api/queued/${q.id}/send`).catch(() => {})} title="Send it now, while it works">Send now</button>
+              <button className="x" onClick={() => api.del(`/api/queued/${q.id}`).catch(() => {})} aria-label="Remove from queue">×</button>
+            </div>
+          ))}
+          {queuing.map((t, i) => <div className="queued-it pending" key={`p${i}`}><span className="queued-text">{t}</span></div>)}
+        </div>
+      )}
       <div className="qr">
         {replies.map(q => (
           <button key={q.key} className="q" onClick={() => send({ key: q.key })}><kbd>{q.key}</kbd>{q.label}</button>
@@ -200,7 +235,7 @@ function Composer({ agent, send }: { agent: LiveAgent; send: (body: { text?: str
         )}
       </div>
       <div className="row">
-        <textarea id="composer" rows={1} value={text} placeholder={`Reply to ${agent.name}…`} enterKeyHint="send"
+        <textarea id="composer" rows={1} value={text} placeholder={busy ? `Queue a message for when ${agent.name} finishes…` : `Reply to ${agent.name}…`} enterKeyHint={busy ? 'done' : 'send'}
           onChange={e => keep(e.target.value)}
           onKeyDown={e => {
             if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing && !isPhone()) {
@@ -209,11 +244,13 @@ function Composer({ agent, send }: { agent: LiveAgent; send: (body: { text?: str
             }
             if (e.key === 'Escape') e.currentTarget.blur()
           }} />
-        <button className="send" onClick={submit} aria-label="Send" disabled={!text.trim()}><SendIcon /></button>
+        <button className={`send ${busy ? 'queue' : ''}`} onClick={submit} aria-label={busy ? 'Queue' : 'Send'} title={busy ? 'Queue: sends when it finishes' : 'Send'} disabled={!text.trim()}>{busy ? <QueueIcon /> : <SendIcon />}</button>
       </div>
     </div>
   )
 }
+
+const QueueIcon = () => <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden><circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="1.6" fill="none" /><path d="M8 4.8V8l2.2 1.5" stroke="currentColor" strokeWidth="1.6" fill="none" strokeLinecap="round" /></svg>
 
 // ---------- chat ----------
 

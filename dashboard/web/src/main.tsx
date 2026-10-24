@@ -294,11 +294,12 @@ function App() {
       onChange={() => { ideas.refresh(); lists.refresh() }} onError={fail} onSort={runSort} onMenu={ideaMenu}
       onHeaderMenu={(x, y) => listMenu(listShown, x, y)} />
   } else if (middleView.view === 'more') {
-    middle = <MorePane usage={usage.data ?? []} push={push} paused={paused.data?.length ?? 0} />
+    middle = <MorePane usage={usage.data ?? []} push={push} />
   } else {
     const fid = middleView.view === 'folder' ? Number(middleView.a) : null
     const folder = folderList.find(f => f.id === fid)
     middle = <AgentList agents={fid !== null ? all.filter(a => a.folder_id === fid) : all} selected={route.a} onMenu={agentMenu}
+      paused={fid === null ? { items: paused.data ?? [], onResume: p => act(api.post(`/api/paused/${p.id}/resume`), () => openAgent(p.name)), onForget: p => act(api.del(`/api/paused/${p.id}`)) } : undefined}
       header={listHeader(folder?.name ?? 'All agents', folder?.color)}
       past={fid !== null ? (history ?? []).filter(c => c.folder_id === fid && !c.running) : undefined}
       empty={fid !== null ? <div className="empty">Nothing in {folder?.name ?? 'this folder'} yet. Drag agents here, or hold one and pick Move to folder.</div> : undefined} />
@@ -311,7 +312,7 @@ function App() {
     detail = <main className="det jarvis-host"><Jarvis asPage autoTalk={route.a === 'talk'} onClose={() => go(lastListRoute.current)} onChanged={refreshAll} /></main>
   } else if (agentFromRoute) {
     detail = <AgentView key={agentFromRoute.name} agent={agentFromRoute} onBack={() => go(lastListRoute.current)} onTerminal={() => setTerminal(agentFromRoute.name)}
-      onPause={() => act(api.post(`/api/agents/${enc(agentFromRoute.name)}/pause`), () => go('#/paused'))}
+      onPause={() => act(api.post(`/api/agents/${enc(agentFromRoute.name)}/pause`), () => go(isPhone() ? '#/' : lastListRoute.current))}
       onMenu={(x, y) => agentMenu(agentFromRoute, x, y)} onAdopt={() => adopt(agentFromRoute)} send={send(agentFromRoute.name)} />
   } else if (route.view === 'idea' && ideaItem) {
     detail = <IdeaDetail key={ideaItem.id} idea={ideaItem} lists={allLists} onBack={() => go(`#/ideas/${enc(ideaItem.list)}`)}
@@ -330,7 +331,7 @@ function App() {
   }
 
   const hasDetail = !!(agentFromRoute || (route.view === 'idea' && ideaItem) || conversation || route.view === 'settings' || route.view === 'jarvis')
-  const tab = ['ideas', 'idea', 'prioritized'].includes(route.view) ? 'ideas' : route.view === 'history' ? 'history' : ['more', 'paused', 'settings'].includes(route.view) ? 'more' : 'agents'
+  const tab = ['ideas', 'idea', 'prioritized'].includes(route.view) ? 'ideas' : route.view === 'history' ? 'history' : ['more', 'settings'].includes(route.view) ? 'more' : 'agents'
   const brainDump = allLists.find(l => l.name === 'Brain Dump')
 
   return (
@@ -371,7 +372,7 @@ function App() {
       }} />}
       {modal?.kind === 'name' && <NameDialog title={modal.title} initial={modal.initial} color={modal.color} action={modal.action} onSubmit={modal.submit} onClose={() => setModal(null)} />}
       {modal?.kind === 'pause' && <PauseUntil name={modal.name} usage={usage.data ?? []} onClose={() => setModal(null)}
-        onPick={until => { const n = modal.name; setModal(null); act(api.post(`/api/agents/${enc(n)}/pause`, { until }), () => go('#/paused')) }} />}
+        onPick={until => { const n = modal.name; setModal(null); act(api.post(`/api/agents/${enc(n)}/pause`, { until }), () => go(isPhone() ? '#/' : lastListRoute.current)) }} />}
       {modal?.kind === 'confirm' && <Confirm title={modal.title} text={modal.text} action={modal.action} onYes={modal.yes} onClose={() => setModal(null)} />}
       {modal?.kind === 'capture' && <QuickCapture lists={allLists} onClose={() => { setModal(null); refreshAll() }} onError={fail} />}
       {modal?.kind === 'import' && <ImportNotes onClose={() => setModal(null)} onDone={refreshAll} />}
@@ -425,13 +426,12 @@ function IdeasListPicker({ lists, current, onNew }: { lists: List[]; current: st
   )
 }
 
-function MorePane({ usage, push, paused }: { usage: Usage[]; push: React.ReactNode; paused: number }) {
+function MorePane({ usage, push }: { usage: Usage[]; push: React.ReactNode }) {
   return (
     <section className="list more">
       <div className="lh"><h4>More</h4></div>
       <div className="scroll">
         <a className="it plain" href="#/settings"><span className="nm">Settings</span><span className="tm">Voice, budget, defaults ›</span></a>
-        <a className="it plain" href="#/paused"><span className="nm">Paused agents</span><span className="tm">{paused || ''}</span></a>
         <div className="grp">Usage</div>
         <UsageMeters usage={usage} />
         <div className="grp">Notifications</div>

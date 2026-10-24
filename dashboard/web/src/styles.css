@@ -559,3 +559,12 @@ details.ai-note { display: block; }
 .ptr.ready { color: var(--accent); }
 .ptr .spin { animation: spin .8s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
+
+/* messages queued for when a busy agent finishes */
+.queued { border: 1px solid var(--line); border-radius: 10px; padding: 6px 8px; margin-bottom: 8px; display: flex; flex-direction: column; gap: 4px; background: var(--panel); }
+.queued-h { font-size: 11px; font-weight: 600; color: var(--faint); }
+.queued-it { display: flex; align-items: center; gap: 6px; }
+.queued-it.pending { opacity: .6; }
+.queued-text { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.queued .x { padding: 2px 8px; color: var(--faint); font-size: 16px; }
+.grp-toggle { display: flex; width: 100%; text-align: left; }

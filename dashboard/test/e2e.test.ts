@@ -67,6 +67,21 @@ describe('fake agent through the API', () => {
     expect(res.data.error).toMatch(/no resumable session id/)
   })
 
+  it('holds a queued message until the agent is free; send now and remove work', async () => {
+    // the fake agent always shows a menu (needs_you), so a queued message has to wait
+    expect((await api('POST', `/api/agents/${name}/queue`, { text: 'hello later' })).status).toBe(200)
+    await new Promise(r => setTimeout(r, 2500))
+    const [q] = (await agent()).queued
+    expect(q.text).toBe('hello later')
+    expect(screen()).not.toContain('got hello later')
+    await api('POST', `/api/queued/${q.id}/send`)
+    expect(await until(screen, s => s.includes('got hello later'))).toContain('got hello later')
+    await api('POST', `/api/agents/${name}/queue`, { text: 'never mind' })
+    const [r] = (await agent()).queued
+    await api('DELETE', `/api/queued/${r.id}`)
+    expect((await agent()).queued).toEqual([])
+  })
+
   it('reports a crash with its exit code', async () => {
     await api('POST', `/api/agents/${name}/send`, { text: 'crash' })
     const a = await until(agent, a => a?.status === 'crashed')

@@ -85,3 +85,11 @@ CREATE TABLE IF NOT EXISTS jarvis_proposals (
   result TEXT,
   created_at INTEGER NOT NULL
 );
+
+-- Messages typed while an agent was busy: sent one at a time, each after the agent finishes its turn.
+CREATE TABLE IF NOT EXISTS queued (
+  id INTEGER PRIMARY KEY,
+  agent TEXT NOT NULL,
+  text TEXT NOT NULL,
+  at INTEGER NOT NULL
+);

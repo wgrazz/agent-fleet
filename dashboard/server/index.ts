@@ -121,8 +121,33 @@ function decoratedAgents() {
       place(`name:${a.name}`, null)
       folder = map.get(`name:${a.name}`)!
     }
-    return { ...a, key: agentKey(a), folder_id: folder }
+    return { ...a, key: agentKey(a), folder_id: folder, queued: queue.filter(q => q.agent === a.name).map(({ id, text }) => ({ id, text })) }
   })
+}
+
+// ---------- queued messages ----------
+// Typed while the agent was busy: each goes out once the agent has finished its turn (and has had a turn since the
+// last queued one went out), instead of interrupting it.
+type Queued = { id: number; agent: string; text: string }
+let queue = db.prepare('SELECT id, agent, text FROM queued ORDER BY id').all() as Queued[]
+const loadQueue = () => { queue = db.prepare('SELECT id, agent, text FROM queued ORDER BY id').all() as Queued[] }
+const sentAt = new Map<string, number>()
+const IDLE = new Set(['done', 'ready', 'waiting'])
+
+async function sendQueued() {
+  for (const a of list()) {
+    const next = queue.find(q => q.agent === a.name)
+    if (!next || !a.controllable || !IDLE.has(a.status)) continue
+    const last = sentAt.get(a.name) ?? 0
+    if (a.status_since < last && Date.now() - last < 20_000) continue // still hasn't picked up the last one
+    db.prepare('DELETE FROM queued WHERE id = ?').run(next.id)
+    loadQueue()
+    sentAt.set(a.name, Date.now())
+    await sendText(a.name, next.text).catch(e => console.error(`couldn't send queued message to ${a.name}:`, (e as Error).message))
+  }
+  // an agent that's gone takes its queue with it
+  const live = new Set(list().map(a => a.name))
+  if (queue.some(q => !live.has(q.agent)) && list().length) { db.prepare(`DELETE FROM queued WHERE agent NOT IN (${[...live].map(() => '?').join(',') || "''"})`).run(...live); loadQueue() }
 }
 
 function usageText(u: Awaited<ReturnType<typeof usage>>) {
@@ -269,6 +294,24 @@ const routes: [string, RegExp, Route][] = [
     if (typeof b.key === 'string') await sendKey(name, b.key).catch(e => { throw new HttpError(400, e.message) })
     else if (typeof b.text === 'string' && b.text.length <= 100_000) await sendText(name, b.text)
     else throw new HttpError(400, 'send {text} or {key}')
+    return { ok: true }
+  }],
+
+  ['POST', /^\/api\/agents\/([^/]+)\/queue$/, async (req, [name]) => {
+    const a = agentOr404(name)
+    const text = (await body(req)).text
+    if (typeof text !== 'string' || !text.trim() || text.length > 100_000) throw new HttpError(400, 'queue {text}')
+    db.prepare('INSERT INTO queued (agent, text, at) VALUES (?, ?, ?)').run(a.name, text, Math.floor(Date.now() / 1000))
+    loadQueue()
+    await sendQueued() // it may already be free
+    return { ok: true }
+  }],
+  ['DELETE', /^\/api\/queued\/(\d+)$/, async (_req, [id]) => { db.prepare('DELETE FROM queued WHERE id = ?').run(int(id)); loadQueue(); return { ok: true } }],
+  ['POST', /^\/api\/queued\/(\d+)\/send$/, async (_req, [id]) => {
+    const q = queue.find(x => x.id === int(id)) ?? (() => { throw new HttpError(404, 'already sent') })()
+    db.prepare('DELETE FROM queued WHERE id = ?').run(q.id)
+    loadQueue()
+    await sendText(q.agent, q.text)
     return { ok: true }
   }],
 
@@ -649,5 +692,6 @@ if (import.meta.main) {
   alerts.on('alert', a => notify(a).catch(e => console.error('notify failed:', e)))
   startPolling()
   setInterval(() => resumeDue().catch(e => console.error('resume check failed:', e)), 30_000)
+  setInterval(() => sendQueued().catch(e => console.error('queue check failed:', e)), 2000)
   server.listen(config.port, '127.0.0.1', () => console.log(`fleet dashboard on http://127.0.0.1:${config.port}`))
 }
