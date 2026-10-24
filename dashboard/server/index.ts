@@ -182,6 +182,17 @@ async function runJarvis(said: string, opts: JarvisOpts = {}) {
     return reply(word === 'yes' ? (pending.length === 1 ? 'Done.' : `Done, all ${pending.length}.`) : 'Cancelled.', { mode: 'instant' })
   }
 
+  // "what should I do next?" / "rank my notes": Claude sets priorities on every open idea
+  if (J.wantsRanking(said)) {
+    const b0 = await budget()
+    if (b0.jarvis_pct >= b0.max_pct && !opts.override)
+      return reply(`That needs Claude, and I'm past the ${b0.max_pct} percent weekly cap. Tap Allow once to go ahead.`, { blocked: said, mode: 'claude' })
+    const r = await ideas.rankAll(jarvisContext())
+    done.push(`ranked: ${r.counts[0]} high, ${r.counts[1]} medium, ${r.counts[2]} low`)
+    const top = r.next.slice(0, 3).map((i, n) => `${n + 1}, ${i.text.replace(/\s+/g, ' ').slice(0, 80)}`).join('; ')
+    return reply(`${r.summary}${top ? ` Next up: ${top}.` : ''}`, { mode: 'claude' })
+  }
+
   // things you said directly ("tell walmart yes") happen right away
   const quick = J.instant(said, list())
   if (quick) {
@@ -258,8 +269,10 @@ const routes: [string, RegExp, Route][] = [
   }],
 
   ['DELETE', /^\/api\/agents\/([^/]+)$/, async (_req, [name]) => {
-    agentOr404(name)
-    await fleet(['kill', name])
+    const outside = list().find(a => a.name === name && !a.controllable && a.pid)
+    // outside Fleet there's no session to close, so stop the process itself (its conversation stays in History)
+    if (outside) await fleet(['kill', String(outside.pid)])
+    else { agentOr404(name); await fleet(['kill', name]) }
     await poll() // so the next list the page sees already reflects this
     return { ok: true }
   }],
@@ -440,10 +453,12 @@ const routes: [string, RegExp, Route][] = [
     return { ok: true }
   }],
   ['GET', /^\/api\/ideas$/, async req => {
-    const listName = new URL(req.url ?? '', 'http://x').searchParams.get('list') ?? undefined
+    const sp = new URL(req.url ?? '', 'http://x').searchParams
     const agents = new Map(list().map(a => [a.name, a.status]))
-    return ideas.ideas(listName).map(i => ({ ...i, agent_status: i.agent ? agents.get(i.agent) ?? 'gone' : null }))
+    const rows = sp.get('priority') ? ideas.prioritized() : ideas.ideas(sp.get('list') ?? undefined)
+    return rows.map(i => ({ ...i, agent_status: i.agent ? agents.get(i.agent) ?? 'gone' : null }))
   }],
+  ['POST', /^\/api\/ideas\/rank$/, async () => ideas.rankAll(jarvisContext())],
   ['POST', /^\/api\/ideas$/, async req => {
     const b = await body(req)
     const text = str(b.text, 10_000).trim()
@@ -459,6 +474,7 @@ const routes: [string, RegExp, Route][] = [
         notes: typeof b.notes === 'string' ? b.notes.slice(0, 50_000) : undefined,
         list: str(b.list, 60).trim() || undefined, done: typeof b.done === 'boolean' ? b.done : undefined,
         repeat: b.repeat === null ? null : str(b.repeat, 20) || undefined, position: typeof b.position === 'number' ? b.position : undefined,
+        priority: typeof b.priority === 'number' ? b.priority : undefined,
         agent: b.agent === null ? null : undefined, clearSuggestion: b.clearSuggestion === true,
       })
     } catch (e) { throw new HttpError(400, (e as Error).message) }

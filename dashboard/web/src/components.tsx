@@ -195,6 +195,7 @@ export function Sidebar(props: {
       ))}
       {!props.folders.length && <button className="ni ghost" onClick={props.onNewFolder}>New folder…</button>}
       <div className="sec">Ideas<button className="sec-add" onClick={props.onNewList} aria-label="New list">+</button></div>
+      <a className={`ni ${props.route === 'prioritized' ? 'on' : ''}`} href="#/prioritized"><span className="prio p3 side">!</span>Prioritized</a>
       {props.lists.map(l => (
         <ListRow key={l.id} l={l} on={props.route === `ideas/${l.name}`} onMenu={(x, y) => props.onListMenu(l, x, y)} />
       ))}

@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
 process.env.FLEET_DIR = mkdtempSync(join(tmpdir(), 'fleet-jarvis-'))
-const { instant, findAgent, summary, remember, memory, approvalWord, threadFor, newThread, addMessage, threads, messages, propose, pendingProposals, settleProposal, summarize } = await import('../server/jarvis.ts')
+const { instant, findAgent, summary, remember, memory, approvalWord, threadFor, newThread, addMessage, threads, messages, propose, pendingProposals, settleProposal, summarize, wantsRanking } = await import('../server/jarvis.ts')
 
 const agent = (name: string, extra: object = {}) => ({
   name, controllable: true, tool: 'claude', pid: 1, cwd: '', task: '', age_s: 1, session_id: '', status: 'working', status_since: 0,
@@ -70,5 +70,12 @@ describe('conversations and approvals', () => {
     for (const y of ['yes', 'Yeah.', 'do it', 'go ahead', 'sure', 'approve it', 'yes please']) expect(approvalWord(y)).toBe('yes')
     for (const n of ['no', 'Nope', 'cancel', 'never mind']) expect(approvalWord(n)).toBe('no')
     expect(approvalWord('yes and also check the logs')).toBeNull()
+  })
+})
+
+describe('ranking requests', () => {
+  it('recognises asking what to do next', () => {
+    for (const q of ['what should I do next?', 'rank my notes', 'prioritize my ideas', 'sort my notes by what is important', "what's most important"]) expect(wantsRanking(q)).toBe(true)
+    for (const q of ['what needs me?', 'idea: rank the retailers', 'tell walmart yes']) expect(wantsRanking(q)).toBe(false)
   })
 })

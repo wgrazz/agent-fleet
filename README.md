@@ -68,6 +68,7 @@ A web page for the same agents, on the Mac and as an iPhone home-screen app over
 fleet dash install       # runs the server at login (launchd) and publishes it to your tailnet
 fleet hooks install      # optional: exact status from Claude Code instead of reading its screen
 fleet dash               # open it on this Mac
+fleet dash app           # open it in Safari, then File → Add to Dock for a Mac app
 fleet dash update        # after changing the dashboard's code: rebuild + restart
 ```
 

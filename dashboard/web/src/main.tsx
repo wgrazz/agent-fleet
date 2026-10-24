@@ -1,22 +1,22 @@
 import { StrictMode, useCallback, useEffect, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
-import { api, remember, Unauthorized, usePoll, type Conversation, type Folder, type Idea, type List, type LiveAgent, type Paused, type Profile, type Usage } from './api.ts'
+import { api, onOffline, remember, Unauthorized, usePoll, type Conversation, type Folder, type Idea, type List, type LiveAgent, type Paused, type Profile, type Usage } from './api.ts'
 import { AgentList, AgentView, PausedList } from './agents.tsx'
 import {
   COLORS, Confirm, CustomForm, InterviewForm, isPhone, MenuHost, MicIcon, NameDialog, NewAgentButton, openMenu, ORDER, PauseUntil, Sidebar, UsageMeters,
   type MenuItem, type StartFields, useHold,
 } from './components.tsx'
 import { ConversationView, HistoryPane, Jarvis, Palette, speak, spokenAlerts } from './extras.tsx'
-import { IdeaDetail, IdeasPane, ImportNotes, QuickCapture, SortMode } from './ideas.tsx'
+import { IdeaDetail, IdeasPane, ImportNotes, PRIORITY, PriorityPane, QuickCapture, SortMode } from './ideas.tsx'
 import { SettingsPage } from './settings.tsx'
 import { FullTerminal } from './terminal.tsx'
 import './styles.css'
 
 // #/ · #/folder/ID · #/agent/NAME (what pushes open) · #/paused · #/ideas/LIST · #/idea/ID · #/history[/TOOL/ID] · #/more
-type View = 'all' | 'folder' | 'agent' | 'paused' | 'ideas' | 'idea' | 'history' | 'more' | 'jarvis' | 'settings'
+type View = 'all' | 'folder' | 'agent' | 'paused' | 'ideas' | 'idea' | 'history' | 'more' | 'jarvis' | 'settings' | 'prioritized'
 const parseRoute = () => {
   const [, view = '', a = '', b = ''] = location.hash.split('/')
-  const views: View[] = ['folder', 'agent', 'paused', 'ideas', 'idea', 'history', 'more', 'jarvis', 'settings']
+  const views: View[] = ['folder', 'agent', 'paused', 'ideas', 'idea', 'history', 'more', 'jarvis', 'settings', 'prioritized']
   return { view: (views.includes(view as View) ? view : 'all') as View, a: decodeURIComponent(a), b: decodeURIComponent(b) }
 }
 const go = (hash: string) => (location.hash = hash)
@@ -43,7 +43,10 @@ function App() {
   const [sorting, setSorting] = useState(false)
   const lastListRoute = useRef('#/')
 
-  const fail = useCallback((e: Error) => (e instanceof Unauthorized ? setLocked(true) : setToast(e.message)), [])
+  const [offline, setOffline] = useState<{ off: boolean; pending: number }>({ off: false, pending: 0 })
+  useEffect(() => onOffline((off, pending) => setOffline({ off, pending })), [])
+  // while offline, polling errors are expected; the banner says so once instead of a toast every 2 s
+  const fail = useCallback((e: Error) => (e instanceof Unauthorized ? setLocked(true) : /isn't reachable/.test(e.message) && document.querySelector('.offline-bar') ? null : setToast(e.message)), [])
   const agents = usePoll<LiveAgent[]>('/api/agents', 2000, fail)
   const paused = usePoll<Paused[]>('/api/paused', 5000, fail)
   const folders = usePoll<Folder[]>('/api/folders', 15000, fail)
@@ -58,7 +61,8 @@ function App() {
   // which Ideas list is on screen: the route's, or the open idea's
   const [ideaItem, setIdeaItem] = useState<Idea | null>(null)
   const currentListName = route.view === 'ideas' ? route.a : route.view === 'idea' ? ideaItem?.list ?? '' : ''
-  const ideas = usePoll<Idea[]>(`/api/ideas?list=${enc(currentListName || '-')}`, currentListName ? 4000 : 3_600_000, fail)
+  const fromPriority = route.view === 'prioritized' || (route.view === 'idea' && remember.get('ideaFrom') === 'prioritized')
+  const ideas = usePoll<Idea[]>(fromPriority ? '/api/ideas?priority=1' : `/api/ideas?list=${enc(currentListName || '-')}`, currentListName || fromPriority ? 4000 : 3_600_000, fail)
   useEffect(() => {
     if (route.view !== 'idea') return setIdeaItem(null)
     const found = ideas.data?.find(i => i.id === Number(route.a))
@@ -70,7 +74,8 @@ function App() {
     const on = () => {
       const r = parseRoute()
       setRoute(r)
-      if (['all', 'folder', 'paused', 'history', 'ideas'].includes(r.view)) lastListRoute.current = location.hash || '#/'
+      if (['all', 'folder', 'paused', 'history', 'ideas', 'prioritized'].includes(r.view)) lastListRoute.current = location.hash || '#/'
+      if (r.view === 'ideas' || r.view === 'prioritized') remember.set('ideaFrom', r.view)
     }
     addEventListener('hashchange', on)
     loadProfiles()
@@ -142,6 +147,11 @@ function App() {
       { label: 'Pause', onClick: () => act(api.post(`/api/agents/${enc(a.name)}/pause`)) },
       { label: 'Pause until…', onClick: () => setModal({ kind: 'pause', name: a.name }) },
     ] : []),
+    ...(!a.controllable && a.pid !== null ? ['sep' as const, { label: 'Stop…', danger: true, onClick: () => setModal({
+      kind: 'confirm', title: `Stop ${a.name}?`, action: 'Stop',
+      text: 'This stops the agent running in your terminal window. Its conversation is saved, so you can resume it later from History.',
+      yes: () => act(api.del(`/api/agents/${enc(a.name)}`), () => route.a === a.name && go(lastListRoute.current)),
+    }) }] : []),
     ...(a.controllable ? ['sep' as const, { label: a.pid === null ? 'Close session' : 'Kill…', danger: true, onClick: () => setModal({
       kind: 'confirm', title: `Kill ${a.name}?`, action: 'Kill', text: 'This stops the agent and closes its session. Pause instead if you want to come back to the conversation.',
       yes: () => act(api.del(`/api/agents/${enc(a.name)}`), () => route.a === a.name && go(lastListRoute.current)),
@@ -192,6 +202,7 @@ function App() {
 
   const ideaMenu = (i: Idea, x: number, y: number) => openMenu(x, y, [
     { label: i.done ? 'Mark not done' : 'Mark done', onClick: () => act(api.patch(`/api/ideas/${i.id}`, { done: !i.done })) },
+    { label: 'Priority', items: [3, 2, 1, 0].map(p => ({ label: PRIORITY[p], checked: i.priority === p, onClick: () => act(api.patch(`/api/ideas/${i.id}`, { priority: p })) })) },
     { label: 'Move to', items: allLists.filter(l => l.name !== i.list).map(l => ({ label: l.name, swatch: l.color, onClick: () => act(api.patch(`/api/ideas/${i.id}`, { list: l.name })) })) },
     { label: 'Start an agent on this', onClick: () => startFromIdea(i) },
     { label: 'Interview me about it', onClick: () => setModal({ kind: 'interview', topic: i.text, ideaId: i.id }) },
@@ -264,7 +275,7 @@ function App() {
 
   const agentFromRoute = route.view === 'agent' ? all.find(a => a.name === route.a) ?? null : null
   const conversation = route.view === 'history' && route.b ? history?.find(c => c.id === route.b) ?? null : null
-  const sideRoute = route.view === 'folder' ? `folder/${route.a}` : route.view === 'ideas' ? `ideas/${route.a}` : route.view === 'idea' ? `ideas/${currentListName}` : route.view
+  const sideRoute = route.view === 'folder' ? `folder/${route.a}` : route.view === 'ideas' ? `ideas/${route.a}` : route.view === 'idea' ? (fromPriority ? 'prioritized' : `ideas/${currentListName}`) : route.view
   const listShown = allLists.find(l => l.name === currentListName)
 
   // middle pane: when an agent is open it keeps showing the list it was opened from
@@ -275,6 +286,9 @@ function App() {
       onResume={p => act(api.post(`/api/paused/${p.id}/resume`), () => openAgent(p.name))} onForget={p => act(api.del(`/api/paused/${p.id}`))} />
   } else if (middleView.view === 'history') {
     middle = <HistoryPane items={history} q={historyQ} setQ={setHistoryQ} selected={route.b} onMenu={conversationMenu} />
+  } else if (route.view === 'prioritized' || (route.view === 'idea' && fromPriority)) {
+    middle = <PriorityPane items={ideas.data ?? []} selected={route.view === 'idea' ? Number(route.a) : null}
+      onChange={() => { ideas.refresh(); lists.refresh() }} onError={fail} onMenu={ideaMenu} />
   } else if ((route.view === 'ideas' || route.view === 'idea') && listShown) {
     middle = <IdeasPane list={listShown} items={ideas.data ?? []} selected={route.view === 'idea' ? Number(route.a) : null}
       onChange={() => { ideas.refresh(); lists.refresh() }} onError={fail} onSort={runSort} onMenu={ideaMenu}
@@ -316,7 +330,7 @@ function App() {
   }
 
   const hasDetail = !!(agentFromRoute || (route.view === 'idea' && ideaItem) || conversation || route.view === 'settings' || route.view === 'jarvis')
-  const tab = ['ideas', 'idea'].includes(route.view) ? 'ideas' : route.view === 'history' ? 'history' : ['more', 'paused', 'settings'].includes(route.view) ? 'more' : 'agents'
+  const tab = ['ideas', 'idea', 'prioritized'].includes(route.view) ? 'ideas' : route.view === 'history' ? 'history' : ['more', 'paused', 'settings'].includes(route.view) ? 'more' : 'agents'
   const brainDump = allLists.find(l => l.name === 'Brain Dump')
 
   return (
@@ -335,7 +349,7 @@ function App() {
         <a href="#/history" className={tab === 'history' ? 'on' : ''}>History</a>
         <a href="#/more" className={tab === 'more' ? 'on' : ''}>More</a>
       </nav>
-      {(route.view === 'ideas' || route.view === 'idea') && <IdeasListPicker lists={allLists} current={currentListName}
+      {(route.view === 'ideas' || route.view === 'idea' || route.view === 'prioritized') && <IdeasListPicker lists={allLists} current={route.view === 'prioritized' ? '★' : currentListName}
         onNew={() => setModal({ kind: 'name', title: 'New list', color: COLORS[6], action: 'Create', submit: (name, color) => { setModal(null); act(api.post('/api/lists', { name, color }), () => go(`#/ideas/${enc(name)}`)) } })} />}
 
       {jarvisOpen && route.view !== 'jarvis' && <Jarvis onClose={() => setJarvisOpen(false)} onChanged={refreshAll} />}
@@ -374,6 +388,11 @@ function App() {
       ]} />}
       {terminal && <FullTerminal name={terminal} onClose={() => setTerminal('')} />}
       <MenuHost />
+      {(offline.off || offline.pending > 0) && (
+        <div className="offline-bar" role="status">
+          {offline.off ? "Your Mac isn't reachable. Notes still work" : 'Back online'}{offline.pending ? ` · ${offline.pending} change${offline.pending > 1 ? 's' : ''} waiting to sync` : offline.off ? '; changes sync when it is.' : ''}
+        </div>
+      )}
       {toast && <div className="toast" role="status" onClick={() => setToast('')}>{toast}</div>}
     </div>
   )
@@ -391,9 +410,10 @@ function FolderChip({ f, on, onMenu }: { f: Folder; on: boolean; onMenu: (x: num
 }
 
 function IdeasListPicker({ lists, current, onNew }: { lists: List[]; current: string; onNew: () => void }) {
-  useEffect(() => { if (current) remember.set('lastList', current) }, [current])
+  useEffect(() => { if (current && current !== '★') remember.set('lastList', current) }, [current])
   return (
     <div className="chips ideas-chips">
+      <a className={`chip-f ${current === '★' ? 'on' : ''}`} href="#/prioritized"><span className="prio p3">!</span>Prioritized</a>
       {lists.map(l => (
         <a key={l.id} className={`chip-f ${l.name === current ? 'on' : ''}`} href={`#/ideas/${enc(l.name)}`}>
           <span className="sq round" style={{ background: l.color }} />{l.name}{l.name === 'Brain Dump' && l.unsorted > 0 ? ` ${l.unsorted}` : ''}

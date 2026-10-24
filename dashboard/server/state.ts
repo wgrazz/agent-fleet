@@ -101,8 +101,11 @@ async function refresh() {
     // outside tmux there is no screen; Claude's own session file still says busy/idle
     let status: Status = seen ?? (/^\[busy\]/.test(r.task) ? 'working' : /^\[(idle|waiting)\]/.test(r.task) ? 'done' : 'unknown')
     if (hook && seen !== 'needs_you') {
-      // a needs_you hook goes stale once the screen moves on (answered from a real terminal)
-      const stale = hook.status === 'needs_you' && (screens.get(name)?.changedAt ?? 0) > hook.at + 1000
+      // a needs_you hook goes stale once the screen moves on (answered from a real terminal); a working hook goes
+      // stale when the screen has been quiet with no busy spinner (e.g. a conversation resumed into Fleet after its
+      // old window was stopped mid-turn, so its last hook said "working")
+      const stale = (hook.status === 'needs_you' && (screens.get(name)?.changedAt ?? 0) > hook.at + 1000)
+        || (hook.status === 'working' && seen === 'done' && quietMs > 8000 && Date.now() - hook.at > 8000)
       if (!stale) status = hook.status
     }
     next.push({

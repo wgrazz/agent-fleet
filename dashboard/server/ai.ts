@@ -102,6 +102,19 @@ export const sortIdeas = (items: { id: number; text: string }[], lists: { name: 
     obj({ suggestions: { type: 'array', items: obj({ id: { type: 'integer' }, list: { type: 'string', enum: [...lists.map(l => l.name), 'Brain Dump'] }, confidence: { type: 'number' } }) } }),
     { timeoutMs: 180_000, feature: 'sort' })
 
+// ---------- priorities ----------
+
+const RANK_SYSTEM = `You help a solo founder decide what matters. Given their open notes and ideas (from lists like Brain Dump, General Code, Research, Errands) and what their coding agents are doing now, give each note a priority: 3 = high (do soon: blocks other work, time-sensitive, or clearly moves the business), 2 = medium (worth doing this week or two), 1 = low (someday), 0 = no priority (reference, done-ish, vague). Be decisive: usually under a fifth of notes are high. Give each a reason of at most 12 words. Then pick up to 5 note ids to do next, best first, and write a two-sentence spoken summary of what to focus on.`
+
+export type Ranked = { ranked: { id: number; priority: number; reason: string }[]; next: number[]; summary: string }
+
+export const rankIdeas = (items: { id: number; list: string; text: string }[], context: string) =>
+  ask<Ranked>(`${context}\n\nOpen notes (id · list · text):\n${items.map(i => `${i.id} · ${i.list} · ${i.text.replace(/\s+/g, ' ').slice(0, 220)}`).join('\n')}`, RANK_SYSTEM,
+    obj({
+      ranked: { type: 'array', items: obj({ id: { type: 'integer' }, priority: { type: 'integer', enum: [0, 1, 2, 3] }, reason: str }) },
+      next: { type: 'array', items: { type: 'integer' } }, summary: str,
+    }), { timeoutMs: 240_000, feature: 'rank' })
+
 // ---------- interview agent ----------
 
 /** First prompt for a Claude agent that interviews you about an idea, one question at a time, then writes it up. */

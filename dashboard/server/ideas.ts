@@ -1,12 +1,12 @@
 // Ideas: checklist lists (Priority, Brain Dump, then yours), recurring items, and Brain Dump sorting suggestions.
-import { sortIdeas } from './ai.ts'
+import { rankIdeas, sortIdeas } from './ai.ts'
 import { db } from './store.ts'
 
 export type List = { id: number; name: string; color: string; position: number; archived: number; open: number; done: number; unsorted?: number }
 export type Idea = {
   id: number; list: string; text: string; notes: string; done: number; done_at: number | null; created_at: number
   position: number | null; repeat: string | null; next_due: number | null; agent: string | null; source: string | null
-  suggestion: string | null; suggestion_conf: number | null
+  suggestion: string | null; suggestion_conf: number | null; priority: number; why: string | null
 }
 
 const now = () => Math.floor(Date.now() / 1000)
@@ -99,7 +99,7 @@ export function addIdea(text: string, list = 'Brain Dump', extra: { source?: str
   return Number(r.lastInsertRowid)
 }
 
-export function updateIdea(id: number, p: Partial<Pick<Idea, 'text' | 'notes' | 'list' | 'repeat' | 'position' | 'agent'>> & { done?: boolean; clearSuggestion?: boolean }) {
+export function updateIdea(id: number, p: Partial<Pick<Idea, 'text' | 'notes' | 'list' | 'repeat' | 'position' | 'agent' | 'priority'>> & { done?: boolean; clearSuggestion?: boolean }) {
   const cur = idea(id)
   if (!cur) throw new Error('no such idea')
   if (p.text !== undefined) db.prepare('UPDATE ideas SET text = ? WHERE id = ?').run(p.text, id)
@@ -114,6 +114,7 @@ export function updateIdea(id: number, p: Partial<Pick<Idea, 'text' | 'notes' | 
   }
   if (p.position !== undefined) db.prepare('UPDATE ideas SET position = ? WHERE id = ?').run(p.position, id)
   if (p.agent !== undefined) db.prepare('UPDATE ideas SET agent = ? WHERE id = ?').run(p.agent, id)
+  if (p.priority !== undefined) db.prepare('UPDATE ideas SET priority = ?, why = NULL WHERE id = ?').run(Math.max(0, Math.min(3, Math.round(p.priority))), id)
   if (p.clearSuggestion) db.prepare('UPDATE ideas SET suggestion = NULL, suggestion_conf = NULL WHERE id = ?').run(id)
   if (p.done !== undefined) {
     const repeat = (idea(id) as Idea).repeat
@@ -139,4 +140,24 @@ export async function suggestSorting(limit = 40) {
   const set = db.prepare("UPDATE ideas SET suggestion = ?, suggestion_conf = ? WHERE id = ? AND list = 'Brain Dump'")
   for (const s of suggestions) if (pending.some(p => p.id === s.id)) set.run(s.list, Math.max(0, Math.min(1, s.confidence)), s.id)
   return suggestions.length
+}
+
+// ---------- priorities ----------
+
+export const prioritized = () => {
+  reopenDue()
+  return db.prepare('SELECT * FROM ideas WHERE done = 0 AND priority > 0 ORDER BY priority DESC, coalesce(position, id), id').all() as Idea[]
+}
+
+/** Claude reads every open idea (and what your agents are doing) and sets a priority with a one-line reason. */
+export async function rankAll(context: string) {
+  const open = db.prepare('SELECT id, list, text, priority FROM ideas WHERE done = 0 ORDER BY id DESC LIMIT 200').all() as { id: number; list: string; text: string; priority: number }[]
+  if (!open.length) return { summary: 'You have no open ideas to rank.', next: [] as Idea[], counts: [0, 0, 0] }
+  const r = await rankIdeas(open, context)
+  const set = db.prepare('UPDATE ideas SET priority = ?, why = ? WHERE id = ? AND done = 0')
+  const ids = new Set(open.map(o => o.id))
+  for (const x of r.ranked) if (ids.has(x.id)) set.run(Math.max(0, Math.min(3, x.priority)), x.reason.slice(0, 200), x.id)
+  const next = r.next.filter(id => ids.has(id)).slice(0, 5).map(id => idea(id)!).filter(Boolean)
+  const counts = [3, 2, 1].map(p => r.ranked.filter(x => x.priority === p).length)
+  return { summary: r.summary, next, counts }
 }

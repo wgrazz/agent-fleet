@@ -521,3 +521,15 @@ details.ai-note { display: block; }
 @keyframes talk { from { transform: scale(.94); } to { transform: scale(1.06); } }
 @media (prefers-reduced-motion: reduce) { .orb span { animation: none !important; } }
 @media (max-width: 700px) { .voice-mode { padding-bottom: max(16px, env(safe-area-inset-bottom)); } .orb { width: 110px; height: 110px; } }
+
+/* priorities */
+.prio { font-weight: 800; margin-right: 6px; letter-spacing: -1px; }
+.prio.p3 { color: var(--dead); } .prio.p2 { color: var(--need); } .prio.p1 { color: var(--done); }
+.prio.side { width: 13px; text-align: center; margin: 0; }
+.idea-list { font-weight: 600; color: var(--dim); }
+.why { font-style: italic; }
+.rank-note { margin: 4px 12px 8px; }
+
+.offline-bar { position: fixed; left: 50%; transform: translateX(-50%); top: max(8px, env(safe-area-inset-top)); z-index: 65; background: #1d1d1f; color: #fff;
+  font-size: 12.5px; padding: 6px 12px; border-radius: 99px; box-shadow: var(--pop-shadow); max-width: calc(100% - 24px); text-align: center; }
+.idea[data-pending] .idea-text::after { content: ' · waiting to sync'; color: var(--faint); font-size: 11px; }

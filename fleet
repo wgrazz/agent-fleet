@@ -24,6 +24,7 @@ LATER
 
 DASHBOARD
   fleet dash             open the dashboard in your browser
+  fleet dash app         open it in Safari to add to your Dock as a Mac app
   fleet ask TEXT         ask Jarvis (the dashboard's assistant) from any terminal or script
   fleet dash install     run the dashboard at login and put it on your tailnet for your phone (--local: Mac only)
   fleet dash update      after changing the dashboard's code: rebuild the page and restart the server
@@ -587,7 +588,8 @@ def hook(event):
 
 
 IDEA_COLUMNS = {'notes': "TEXT NOT NULL DEFAULT ''", 'position': 'REAL', 'done_at': 'INTEGER', 'repeat': 'TEXT',
-                'next_due': 'INTEGER', 'agent': 'TEXT', 'source': 'TEXT', 'suggestion': 'TEXT', 'suggestion_conf': 'REAL'}
+                'next_due': 'INTEGER', 'agent': 'TEXT', 'source': 'TEXT', 'suggestion': 'TEXT', 'suggestion_conf': 'REAL',
+                'priority': 'INTEGER NOT NULL DEFAULT 0', 'why': 'TEXT'}
 NOTES_DB = f'{HOME}/Library/Group Containers/group.com.apple.notes/NoteStore.sqlite'
 CHECKLIST = 103  # Apple Notes paragraph style for a checklist line
 
@@ -833,6 +835,17 @@ def dash_update():
     print('Updated and restarted. On your phone, swipe Fleet away and reopen it.')
 
 
+def dash_app():
+    """Open the dashboard in Safari so it can be added to the Dock as its own app (File → Add to Dock)."""
+    cfg = config()
+    ts = tailscale()
+    host = json.loads(out(ts, 'status', '--json') or '{}').get('Self', {}).get('DNSName', '').rstrip('.') if ts else ''
+    url = f'https://{host}/?key={cfg["key"]}' if host else f'http://127.0.0.1:{cfg["port"]}/?key={cfg["key"]}'
+    if shutil.which('open'):
+        subprocess.run(['open', '-a', 'Safari', url])
+    print('In Safari: File → Add to Dock. Fleet then opens as its own app with notifications, like on your phone.')
+
+
 def tts_install():
     """Natural voice for Jarvis: Kokoro (open-weight, Apache-2.0) in its own Python env under ~/.fleet/tts (~350 MB)."""
     d = f'{FLEET_DIR}/tts'
@@ -1001,6 +1014,8 @@ def main(args):
         return dash()
     if cmd == 'dash' and rest[:1] == ['install'] and set(rest[1:]) <= {'--local'}:
         return dash_install(local='--local' in rest)
+    if cmd == 'dash' and rest == ['app']:
+        return dash_app()
     if cmd == 'dash' and rest == ['update']:
         return dash_update()
     if cmd == 'tts' and rest == ['install']:

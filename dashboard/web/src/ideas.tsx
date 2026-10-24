@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from 'react'
 import { api, type Idea, type List } from './api.ts'
 import { Dialog, InboxIcon, isPhone, SparkIcon, STATUS_LABEL, useHold } from './components.tsx'
 
+export const PRIORITY = ['None', 'Low', 'Medium', 'High']
+
 const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
 
 export function repeatLabel(rule: string | null) {
@@ -70,14 +72,16 @@ export function IdeasPane({ list, items, selected, onChange, onError, onSort, on
   )
 }
 
-function IdeaRow({ i, on, onToggle, onMenu, dragProps }: { i: Idea; on: boolean; onToggle: () => void; onMenu: (x: number, y: number) => void; dragProps?: object }) {
+function IdeaRow({ i, on, onToggle, onMenu, dragProps, showList }: { i: Idea; on: boolean; onToggle: () => void; onMenu: (x: number, y: number) => void; dragProps?: object; showList?: boolean }) {
   const hold = useHold(onMenu)
   return (
     <div className={`idea ${on ? 'on' : ''} ${i.done ? 'is-done' : ''}`} {...dragProps}>
       <button className={`check ${i.done ? 'checked' : ''}`} role="checkbox" aria-checked={!!i.done} aria-label="Done" onClick={onToggle} />
       <a href={`#/idea/${i.id}`} className="idea-body" {...hold}>
-        <span className="idea-text">{i.text}</span>
+        <span className="idea-text">{i.priority > 0 && !i.done && <span className={`prio p${i.priority}`} title={i.why ?? PRIORITY[i.priority]}>{'!'.repeat(i.priority)}</span>}{i.text}</span>
         <span className="idea-meta">
+          {showList && <span className="idea-list">{i.list}</span>}
+          {showList && i.why && <span className="why">{i.why}</span>}
           {i.repeat && <span title={repeatLabel(i.repeat)}>↻ {repeatLabel(i.repeat)}</span>}
           {i.agent && <span className="idea-agent"><span className={`st-inline st-${i.agent_status}`} />{i.agent}{i.agent_status === 'done' && !i.done ? ' · done?' : ''}</span>}
           {i.notes && <span>✎ note</span>}
@@ -115,6 +119,9 @@ export function IdeaDetail({ idea, lists, onBack, onChange, onError, onStart, on
           <label>List<select value={idea.list} onChange={e => save({ list: e.target.value })}>
             {lists.map(l => <option key={l.id} value={l.name}>{l.name}</option>)}
           </select></label>
+          <label>Priority<select value={idea.priority} onChange={e => save({ priority: Number(e.target.value) })}>
+            {PRIORITY.map((p, n) => <option key={n} value={n}>{p}</option>)}
+          </select></label>
           <label>Repeat<select value={kind || ''} onChange={e => setRepeat(e.target.value)}>
             <option value="">Never</option><option value="daily">Every day</option><option value="weekly">Weekly</option>
             <option value="monthly">Monthly</option><option value="every">Every N days</option>
@@ -123,6 +130,7 @@ export function IdeaDetail({ idea, lists, onBack, onChange, onError, onStart, on
           {kind === 'monthly' && <label>Day<input type="number" min={1} max={31} defaultValue={arg} onBlur={e => setRepeat('monthly', e.target.value)} /></label>}
           {kind === 'every' && <label>Days<input type="number" min={1} max={999} defaultValue={arg} onBlur={e => setRepeat('every', e.target.value)} /></label>}
         </div>
+        {idea.why && idea.priority > 0 && <p className="hint">Claude: {idea.why}</p>}
         {idea.repeat && idea.done && idea.next_due && <p className="hint">Comes back {new Date(idea.next_due * 1000).toLocaleDateString([], { weekday: 'long', month: 'short', day: 'numeric' })}.</p>}
         {idea.suggestion && !idea.done && (
           <div className="ai-note"><SparkIcon /> Looks like it belongs in <b>{idea.suggestion}</b>
@@ -264,3 +272,38 @@ export function ImportNotes({ onClose, onDone }: { onClose: () => void; onDone: 
   )
 }
 
+
+/** Every open idea that has a priority, across all lists, most important first. */
+export function PriorityPane({ items, selected, onChange, onError, onMenu }: {
+  items: Idea[]; selected: number | null; onChange: () => void; onError: (e: Error) => void; onMenu: (i: Idea, x: number, y: number) => void
+}) {
+  const [ranking, setRanking] = useState(false)
+  const [summary, setSummary] = useState('')
+  const rank = () => {
+    setRanking(true)
+    api.post<{ summary: string; counts: number[] }>('/api/ideas/rank').then(r => { setSummary(r.summary); onChange() }).catch(onError).finally(() => setRanking(false))
+  }
+  const toggle = (i: Idea) => api.patch(`/api/ideas/${i.id}`, { done: !i.done }).then(onChange).catch(onError)
+  return (
+    <section className="list ideas">
+      <div className="lh">
+        <h4><span className="prio p3">!</span>Prioritized</h4>
+        <button className="btn small primary" onClick={rank} disabled={ranking}><SparkIcon />{ranking ? 'Ranking…' : 'Rank with Claude'}</button>
+      </div>
+      <div className="scroll">
+        {summary && <div className="ai-note rank-note"><SparkIcon /> {summary}</div>}
+        {[3, 2, 1].map(p => {
+          const group = items.filter(i => i.priority === p)
+          if (!group.length) return null
+          return (
+            <div key={p}>
+              <div className="grp">{PRIORITY[p]}</div>
+              {group.map(i => <IdeaRow key={i.id} i={i} on={i.id === selected} showList onToggle={() => toggle(i)} onMenu={(x, y) => onMenu(i, x, y)} />)}
+            </div>
+          )
+        })}
+        {!items.length && <div className="empty">Nothing has a priority yet. Tap <b>Rank with Claude</b> to rank all your open ideas, ask Jarvis “what should I do next?”, or set one on any idea.</div>}
+      </div>
+    </section>
+  )
+}

@@ -1,7 +1,50 @@
-// Fleet service worker: shows pushes from the dashboard server and opens the agent they're about.
-// No offline caching: the page is useless without the Mac anyway.
+// Fleet service worker: pushes from the dashboard server, and an offline copy of the app and your notes.
+// Online, everything comes from the Mac. When the Mac can't be reached, the app shell and the last copy of
+// your lists and ideas are served from here (marked X-Fleet-Offline so the page can say so).
+const SHELL = 'fleet-shell-v1'
+const DATA = 'fleet-data-v1'
+
 self.addEventListener('install', () => self.skipWaiting())
 self.addEventListener('activate', e => e.waitUntil(self.clients.claim()))
+
+async function fromCache(cacheName, key) {
+  const hit = await (await caches.open(cacheName)).match(key)
+  if (!hit) return null
+  const headers = new Headers(hit.headers)
+  headers.set('X-Fleet-Offline', '1')
+  return new Response(await hit.blob(), { status: hit.status, headers })
+}
+
+async function networkFirst(request, cacheName, key = request) {
+  try {
+    const res = await fetch(request)
+    if (res.ok) (await caches.open(cacheName)).put(key, res.clone())
+    return res
+  } catch {
+    return (await fromCache(cacheName, key))
+      ?? new Response(JSON.stringify({ error: "Your Mac isn't reachable right now." }), { status: 503, headers: { 'Content-Type': 'application/json', 'X-Fleet-Offline': '1' } })
+  }
+}
+
+async function cacheFirst(request) {
+  const cache = await caches.open(SHELL)
+  const hit = await cache.match(request)
+  if (hit) return hit
+  const res = await fetch(request)
+  if (res.ok) cache.put(request, res.clone())
+  return res
+}
+
+self.addEventListener('fetch', e => {
+  const url = new URL(e.request.url)
+  if (url.origin !== self.location.origin || e.request.method !== 'GET' || url.pathname.startsWith('/ws/')) return
+  if (url.pathname.startsWith('/api/')) {
+    if (/^\/api\/(lists|ideas|folders|settings)(\?|$)/.test(url.pathname + url.search.slice(0, 1))) e.respondWith(networkFirst(e.request, DATA))
+    return
+  }
+  if (e.request.mode === 'navigate') return e.respondWith(networkFirst(e.request, SHELL, '/'))
+  if (url.pathname.startsWith('/assets/') || /\.(png|webmanifest|svg)$/.test(url.pathname)) e.respondWith(cacheFirst(e.request))
+})
 
 self.addEventListener('push', e => {
   const d = e.data ? e.data.json() : {}

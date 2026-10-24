@@ -159,3 +159,7 @@ export function instant(said: string, agents: Agent[]): JarvisReply | null {
   }
   return null
 }
+
+/** "what should I do next", "rank my notes", "prioritize my ideas", "sort my notes by importance" */
+export const wantsRanking = (said: string) =>
+  /\b(what should i (do|work on|tackle) (next|first|now)|what('?s| is) (most )?important|(rank|prioriti[sz]e|triage)\b.*\b(notes?|ideas?|todos?|tasks?|lists?)|sort\b.*\b(notes?|ideas?|tasks?)\b.*\b(importan|priorit))/i.test(said)
