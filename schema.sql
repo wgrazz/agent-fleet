@@ -28,3 +28,23 @@ CREATE TABLE IF NOT EXISTS push_subs (
   endpoint TEXT PRIMARY KEY,
   sub TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS folders (
+  id INTEGER PRIMARY KEY,
+  name TEXT NOT NULL,
+  color TEXT NOT NULL DEFAULT '#8e8e93',
+  position INTEGER NOT NULL DEFAULT 0
+);
+-- which folder an agent or past conversation sits in; key is "sid:<session id>" when known, else "name:<session>"
+CREATE TABLE IF NOT EXISTS placements (
+  key TEXT PRIMARY KEY,
+  folder_id INTEGER NOT NULL
+);
+-- Ideas lists; ideas.list holds the list's name so `fleet idea -l NAME` needs no lookup
+CREATE TABLE IF NOT EXISTS lists (
+  id INTEGER PRIMARY KEY,
+  name TEXT NOT NULL UNIQUE,
+  color TEXT NOT NULL DEFAULT '#8e8e93',
+  position INTEGER NOT NULL DEFAULT 0,
+  archived INTEGER NOT NULL DEFAULT 0
+);
+INSERT OR IGNORE INTO lists (name, color, position) VALUES ('Priority', '#ff3b30', -2), ('Brain Dump', '#8e8e93', -1);

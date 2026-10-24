@@ -7,6 +7,7 @@ START & RETURN
                          start NAME already running that tool, optionally with a first prompt
   fleet resume [NAME]    go back into NAME (no name: the only session, or a list if there are several)
   fleet peek NAME        print the last 40 lines of NAME's screen without going into it
+  fleet rename OLD NEW   rename a session
 
 SEE
   fleet                  the agents you started, their status, what they're doing, and any follow-up waiters
@@ -18,6 +19,7 @@ LATER
   fleet paused           list paused agents
   fleet unpause ID|NAME  bring a paused agent back in a new session with its conversation
   fleet idea [-l LIST] TEXT   jot an idea (lands in Brain Dump unless you name a list)
+  fleet import-notes [--dry-run]   copy your numbered Apple Notes checklists into Ideas (needs Full Disk Access)
 
 DASHBOARD
   fleet dash             open the dashboard in your browser
@@ -73,7 +75,7 @@ LAUNCH = {
     'claude':  dict(bin='claude', prompt=[], model=['--model', '{}'], effort=['--effort', '{}'], resume=['--resume', '{}']),
     'codex':   dict(bin='codex', prompt=[], model=['-m', '{}'], effort=['-c', 'model_reasoning_effort={}'], resume=['resume', '{}']),
     'cursor':  dict(bin='cursor-agent', prompt=[], model=['--model', '{}'], effort=None, resume=['--resume', '{}']),
-    'copilot': dict(bin='copilot', prompt=['-i'], model=['--model', '{}'], effort=None, resume=['--resume={}']),
+    'copilot': dict(bin='copilot', prompt=['-i'], model=['--model', '{}'], effort=['--reasoning-effort', '{}'], resume=['--resume={}']),
     'agy':     dict(bin='agy', prompt=['-i'], model=['--model', '{}'], effort=['--effort', '{}'], resume=['--conversation', '{}']),
 }
 # Test-only tools: FLEET_EXTRA_TOOLS="fake=/abs/fake-agent.sh,other=/abs/x"
@@ -128,6 +130,8 @@ def service(procs, pid):
         return 'chrome bridge'
     if 'claude-mem' in parent:
         return 'claude-mem observer'
+    if '--no-session-persistence' in cmd:
+        return 'one-shot helper'  # e.g. the dashboard's smart features (claude -p)
 
 
 def panes():
@@ -392,6 +396,10 @@ def db():
     con.execute('PRAGMA journal_mode=WAL')
     with open(os.path.join(os.path.dirname(FLEET), 'schema.sql')) as f:
         con.executescript(f.read())
+    have = {r[1] for r in con.execute('PRAGMA table_info(ideas)')}
+    for col, kind in IDEA_COLUMNS.items():  # same list as dashboard/server/store.ts
+        if col not in have:
+            con.execute(f'ALTER TABLE ideas ADD COLUMN {col} {kind}')
     return con
 
 
@@ -426,6 +434,7 @@ def new(args):
     p.add_argument('--model', default='')
     p.add_argument('--effort', default='')
     p.add_argument('--detach', action='store_true')
+    p.add_argument('--resume', default='', help='continue this conversation id instead of starting fresh')
     p.add_argument('prompt', nargs='*')
     a = p.parse_args(args)
     if not a.tool and not a.profile:
@@ -440,7 +449,7 @@ def new(args):
         if not prof:
             sys.exit(f'No profile named {a.profile}.')
     argv = launch_argv(a.tool or prof['tool'], ' '.join(a.prompt), a.model or (prof and prof['model']) or '',
-                       a.effort or (prof and prof['effort']) or '', extra=(prof and prof['args']) or '')
+                       a.effort or (prof and prof['effort']) or '', resume=a.resume, extra=(prof and prof['args']) or '')
     start(a.name, os.getcwd(), argv)
     if a.detach:
         return print(f'Started {a.name}.')
@@ -459,6 +468,13 @@ def pause(name):
                     (name, row['tool'], row['session_id'], row['cwd'] or HOME, int(time.time())))
     subprocess.run(['tmux', 'kill-session', '-t', f'={name}'], capture_output=True)
     print(f'Paused {name}. fleet unpause {name} brings it back.')
+
+
+def rename(old, new_name):
+    check_name(new_name)
+    if subprocess.run(['tmux', 'rename-session', '-t', f'={old}', new_name], capture_output=True).returncode:
+        sys.exit(f'No tmux session named {old}.')
+    print(f'Renamed {old} to {new_name}.')
 
 
 def paused_list():
@@ -507,6 +523,126 @@ def hook(event):
     except BaseException:
         pass
     os._exit(0)
+
+
+IDEA_COLUMNS = {'notes': "TEXT NOT NULL DEFAULT ''", 'position': 'REAL', 'done_at': 'INTEGER', 'repeat': 'TEXT',
+                'next_due': 'INTEGER', 'agent': 'TEXT', 'source': 'TEXT', 'suggestion': 'TEXT', 'suggestion_conf': 'REAL'}
+NOTES_DB = f'{HOME}/Library/Group Containers/group.com.apple.notes/NoteStore.sqlite'
+CHECKLIST = 103  # Apple Notes paragraph style for a checklist line
+
+
+def pb_fields(buf):
+    """Minimal protobuf reader: yields (field number, value) with varints as int and length-delimited as bytes."""
+    i = 0
+
+    def varint():
+        nonlocal i
+        shift = result = 0
+        while True:
+            b = buf[i]
+            i += 1
+            result |= (b & 0x7F) << shift
+            if b < 0x80:
+                return result
+            shift += 7
+    while i < len(buf):
+        key = varint()
+        num, wire = key >> 3, key & 7
+        if wire == 0:
+            yield num, varint()
+        elif wire == 2:
+            n = varint()
+            yield num, buf[i:i + n]
+            i += n
+        elif wire in (1, 5):
+            i += 8 if wire == 1 else 4
+        else:
+            raise ValueError(f'unsupported protobuf wire type {wire}')
+
+
+def pb_first(buf, num):
+    return next((v for n, v in pb_fields(buf) if n == num), None)
+
+
+def note_lines(data):
+    """Lines of one note from ZICNOTEDATA.ZDATA (gzipped NoteStoreProto) as (text, is_checklist, done).
+    Layout (per apple_cloud_notes_parser): proto.2 document → .3 note → .2 text, .5 attribute runs; a run is
+    .1 length in UTF-16 units and .2 paragraph style, whose .1 is the style type and .5.2 the checklist done flag."""
+    import gzip
+    note = pb_first(pb_first(gzip.decompress(data), 2), 3)
+    text = pb_first(note, 2).decode('utf-8')
+    units = text.encode('utf-16-le')
+    lines, cur, style, pos = [], '', (False, False), 0
+    for num, run in pb_fields(note):
+        if num != 5:
+            continue
+        length = pb_first(run, 1) or 0
+        para = pb_first(run, 2)
+        kind = pb_first(para, 1) if para else None
+        check = pb_first(para, 5) if para else None
+        run_style = (kind == CHECKLIST, bool(check and pb_first(check, 2)))
+        for ch in units[pos * 2:(pos + length) * 2].decode('utf-16-le'):
+            if ch == '\n':
+                lines.append((cur, *(run_style if run_style[0] else style)))
+                cur, style = '', (False, False)
+            else:
+                cur += ch
+                style = run_style if run_style[0] else style
+        pos += length
+    if cur:
+        lines.append((cur, *style))
+    return lines
+
+
+def notes_list_name(title):
+    """'000 Brain Dump:' → 'Brain Dump', '001 PRIORITY:' → 'Priority', '002 General Code:' → 'General Code'."""
+    name = re.sub(r'^\d+\s*', '', title).strip().rstrip(':').strip()
+    return 'Priority' if name.lower() == 'priority' else name
+
+
+def import_notes(args):
+    """Copy Apple Notes checklists into Ideas: one list per note, checked items land in that list's Done."""
+    dry = '--dry-run' in args
+    pattern = re.compile(next((a.split('=', 1)[1] for a in args if a.startswith('--match=')), r'^\d{3}\b'))
+    try:
+        src = sqlite3.connect(f'file:{NOTES_DB}?mode=ro', uri=True)
+        rows = src.execute(
+            'SELECT o.ZTITLE1, o.ZIDENTIFIER, d.ZDATA FROM ZICCLOUDSYNCINGOBJECT o JOIN ZICNOTEDATA d ON d.ZNOTE = o.Z_PK'
+            ' WHERE o.ZTITLE1 IS NOT NULL AND coalesce(o.ZMARKEDFORDELETION, 0) = 0 AND d.ZDATA IS NOT NULL').fetchall()
+    except sqlite3.Error as e:
+        sys.exit("Can't read Apple Notes (" + str(e) + ').\nmacOS only lets apps with Full Disk Access read it: System Settings → '
+                 'Privacy & Security → Full Disk Access → turn on the terminal app you run this from, then run it again.')
+    picked = sorted((r for r in rows if pattern.search(r[0])), key=lambda r: r[0])
+    con = None if dry else db()
+    total = {'open': 0, 'done': 0, 'skipped': 0}
+    for pos, (title, ident, data) in enumerate(picked):
+        name = notes_list_name(title)
+        try:
+            lines = note_lines(data)
+        except Exception as e:  # an unexpected note format shouldn't stop the rest
+            print(f'  {title}: could not read ({e})')
+            continue
+        items = [(t.strip(), chk, done) for t, chk, done in lines[1:] if t.strip()]  # line 0 is the title
+        opened = sum(1 for _, _, d in items if not d)
+        print(f'  {name:<28} {opened:>4} open  {len(items) - opened:>4} done')
+        total['open'] += opened
+        total['done'] += len(items) - opened
+        if dry:
+            continue
+        with con:
+            if name not in ('Priority', 'Brain Dump'):
+                con.execute('INSERT OR IGNORE INTO lists (name, position) VALUES (?, ?)', (name, pos))
+            for i, (text, _, done) in enumerate(items):
+                source = f'notes:{ident}:{i}:{text[:40]}'
+                if con.execute('SELECT 1 FROM ideas WHERE source = ?', (source,)).fetchone():
+                    total['skipped'] += 1
+                    continue
+                now = int(time.time())
+                con.execute('INSERT INTO ideas (list, text, created_at, position, source, done, done_at, notes)'
+                            " VALUES (?, ?, ?, ?, ?, ?, ?, '')", (name, text, now, i + 1, source, int(done), now if done else None))
+    verb = 'Would import' if dry else 'Imported'
+    print(f"{verb} {total['open']} open and {total['done']} done items from {len(picked)} notes"
+          + (f" ({total['skipped']} already imported)" if total['skipped'] else '') + '. Apple Notes was not changed.')
 
 
 HOOK_EVENTS = {'UserPromptSubmit': 'working', 'PreToolUse': 'working', 'Notification': 'notify',
@@ -650,10 +786,12 @@ def selftest():
         51: dict(pid=51, ppid=1, age='1', tty='??', cmd='/usr/sbin/distnoted agent'),
         52: dict(pid=52, ppid=1, age='1', tty='??', cmd='bun /x/claude-mem/worker-service.cjs --daemon'),
         53: dict(pid=53, ppid=52, age='1', tty='??', cmd='/opt/homebrew/bin/claude --output-format stream-json'),
+        54: dict(pid=54, ppid=1, age='1', tty='??', cmd='claude -p --model sonnet --no-session-persistence --system-prompt x'),
         60: dict(pid=60, ppid=1, age='1', tty='??', cmd='node -e require("claude")'),
     }
     agents, top, waiters = find(procs)
-    assert top == [20, 30, 40, 50, 53], top
+    assert top == [20, 30, 40, 50, 53, 54], top
+    assert service(procs, 54) == 'one-shot helper'
     assert agents[40] == 'cursor' and agents[30] == 'codex'
     assert waiters == [21], waiters
     assert owner(procs, 21, agents) == 'claude 20'
@@ -702,6 +840,34 @@ def selftest():
         assert s['hooks']['PreToolUse'][0]['hooks'][0]['async'] is True
         with open(path) as f:
             assert json.load(f) == orig
+    # Apple Notes parsing, on a note built in the same layout Notes stores
+    import gzip
+
+    def enc_varint(n):
+        out = b''
+        while True:
+            out += bytes([(n & 0x7F) | (0x80 if n > 0x7F else 0)])
+            n >>= 7
+            if not n:
+                return out
+
+    def fld(num, val):
+        if isinstance(val, int):
+            return enc_varint(num << 3) + enc_varint(val)
+        return enc_varint(num << 3 | 2) + enc_varint(len(val)) + val
+
+    def run(n, style=None, done=None):
+        para = b'' if style is None else fld(1, style) + (fld(5, fld(1, b'u') + fld(2, done)) if done is not None else b'')
+        return fld(5, fld(1, n) + (fld(2, para) if style is not None else b''))
+    lines = ['000 Brain Dump:', 'Fix login 🙂', 'Ship it', 'plain line']
+    text = '\n'.join(lines) + '\n'
+    u16 = [len((ln + '\n').encode('utf-16-le')) // 2 for ln in lines]
+    note = fld(2, text.encode()) + run(u16[0]) + run(u16[1], CHECKLIST, 0) + run(u16[2], CHECKLIST, 1) + run(u16[3])
+    blob = gzip.compress(fld(2, fld(3, note)))
+    assert note_lines(blob) == [('000 Brain Dump:', False, False), ('Fix login 🙂', True, False), ('Ship it', True, True),
+                                ('plain line', False, False)], note_lines(blob)
+    assert notes_list_name('000 Brain Dump:') == 'Brain Dump' and notes_list_name('001 PRIORITY:') == 'Priority'
+    assert notes_list_name('011 Optimal Data Public Face') == 'Optimal Data Public Face'
     print('ok')
 
 
@@ -717,6 +883,8 @@ def main(args):
         return new(rest)
     if cmd in ('resume', 'attach', 'a') and len(rest) == 1:
         return open_session(rest[0])
+    if cmd == 'rename' and len(rest) == 2:
+        return rename(*rest)
     if cmd == 'pause' and len(rest) == 1:
         return pause(rest[0])
     if cmd == 'paused' and not rest:
@@ -725,6 +893,8 @@ def main(args):
         return unpause(rest[0], detach='--detach' in rest[1:])
     if cmd == 'idea':
         return idea(rest)
+    if cmd == 'import-notes':
+        return import_notes(rest)
     if cmd == 'hook' and len(rest) == 1:
         return hook(rest[0])
     if cmd == 'hooks' and rest in (['install'], ['uninstall']):

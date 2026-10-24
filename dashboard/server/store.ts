@@ -30,3 +30,13 @@ export const config = readSecret<Config>('config.json', () => ({ port: 7878, key
 export const db = new DatabaseSync(join(FLEET_DIR, 'fleet.db'))
 db.exec('PRAGMA journal_mode=WAL')
 db.exec(readFileSync(join(REPO, 'schema.sql'), 'utf8'))
+
+// Columns added after the first release. The CLI only ever inserts (list, text, created_at), so they live here.
+const IDEA_COLUMNS: Record<string, string> = {
+  notes: "TEXT NOT NULL DEFAULT ''", position: 'REAL', done_at: 'INTEGER', repeat: 'TEXT', next_due: 'INTEGER',
+  agent: 'TEXT', source: 'TEXT', suggestion: 'TEXT', suggestion_conf: 'REAL',
+}
+const have = new Set((db.prepare('PRAGMA table_info(ideas)').all() as { name: string }[]).map(c => c.name))
+for (const [col, type] of Object.entries(IDEA_COLUMNS)) if (!have.has(col)) db.exec(`ALTER TABLE ideas ADD COLUMN ${col} ${type}`)
+// ideas jotted into a list that doesn't exist yet (fleet idea -l NewList) get that list
+db.exec("INSERT OR IGNORE INTO lists (name, position) SELECT DISTINCT list, 100 FROM ideas")

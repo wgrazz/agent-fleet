@@ -5,10 +5,15 @@ import { createReadStream, existsSync, statSync } from 'node:fs'
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import { homedir } from 'node:os'
 import { extname, join, normalize } from 'node:path'
+import { improvePrompt, interviewPrompt, jarvis, recommend } from './ai.ts'
+import { changes } from './git.ts'
+import { conversations, transcript } from './history.ts'
+import * as ideas from './ideas.ts'
 import { notify, publicKey, subscribe } from './push.ts'
 import { alerts, ingestHook, list, poll, startPolling } from './state.ts'
 import { config, db, FLEET_BIN } from './store.ts'
 import { run, sendKey, sendText } from './tmux.ts'
+import { usage } from './usage.ts'
 import { attach } from './ws.ts'
 
 const NAME = /^[A-Za-z0-9._-]{1,40}$/ // same rule as the fleet CLI
@@ -67,29 +72,94 @@ const agentOr404 = (name: string) => {
   return a
 }
 
+type StartOpts = { name?: string; profile?: string; tool?: string; model?: string; effort?: string; cwd?: string; prompt?: string; resume?: string; folder_id?: number }
+
+/** Start an agent the same way `fleet new` does; used by New agent, Ideas, Interview, History and Jarvis. */
+export async function startAgent(b: StartOpts): Promise<{ name: string }> {
+  const profile = str(b.profile, 80)
+  const prof = profile ? db.prepare('SELECT * FROM profiles WHERE name = ?').get(profile) as any : null
+  if (profile && !prof) throw new HttpError(404, `no profile named ${profile}`)
+  const tool = str(b.tool, 20) || prof?.tool || 'claude'
+  if (!TOOLS.has(tool)) throw new HttpError(400, `unknown tool ${tool}`)
+  let name = str(b.name, 40) || `${tool}-${randomBytes(2).toString('hex')}`
+  if (!NAME.test(name)) name = name.replace(/[^A-Za-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || `${tool}-${randomBytes(2).toString('hex')}`
+  if (list().some(a => a.name === name)) name = `${name.slice(0, 35)}-${randomBytes(2).toString('hex')}`
+  const cwd = str(b.cwd, 1000) || prof?.cwd || config.cwd || homedir()
+  if (!existsSync(cwd) || !statSync(cwd).isDirectory()) throw new HttpError(400, `no such folder: ${cwd}`)
+  const args = ['new', name, '--detach', ...(profile ? ['--profile', profile] : []), '--tool', tool]
+  for (const k of ['model', 'effort', 'resume'] as const) if (str(b[k], 80)) args.push(`--${k}`, str(b[k], 80))
+  const prompt = str(b.prompt, 100_000)
+  if (prompt) args.push('--', prompt)
+  await fleet(args, cwd)
+  if (typeof b.folder_id === 'number') place(`name:${name}`, b.folder_id)
+  await poll() // so the next list the page sees already reflects this
+  return { name }
+}
+
+// ---------- folders ----------
+// An agent's folder follows its conversation id when it has one (so it survives pause/resume and renames),
+// otherwise its session name.
+const placements = () => new Map((db.prepare('SELECT key, folder_id FROM placements').all() as { key: string; folder_id: number }[]).map(r => [r.key, r.folder_id]))
+
+function place(key: string, folder: number | null) {
+  if (folder === null) db.prepare('DELETE FROM placements WHERE key = ?').run(key)
+  else db.prepare('INSERT INTO placements (key, folder_id) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET folder_id = excluded.folder_id').run(key, folder)
+}
+
+const agentKey = (a: { name: string; session_id: string }) => (a.session_id ? `sid:${a.session_id}` : `name:${a.name}`)
+
+function decoratedAgents() {
+  const map = placements()
+  return list().map(a => {
+    let folder = map.get(`sid:${a.session_id}`) ?? map.get(`name:${a.name}`) ?? null
+    if (a.session_id && !map.has(`sid:${a.session_id}`) && map.has(`name:${a.name}`)) { // adopt the id once it shows up
+      place(`sid:${a.session_id}`, map.get(`name:${a.name}`)!)
+      place(`name:${a.name}`, null)
+      folder = map.get(`name:${a.name}`)!
+    }
+    return { ...a, key: agentKey(a), folder_id: folder }
+  })
+}
+
+function usageText(u: Awaited<ReturnType<typeof usage>>) {
+  return u.map(p => `${p.tool}: ${p.windows.length ? p.windows.map(w => `${w.label} ${w.pct}% used`).join(', ') : 'unknown'}`).join('\n')
+}
+
+function jarvisContext() {
+  const agents = list().map(a => `- ${a.name} (${a.tool}, ${a.status.replace('_', ' ')})${a.message ? `: asking "${a.message}"` : a.task ? `: ${a.task.replace(/^\[[a-z]+\]\s*/, '')}` : ''}${a.quick_replies.length ? ` options: ${a.quick_replies.map(q => `${q.key}=${q.label}`).join(', ')}` : ''}${a.controllable ? '' : ' (read-only)'}`)
+  const lists = ideas.lists().map(l => `${l.name} (${l.open} open)`).join(', ')
+  return `Agents:\n${agents.join('\n') || '- none running'}\nIdea lists: ${lists}\nTime: ${new Date().toLocaleString()}`
+}
+
+async function runJarvis(said: string) {
+  const { say, actions } = await jarvis(said, jarvisContext())
+  const done: string[] = []
+  for (const a of actions) {
+    try {
+      const target = a.agent ? list().find(x => x.name === a.agent && x.controllable) : undefined
+      if ((a.type === 'reply' || a.type === 'key' || a.type === 'pause') && !target) throw new Error(`no agent named ${a.agent}`)
+      if (a.type === 'reply') await sendText(target!.name, a.text)
+      if (a.type === 'key') await sendKey(target!.name, a.key)
+      if (a.type === 'pause') await fleet(['pause', target!.name])
+      if (a.type === 'start') done.push(`started ${(await startAgent({ tool: a.tool || undefined, model: a.model, effort: a.effort, prompt: a.text, name: a.name })).name}`)
+      if (a.type === 'idea') ideas.addIdea(a.text, a.list || 'Brain Dump')
+      if (a.type !== 'start') done.push(`${a.type}${a.agent ? ` ${a.agent}` : ''}${a.key ? ` ${a.key}` : ''}`)
+    } catch (e) {
+      done.push(`couldn't ${a.type}: ${(e as Error).message}`)
+    }
+  }
+  if (actions.length) await poll()
+  return { say, done }
+}
+
+const int = (v: string) => Number.parseInt(v, 10)
+const ideaOr404 = (id: string) => ideas.idea(int(id)) ?? (() => { throw new HttpError(404, 'no such idea') })()
+
 type Route = (req: IncomingMessage, params: string[]) => Promise<unknown>
 const routes: [string, RegExp, Route][] = [
-  ['GET', /^\/api\/agents$/, async () => list()],
+  ['GET', /^\/api\/agents$/, async () => decoratedAgents()],
 
-  ['POST', /^\/api\/agents$/, async req => {
-    const b = await body(req)
-    const profile = str(b.profile, 80)
-    const prof = profile ? db.prepare('SELECT * FROM profiles WHERE name = ?').get(profile) as any : null
-    if (profile && !prof) throw new HttpError(404, `no profile named ${profile}`)
-    const tool = str(b.tool, 20) || prof?.tool || 'claude'
-    if (!TOOLS.has(tool)) throw new HttpError(400, `unknown tool ${tool}`)
-    const name = str(b.name, 40) || `${tool}-${randomBytes(2).toString('hex')}`
-    if (!NAME.test(name)) throw new HttpError(400, 'name: letters, digits, . _ - (up to 40)')
-    const cwd = str(b.cwd, 1000) || prof?.cwd || config.cwd || homedir()
-    if (!existsSync(cwd) || !statSync(cwd).isDirectory()) throw new HttpError(400, `no such folder: ${cwd}`)
-    const args = ['new', name, '--detach', ...(profile ? ['--profile', profile] : []), '--tool', tool]
-    for (const k of ['model', 'effort'] as const) if (str(b[k], 80)) args.push(`--${k}`, str(b[k], 80))
-    const prompt = str(b.prompt, 100_000)
-    if (prompt) args.push('--', prompt)
-    await fleet(args, cwd)
-    await poll() // so the next list the page sees already reflects this
-    return { name }
-  }],
+  ['POST', /^\/api\/agents$/, async req => startAgent(await body(req))],
 
   ['POST', /^\/api\/agents\/([^/]+)\/send$/, async (req, [name]) => {
     agentOr404(name)
@@ -112,6 +182,169 @@ const routes: [string, RegExp, Route][] = [
     await fleet(['kill', name])
     await poll() // so the next list the page sees already reflects this
     return { ok: true }
+  }],
+
+  ['POST', /^\/api\/agents\/([^/]+)\/rename$/, async (req, [name]) => {
+    agentOr404(name)
+    const to = str((await body(req)).to, 40)
+    if (!NAME.test(to)) throw new HttpError(400, 'name: letters, digits, . _ - (up to 40)')
+    await fleet(['rename', name, to])
+    const map = placements()
+    if (map.has(`name:${name}`)) { place(`name:${to}`, map.get(`name:${name}`)!); place(`name:${name}`, null) }
+    db.prepare('UPDATE ideas SET agent = ? WHERE agent = ?').run(to, name)
+    await poll()
+    return { name: to }
+  }],
+
+  ['GET', /^\/api\/agents\/([^/]+)\/changes$/, async (_req, [name]) => {
+    const a = list().find(a => a.name === name)
+    if (!a?.cwd) throw new HttpError(404, `no agent named ${name}`)
+    return changes(a.cwd, Math.floor(Date.now() / 1000) - a.age_s)
+  }],
+
+  // ---------- folders ----------
+  ['GET', /^\/api\/folders$/, async () => db.prepare('SELECT * FROM folders ORDER BY position, id').all()],
+  ['POST', /^\/api\/folders$/, async req => {
+    const b = await body(req)
+    const name = str(b.name, 60).trim()
+    if (!name) throw new HttpError(400, 'folder name: 1-60 characters')
+    const pos = (db.prepare('SELECT coalesce(max(position), 0) + 1 AS p FROM folders').get() as { p: number }).p
+    const r = db.prepare('INSERT INTO folders (name, color, position) VALUES (?, ?, ?)').run(name, str(b.color, 20) || '#8e8e93', pos)
+    return { id: Number(r.lastInsertRowid) }
+  }],
+  ['PATCH', /^\/api\/folders\/(\d+)$/, async (req, [id]) => {
+    const b = await body(req)
+    if (str(b.name, 60).trim()) db.prepare('UPDATE folders SET name = ? WHERE id = ?').run(str(b.name, 60).trim(), int(id))
+    if (str(b.color, 20)) db.prepare('UPDATE folders SET color = ? WHERE id = ?').run(str(b.color, 20), int(id))
+    if (typeof b.position === 'number') db.prepare('UPDATE folders SET position = ? WHERE id = ?').run(b.position, int(id))
+    return { ok: true }
+  }],
+  ['DELETE', /^\/api\/folders\/(\d+)$/, async (_req, [id]) => {
+    db.prepare('DELETE FROM placements WHERE folder_id = ?').run(int(id)) // its agents go back to All, nothing else changes
+    db.prepare('DELETE FROM folders WHERE id = ?').run(int(id))
+    return { ok: true }
+  }],
+  ['PUT', /^\/api\/placements$/, async req => {
+    const b = await body(req)
+    if (!/^(sid|name):[\w.-]{1,80}$/.test(String(b.key))) throw new HttpError(400, 'bad key')
+    place(b.key, typeof b.folder_id === 'number' ? b.folder_id : null)
+    return { ok: true }
+  }],
+
+  // ---------- history + chat ----------
+  ['GET', /^\/api\/history$/, async req => {
+    const q = new URL(req.url ?? '', 'http://x').searchParams.get('q')?.toLowerCase().trim() ?? ''
+    const map = placements()
+    const running = new Map(list().filter(a => a.session_id).map(a => [a.session_id, a.name]))
+    return (await conversations())
+      .filter(c => !q || `${c.title} ${c.prompt} ${c.cwd}`.toLowerCase().includes(q))
+      .map(c => ({ ...c, key: `sid:${c.id}`, folder_id: map.get(`sid:${c.id}`) ?? null, running: running.get(c.id) ?? null }))
+  }],
+  ['GET', /^\/api\/transcript$/, async req => {
+    const sp = new URL(req.url ?? '', 'http://x').searchParams
+    const t = await transcript(sp.get('tool') ?? '', sp.get('id') ?? '')
+    if (!t) throw new HttpError(404, 'no transcript for that conversation')
+    return t.version === sp.get('v') ? { version: t.version, same: true } : t
+  }],
+  ['POST', /^\/api\/history\/resume$/, async req => {
+    const b = await body(req)
+    if (b.tool !== 'claude' && b.tool !== 'codex') throw new HttpError(400, 'only Claude and Codex conversations can be resumed from here')
+    const slug = String(b.title || b.tool).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 30)
+    return startAgent({ tool: b.tool, resume: str(b.id, 80), cwd: str(b.cwd, 1000), name: slug || undefined })
+  }],
+
+  // ---------- usage + smart features ----------
+  ['GET', /^\/api\/usage$/, async () => usage()],
+  ['POST', /^\/api\/ai\/improve$/, async req => {
+    const b = await body(req)
+    if (!str(b.text, 20_000).trim()) throw new HttpError(400, 'nothing to improve')
+    const project = str(b.cwd, 1000) || config.cwd || ''
+    return improvePrompt(b.text, project && existsSync(project) ? project : '')
+  }],
+  ['POST', /^\/api\/ai\/recommend$/, async req => {
+    const b = await body(req)
+    if (!str(b.task, 20_000).trim()) throw new HttpError(400, 'describe the task first')
+    return recommend(b.task, usageText(await usage()))
+  }],
+  ['POST', /^\/api\/interview$/, async req => {
+    const b = await body(req)
+    const topic = str(b.topic, 20_000).trim()
+    if (!topic) throw new HttpError(400, 'what should the interview be about?')
+    const slug = topic.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 24)
+    const started = await startAgent({ tool: 'claude', name: `interview-${slug}`, prompt: interviewPrompt(topic), cwd: str(b.cwd, 1000), folder_id: b.folder_id })
+    if (typeof b.idea_id === 'number') ideas.updateIdea(b.idea_id, { agent: started.name })
+    return started
+  }],
+  ['POST', /^\/api\/jarvis$/, async req => {
+    const said = str((await body(req)).text, 2000).trim()
+    if (!said) throw new HttpError(400, "didn't catch that")
+    return runJarvis(said)
+  }],
+
+  // ---------- ideas ----------
+  ['GET', /^\/api\/lists$/, async () => ideas.lists()],
+  ['POST', /^\/api\/lists$/, async req => {
+    const b = await body(req)
+    const name = str(b.name, 60).trim()
+    if (!name) throw new HttpError(400, 'list name: 1-60 characters')
+    try { ideas.createList(name, str(b.color, 20) || undefined) } catch { throw new HttpError(409, `there's already a list called ${name}`) }
+    return { ok: true }
+  }],
+  ['PATCH', /^\/api\/lists\/(\d+)$/, async (req, [id]) => {
+    const b = await body(req)
+    try {
+      ideas.updateList(int(id), { name: str(b.name, 60).trim() || undefined, color: str(b.color, 20) || undefined,
+        position: typeof b.position === 'number' ? b.position : undefined, archived: typeof b.archived === 'boolean' ? b.archived : undefined })
+    } catch (e) { throw new HttpError(400, (e as Error).message) }
+    return { ok: true }
+  }],
+  ['DELETE', /^\/api\/lists\/(\d+)$/, async (_req, [id]) => {
+    try { ideas.deleteList(int(id)) } catch (e) { throw new HttpError(400, (e as Error).message) }
+    return { ok: true }
+  }],
+  ['GET', /^\/api\/ideas$/, async req => {
+    const listName = new URL(req.url ?? '', 'http://x').searchParams.get('list') ?? undefined
+    const agents = new Map(list().map(a => [a.name, a.status]))
+    return ideas.ideas(listName).map(i => ({ ...i, agent_status: i.agent ? agents.get(i.agent) ?? 'gone' : null }))
+  }],
+  ['POST', /^\/api\/ideas$/, async req => {
+    const b = await body(req)
+    const text = str(b.text, 10_000).trim()
+    if (!text) throw new HttpError(400, 'empty idea')
+    return { id: ideas.addIdea(text, str(b.list, 60).trim() || 'Brain Dump') }
+  }],
+  ['PATCH', /^\/api\/ideas\/(\d+)$/, async (req, [id]) => {
+    ideaOr404(id)
+    const b = await body(req)
+    try {
+      return ideas.updateIdea(int(id), {
+        text: typeof b.text === 'string' && b.text.trim() ? b.text.trim().slice(0, 10_000) : undefined,
+        notes: typeof b.notes === 'string' ? b.notes.slice(0, 50_000) : undefined,
+        list: str(b.list, 60).trim() || undefined, done: typeof b.done === 'boolean' ? b.done : undefined,
+        repeat: b.repeat === null ? null : str(b.repeat, 20) || undefined, position: typeof b.position === 'number' ? b.position : undefined,
+        agent: b.agent === null ? null : undefined, clearSuggestion: b.clearSuggestion === true,
+      })
+    } catch (e) { throw new HttpError(400, (e as Error).message) }
+  }],
+  ['DELETE', /^\/api\/ideas\/(\d+)$/, async (_req, [id]) => {
+    ideas.deleteIdea(int(id))
+    return { ok: true }
+  }],
+  ['POST', /^\/api\/ideas\/sort$/, async () => ({ suggested: await ideas.suggestSorting() })],
+  ['POST', /^\/api\/ideas\/(\d+)\/start$/, async (req, [id]) => {
+    const item = ideaOr404(id)
+    const b = await body(req)
+    const slug = item.text.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 28)
+    const started = await startAgent({ ...b, name: str(b.name, 40) || slug, prompt: str(b.prompt, 100_000) || `${item.text}${item.notes ? `\n\n${item.notes}` : ''}` })
+    ideas.updateIdea(item.id, { agent: started.name })
+    return started
+  }],
+  ['POST', /^\/api\/ideas\/import$/, async () => {
+    try {
+      return { output: (await run(FLEET_BIN, ['import-notes'])).trim() }
+    } catch (e: any) {
+      throw new HttpError(403, (e.stderr || e.message || 'import failed').trim())
+    }
   }],
 
   ['GET', /^\/api\/paused$/, async () => db.prepare('SELECT * FROM paused ORDER BY paused_at DESC').all()],
