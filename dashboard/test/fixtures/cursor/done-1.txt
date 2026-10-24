@@ -17,7 +17,7 @@
 
 
   Auto · 5.9%                                                   Run Everything
-  /private/tmp/claude-501/-Users-will-Desktop-Optimal-Data-Inc-optimal/5309df96
+  /private/tmp/claude-501/-Users-user-Desktop-Acme-Widgets-Inc-project/5309df96
   -c45e-4b5e-b7d2-67a734478ef7/scratchpad/work-cursor.AOTs · master
 
 

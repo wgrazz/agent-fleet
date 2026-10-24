@@ -4,7 +4,7 @@
   └ fleet-test-ok
 
 • Hook failed
-  └ unsupported plugin entry type: /Users/will/.codex/plugins/cache/claude-mem-
+  └ unsupported plugin entry type: /Users/user/.codex/plugins/cache/claude-mem-
 local/claude-mem/13.11.0/node_modules/.bin/node-gyp-build
 
 • It printed:
@@ -12,7 +12,7 @@ local/claude-mem/13.11.0/node_modules/.bin/node-gyp-build
   fleet-test-ok
 
 • Hook failed
-  └ unsupported plugin entry type: /Users/will/.codex/plugins/cache/claude-mem-
+  └ unsupported plugin entry type: /Users/user/.codex/plugins/cache/claude-mem-
 local/claude-mem/13.11.0/node_modules/.bin/node-gyp-build
 
   Worked for 13s • 6:46 PM

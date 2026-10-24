@@ -7,7 +7,7 @@
   │                                                                          │
   │  Do you trust the contents of this directory?                            │
   │                                                                          │
-  │    /private/tmp/claude-501/-Users-will-Desktop-Optimal-Data-Inc-optimal  │
+  │    /private/tmp/claude-501/-Users-user-Desktop-Acme-Widgets-Inc-project  │
   │    /5309df96-c45e-4b5e-b7d2-67a734478ef7/scratchpad/work-cursor.AOTs     │
   │                                                                          │
   │                                                                          │

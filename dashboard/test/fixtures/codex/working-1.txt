@@ -8,11 +8,11 @@
 
 
 • Hook failed
-  └ unsupported plugin entry type: /Users/will/.codex/plugins/cache/claude-mem-
+  └ unsupported plugin entry type: /Users/user/.codex/plugins/cache/claude-mem-
 local/claude-mem/13.11.0/node_modules/.bin/node-gyp-build
 
 • Hook failed
-  └ unsupported plugin entry type: /Users/will/.codex/plugins/cache/claude-mem-
+  └ unsupported plugin entry type: /Users/user/.codex/plugins/cache/claude-mem-
 local/claude-mem/13.11.0/node_modules/.bin/node-gyp-build
 
 • Working (2s • esc to interrupt)

@@ -5,7 +5,7 @@
   Antigravity CLI 1.4.6
   user@example.com (Google AI Pro)
   Gemini 3.8 Flash (High)
-  /private/tmp/claude-501/-Users-will-Desktop-Optimal-Data-Inc-optimal/5309df96-
+  /private/tmp/claude-501/-Users-user-Desktop-Acme-Widgets-Inc-project/5309df96-
 
 ────────────────────────────────────────────────────────────
 > Run this exact shell command and then tell me what it printed: sleep 6 &&

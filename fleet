@@ -326,7 +326,7 @@ def show(procs, everything=False):
         label = os.path.basename(r['cwd']) or r['cwd'] or '?'
         what = r['task'][:60] + ('  <- ran fleet' if r['mine'] else '')
         st = (status.get(r['pid']) or '–').replace('_', ' ')
-        print(f'{r["pid"]:>6}  {r["tool"]:<8}{st:<10}{r["age"]:>11}  {r["where"]:<30}{label[:15]:<16}{what}')
+        print(f'{r["pid"]:>6}  {r["tool"]:<8}{st:<10}{r["age"]:>11}  {r["where"]:<29} {label[:15]:<16}{what}')
     if not listed:
         print('  (no agents running)')
     if hidden and not everything:
@@ -1159,7 +1159,7 @@ def selftest():
     assert note_lines(blob) == [('000 Brain Dump:', False, False), ('Fix login 🙂', True, False), ('Ship it', True, True),
                                 ('plain line', False, False)], note_lines(blob)
     assert notes_list_name('000 Brain Dump:') == 'Brain Dump' and notes_list_name('001 PRIORITY:') == 'Priority'
-    assert notes_list_name('011 Optimal Data Public Face') == 'Optimal Data Public Face'
+    assert notes_list_name('011 Side Projects') == 'Side Projects'
     t = parse_when('+2h')
     assert abs(t - time.time() - 7200) < 5 and parse_when('1800000000') == 1800000000
     assert parse_when('23:59') > time.time() and parse_when('2030-01-02 03:04') > time.time()

@@ -1,6 +1,6 @@
 
   Folder access
-  /private/tmp/claude-501/-Users-will-Desktop-Optimal-Data-Inc-optimal/5309df9
+  /private/tmp/claude-501/-Users-user-Desktop-Acme-Widgets-Inc-project/5309df9
   6-c45e-4b5e-b7d2-67a734478ef7/scratchpad/work-codex.ujFU
 
   Trust this folder? Codex can read, edit, and run files here, subject to your

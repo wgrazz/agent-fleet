@@ -1,13 +1,47 @@
-# agent-fleet
+# Agent Fleet
 
-See, reattach and stop every coding agent running on your machine — Claude Code, Codex,
-Cursor, Copilot, Antigravity — and keep them alive when the terminal (or your SSH session) drops.
+**by [Optimal Data Inc.](https://optimaldata.org)** · MIT licensed
+
+Run Claude Code, Codex, Cursor, Copilot and Antigravity side by side, keep them alive when the
+terminal or SSH connection drops, and answer them from your phone. It all runs on your own Mac:
+no account, no cloud relay, and the AI features use the subscriptions you already have.
+
+<p align="center"><img src="docs/screenshots/dashboard.png" width="820" alt="The Fleet dashboard: agents from five tools with their status, and one agent's live screen"></p>
+<p align="center">
+  <img src="docs/screenshots/phone.png" width="260" alt="Fleet on an iPhone">
+  &nbsp;
+  <img src="docs/screenshots/jarvis.png" width="260" alt="Jarvis, the voice assistant">
+</p>
+
+- **Every agent in one list:** needs you, working, done or crashed, across all five tools.
+- **Answer from anywhere:** one-tap menu answers, a reply box and a full terminal, on the Mac or
+  your iPhone over Tailscale, with a push when an agent needs you.
+- **Agents that survive:** close the window or lose the SSH connection and the agent keeps going.
+  Pause one until 6:30 and it comes back on its own.
+- **Jarvis:** talk or type ("what needs me?", "tell api yes"). It reads freely and asks before it
+  touches an agent.
+- **Ideas:** a checklist inbox where any idea can become an agent with one tap.
+
+## Install
+
+```
+git clone https://github.com/wgrazz/agent-fleet
+ln -s "$PWD/agent-fleet/fleet" ~/.local/bin/fleet     # anywhere on PATH
+fleet new my-task        # a protected session in this folder: run claude / codex / agent inside it
+fleet dash install       # the dashboard, at login (add --local if you don't use Tailscale)
+```
+
+The CLI needs Python 3.9+, tmux, and `lsof`/`ps` (present on macOS and Linux). `caffeinate` is
+used when present, so Linux works too; it just doesn't block sleep. The dashboard needs macOS
+and Node.js 24+.
+
+## The CLI
 
 ```
 $ fleet
-   PID  TOOL            AGE  WHERE                         DIR             TASK
- 41922  claude       2:14:07  safe · scraper · background   optimal         [running] Walmart gate C capability check
- 43310  codex          31:50  dies with window              motion-studio   Trim the intro to 4 seconds
+   PID  TOOL    STATUS            AGE  WHERE                         DIR             TASK
+ 41922  claude  working       2:14:07  safe · api · background       shop-app        [busy] Add rate limiting to /search
+ 43310  codex   needs you       31:50  dies with window              landing         Trim the hero copy
   + 3 background helpers (fleet all)
 
 WAITERS
@@ -15,23 +49,11 @@ WAITERS
  42001  claude 41922       1:03:12  /bin/sh -c until ssh server 'test -f /tmp/done'; do sleep 300; done
 ```
 
-## Why
-
 Agents started in a plain terminal die when that window closes or a Termius / SSH connection
-drops — along with the hour of work they were in the middle of. `fleet new NAME` starts a
+drops, along with the hour of work they were in the middle of. `fleet new NAME` starts a
 protected tmux session (with `caffeinate` on macOS so the laptop doesn't sleep) and you run the
 agent inside it. `fleet` then shows every agent on the box, whether it is protected, what it is
 working on, and any follow-up waiters it armed. `fleet kill` cleans up.
-
-## Install
-
-```
-git clone https://github.com/wgrazz/agent-fleet
-ln -s "$PWD/agent-fleet/fleet" ~/.local/bin/fleet     # anywhere on PATH
-```
-
-Needs Python 3.9+, tmux, and `lsof`/`ps` (present on macOS and Linux). `caffeinate` is used
-when present, so Linux works too; it just doesn't block sleep.
 
 ## Commands
 
@@ -125,12 +147,12 @@ folders.
 - Cursor and Antigravity don't expose theirs.
 
 **Jarvis.** The mic in the sidebar, the middle of the phone tab bar, or `J`. Type or talk.
-- **Instant, no AI:** "what needs me?", "tell walmart yes", "pause walmart until 18:30",
+- **Instant, no AI:** "what needs me?", "tell api yes", "pause api until 18:30",
   "idea: …", "remember …".
 - **Everything else goes to Claude as your project agent.** It only reads (the project and the web)
   and keeps lasting notes in `~/.fleet/jarvis-memory.md`.
 - **It asks before touching agents.** Starting an agent or typing into one shows an **Approve / No**
-  card, and saying "yes" or "do it" approves it. Things you command directly ("tell walmart yes")
+  card, and saying "yes" or "do it" approves it. Things you command directly ("tell api yes")
   happen right away.
 - **Conversations.** Each has its own title and memory, and a new one starts after 2 hours of quiet.
   Tap the title to switch or start fresh. They're shared between your phone and Mac.
@@ -148,7 +170,7 @@ folders.
 
 **Jarvis on your Mac.** One assistant for agents and your day, from your phone or the Mac.
 - **Music (Spotify):** "pause", "next song", "what's playing", "volume 30", "play some lo-fi".
-- **Calendar and Reminders:** "what's on tomorrow?", "remind me Friday at 9 to check Kroger".
+- **Calendar and Reminders:** "what's on tomorrow?", "remind me Friday at 9 to check the deploy".
   These go through EventKit, so recurring events and every account on the Mac are included.
 - **Email:** "draft a reply to Sam saying I'll send it Monday" saves a draft in Mail. Nothing is
   ever sent.
@@ -220,8 +242,8 @@ a Discord ping instead of checking back.
 
 ```
 export DISCORD_AGENT_WEBHOOK=https://discord.com/api/webhooks/...
-AGENT_NAME=claude ./agent-notify.sh "Walmart gate C finished: 347 branches loaded"
-# → [claude @ optimal] Walmart gate C finished: 347 branches loaded
+AGENT_NAME=claude ./agent-notify.sh "Nightly import finished: 347 rows loaded"
+# → [claude @ shop-app] Nightly import finished: 347 rows loaded
 ```
 
 It never fails the caller: a missing webhook or a failed post only warns on stderr.
