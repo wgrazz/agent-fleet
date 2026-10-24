@@ -12,13 +12,14 @@ mkdirSync(AI_DIR, { recursive: true })
 export const aiModel = () => process.env.FLEET_AI_MODEL ?? config.ai_model ?? 'sonnet'
 
 type Schema = Record<string, unknown>
-type AskOpts = { tools?: string[]; timeoutMs?: number; cwd?: string; feature?: string; resume?: string; persist?: boolean }
+type AskOpts = { tools?: string[]; allow?: string[]; addDirs?: string[]; timeoutMs?: number; cwd?: string; feature?: string; resume?: string; persist?: boolean }
 export type Answer<T> = { value: T; session_id: string; cost: number }
 
 export function askFull<T>(task: string, system: string, schema: Schema, opts: AskOpts = {}): Promise<Answer<T>> {
   const tools = opts.tools ?? []
   const args = ['-p', '--model', aiModel(), '--output-format', 'json', '--strict-mcp-config', '--setting-sources', 'project',
-    '--tools', tools.join(','), ...(tools.length ? ['--allowedTools', ...tools] : []),
+    '--tools', tools.join(','), ...(tools.length ? ['--allowedTools', ...(opts.allow ?? tools)] : []),
+    ...(opts.addDirs ?? []).flatMap(d => ['--add-dir', d]),
     ...(opts.persist ? [] : ['--no-session-persistence']), ...(opts.resume ? ['--resume', opts.resume] : []),
     '--system-prompt', system, '--json-schema', JSON.stringify(schema), '--', task]
   return new Promise((resolve, reject) => {
@@ -136,6 +137,8 @@ Your replies are spoken aloud, so keep "say" to one to three short sentences: no
 
 You are also their general project agent. You run inside their project folder and can read files and search the code (Read, Glob, Grep) and the web (WebSearch, WebFetch) to answer questions about the project, its plans and docs, or anything else. Look things up rather than guessing, but keep it quick.
 
+You also run on the developer's Mac, so you can help with their day. To look things up, run these yourself with Bash (nothing else is allowed): \`fleet mac calendar today|tomorrow|week|YYYY-MM-DD\`, \`fleet mac reminders\`, \`fleet mac music now\`, \`fleet mac apps\`, and \`fleet mac screen\` (it saves a screenshot and prints its path; Read that file to see the screen). If one says it's waiting for permission, tell them to allow it on the Mac.
+
 You only read. To change anything, return "actions". Changes to agents (start, reply, key, pause) are shown to the developer as a card to approve before anything happens, so phrase your reply as an offer ("Shall I start a Claude agent to fix the pagination?"), never as done. Ideas and remember happen right away.
 Actions:
 - reply: send text to an agent (agent, text)
@@ -144,9 +147,11 @@ Actions:
 - start: start a new agent (text = its task; optional tool, model, effort, name)
 - idea: add an idea (text; optional list, default "Brain Dump")
 - remember: save a lasting note about the developer or project for future conversations (text)
+- mac: do something on the Mac (fill "mac"): music_play, music_pause, music_next, music_previous, music_volume (value 0-100), music_search (value), open_app (app), window (app, where = left|right|full|center), and, which the developer approves first: event (title, when "YYYY-MM-DD HH:MM", minutes, calendar), remind (title, when optional, calendar = list name), draft (to, subject, body: an email draft saved in Mail, never sent). Write emails in the developer's voice: short, plain, friendly.
 Only propose actions when they'd clearly help or were asked for; for questions just answer. Never kill agents (they can do that from the dashboard). If an agent name is ambiguous or missing, ask instead of guessing.`
 
-export type JarvisAction = { type: 'reply' | 'key' | 'pause' | 'start' | 'idea' | 'remember'; agent: string; text: string; key: string; tool: string; model: string; effort: string; list: string; name: string }
+export type MacAction = { command: string; title: string; when: string; minutes: string; calendar: string; to: string; subject: string; body: string; app: string; where: string; value: string }
+export type JarvisAction = { type: 'reply' | 'key' | 'pause' | 'start' | 'idea' | 'remember' | 'mac'; agent: string; text: string; key: string; tool: string; model: string; effort: string; list: string; name: string; mac?: MacAction }
 export type JarvisReply = { say: string; actions: JarvisAction[] }
 
 export const jarvisBrain = (said: string, context: string, memory: string, opts: { cwd: string; resume?: string }) =>
@@ -154,6 +159,16 @@ export const jarvisBrain = (said: string, context: string, memory: string, opts:
     obj({
       say: str,
       actions: { type: 'array', items: obj({
-        type: { type: 'string', enum: ['reply', 'key', 'pause', 'start', 'idea', 'remember'] }, agent: str, text: str, key: str, tool: str, model: str, effort: str, list: str, name: str,
+        type: { type: 'string', enum: ['reply', 'key', 'pause', 'start', 'idea', 'remember', 'mac'] }, agent: str, text: str, key: str, tool: str, model: str, effort: str, list: str, name: str,
+        mac: obj({
+          command: { type: 'string', enum: ['', 'music_play', 'music_pause', 'music_next', 'music_previous', 'music_volume', 'music_search', 'open_app', 'window', 'event', 'remind', 'draft'] },
+          title: str, when: str, minutes: str, calendar: str, to: str, subject: str, body: str, app: str, where: str, value: str,
+        }),
       }) },
-    }), { tools: ['Read', 'Glob', 'Grep', 'WebSearch', 'WebFetch'], timeoutMs: 150_000, cwd: opts.cwd, resume: opts.resume, persist: true, feature: 'jarvis' })
+    }), {
+      tools: ['Read', 'Glob', 'Grep', 'WebSearch', 'WebFetch', 'Bash'],
+      // Bash only for the read-only Mac lookups; anything else is refused without asking
+      allow: ['Read', 'Glob', 'Grep', 'WebSearch', 'WebFetch', 'Bash(fleet mac calendar:*)', 'Bash(fleet mac reminders:*)', 'Bash(fleet mac music now)', 'Bash(fleet mac apps)', 'Bash(fleet mac screen)'],
+      addDirs: [join(FLEET_DIR, 'screens')],
+      timeoutMs: 150_000, cwd: opts.cwd, resume: opts.resume, persist: true, feature: 'jarvis',
+    })

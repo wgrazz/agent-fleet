@@ -308,7 +308,7 @@ function App() {
   if (route.view === 'settings') {
     detail = <SettingsPage usage={usage.data ?? []} push={push} onBack={() => go(isPhone() ? '#/more' : lastListRoute.current)} onError={fail} />
   } else if (route.view === 'jarvis') {
-    detail = <main className="det jarvis-host"><Jarvis asPage onClose={() => go(lastListRoute.current)} onChanged={refreshAll} /></main>
+    detail = <main className="det jarvis-host"><Jarvis asPage autoTalk={route.a === 'talk'} onClose={() => go(lastListRoute.current)} onChanged={refreshAll} /></main>
   } else if (agentFromRoute) {
     detail = <AgentView key={agentFromRoute.name} agent={agentFromRoute} onBack={() => go(lastListRoute.current)} onTerminal={() => setTerminal(agentFromRoute.name)}
       onPause={() => act(api.post(`/api/agents/${enc(agentFromRoute.name)}/pause`), () => go('#/paused'))}

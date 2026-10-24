@@ -25,6 +25,7 @@ LATER
 DASHBOARD
   fleet dash             open the dashboard in your browser
   fleet dash app         open it in Safari to add to your Dock as a Mac app
+  fleet mac …            what Jarvis can do on this Mac: music, calendar, reminders, draft, apps, open, window, screen
   fleet ask TEXT         ask Jarvis (the dashboard's assistant) from any terminal or script
   fleet dash install     run the dashboard at login and put it on your tailnet for your phone (--local: Mac only)
   fleet dash update      after changing the dashboard's code: rebuild the page and restart the server
@@ -61,6 +62,7 @@ import sqlite3
 import subprocess
 import sys
 import time
+import urllib.parse
 import urllib.request
 
 HOME = os.path.expanduser('~')
@@ -846,6 +848,195 @@ def dash_app():
     print('In Safari: File → Add to Dock. Fleet then opens as its own app with notifications, like on your phone.')
 
 
+# ---------- fleet mac: what Jarvis can do on this Mac ----------
+# Reads (Jarvis runs these itself): music now, calendar, reminders, apps, screen. Writes go through the dashboard,
+# which asks you first for events, reminders and email drafts. First use of each asks macOS permission on the Mac.
+
+KIT = f'{FLEET_DIR}/bin/fleetkit'
+
+
+def osa(script, timeout=20):
+    try:
+        r = subprocess.run(['osascript', '-e', script], capture_output=True, text=True, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        sys.exit('macOS is waiting for permission: check your Mac for an "allow access" prompt.')
+    if r.returncode:
+        err = r.stderr.strip()
+        if 'Not authorized' in err or '-1743' in err:
+            sys.exit('No permission yet: System Settings → Privacy & Security → Automation, allow Fleet to control that app.')
+        sys.exit(err or 'osascript failed')
+    return r.stdout.strip()
+
+
+def kit(*args, timeout=25):
+    if not os.path.exists(KIT):
+        mac_setup(quiet=True)
+    try:
+        r = subprocess.run([KIT, *args], capture_output=True, text=True, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        sys.exit('macOS is waiting for permission: check your Mac for a Calendars or Reminders prompt.')
+    data = json.loads(r.stdout or '{}')
+    if isinstance(data, dict) and data.get('error'):
+        sys.exit(data['error'])
+    return data
+
+
+def when_range(word):
+    import datetime
+    today = datetime.date.today()
+    if word in ('', 'today'):
+        a, b = today, today + datetime.timedelta(days=1)
+    elif word == 'tomorrow':
+        a, b = today + datetime.timedelta(days=1), today + datetime.timedelta(days=2)
+    elif word == 'week':
+        a, b = today, today + datetime.timedelta(days=7)
+    else:
+        try:
+            a = datetime.date.fromisoformat(word)
+        except ValueError:
+            sys.exit(f"Use today, tomorrow, week or a date like 2026-10-30 (not {word!r}).")
+        b = a + datetime.timedelta(days=1)
+    return a.isoformat(), b.isoformat()
+
+
+def fmt_time(isotime):
+    import datetime
+    if not isotime:
+        return ''
+    t = datetime.datetime.fromisoformat(isotime.replace('Z', '+00:00')).astimezone()
+    return t.strftime('%a %-d %b %-I:%M %p')
+
+
+def mac(args):
+    p = argparse.ArgumentParser(prog='fleet mac')
+    sub = p.add_subparsers(dest='cmd', required=True)
+    m = sub.add_parser('music'); m.add_argument('action', choices=['now', 'play', 'pause', 'toggle', 'next', 'previous', 'volume', 'search']); m.add_argument('value', nargs='*')
+    c = sub.add_parser('calendar'); c.add_argument('when', nargs='?', default='today')
+    e = sub.add_parser('event'); e.add_argument('title'); e.add_argument('--at', required=True); e.add_argument('--minutes', type=int, default=30); e.add_argument('--calendar', default=''); e.add_argument('--notes', default='')
+    r = sub.add_parser('reminders'); r.add_argument('list', nargs='?', default='')
+    rm = sub.add_parser('remind'); rm.add_argument('title'); rm.add_argument('--due', default=''); rm.add_argument('--list', default=''); rm.add_argument('--notes', default='')
+    d = sub.add_parser('draft'); d.add_argument('--to', default=''); d.add_argument('--subject', default=''); d.add_argument('--body', default='')
+    sub.add_parser('apps')
+    o = sub.add_parser('open'); o.add_argument('app')
+    w = sub.add_parser('window'); w.add_argument('where', choices=['left', 'right', 'full', 'center']); w.add_argument('app', nargs='?', default='')
+    sub.add_parser('screen')
+    sub.add_parser('setup')
+    hk = sub.add_parser('hotkey'); hk.add_argument('action', choices=['install', 'uninstall'])
+    a = p.parse_args(args)
+
+    if a.cmd == 'setup':
+        return mac_setup()
+    if a.cmd == 'hotkey':
+        return mac_hotkey(a.action)
+    if a.cmd == 'music':
+        v = ' '.join(a.value)
+        if a.action == 'now':
+            return print(osa('tell application "Spotify" to if player state is stopped then return "Nothing is playing." else return (player state as string) & ": " & (name of current track) & " by " & (artist of current track) & " (" & (album of current track) & ")"'))
+        if a.action == 'search':
+            subprocess.run(['open', f'spotify:search:{urllib.parse.quote(v)}'])
+            return print(f'Opened Spotify search for {v}.')
+        if a.action == 'volume':
+            osa(f'tell application "Spotify" to set sound volume to {max(0, min(100, int(v or 50)))}')
+            return print(f'Spotify volume {v}.')
+        if a.action == 'play' and v.startswith('spotify:'):
+            osa(f'tell application "Spotify" to play track "{v}"')
+            return print('Playing.')
+        verb = {'play': 'play', 'pause': 'pause', 'toggle': 'playpause', 'next': 'next track', 'previous': 'previous track'}[a.action]
+        osa(f'tell application "Spotify" to {verb}')
+        return print({'play': 'Playing.', 'pause': 'Paused.', 'toggle': 'Toggled.', 'next': 'Skipped.', 'previous': 'Back one.'}[a.action])
+    if a.cmd == 'calendar':
+        start, end = when_range(a.when)
+        events = kit('events', start, end)
+        if not events:
+            return print(f'Nothing on the calendar ({a.when}).')
+        for ev in events:
+            t = 'all day' if ev['all_day'] else fmt_time(ev['start'])
+            print(f"{t} · {ev['title']}{' @ ' + ev['location'] if ev['location'] else ''} [{ev['calendar']}]")
+        return
+    if a.cmd == 'event':
+        r = kit('add-event', a.title, a.at.replace(' ', 'T'), str(a.minutes), a.calendar, a.notes)
+        return print(f"Added “{a.title}” to {r['calendar']} at {fmt_time(r['start'])}.")
+    if a.cmd == 'reminders':
+        items = kit('reminders', *( [a.list] if a.list else []))
+        if not items:
+            return print('No open reminders.')
+        for it in items:
+            print(f"{it['title']}{' (due ' + fmt_time(it['due']) + ')' if it['due'] else ''} [{it['list']}]")
+        return
+    if a.cmd == 'remind':
+        r = kit('add-reminder', a.title, a.due.replace(' ', 'T'), a.list, a.notes)
+        return print(f"Reminder added to {r['list']}: {a.title}.")
+    if a.cmd == 'draft':
+        q = lambda t: t.replace('\\', '\\\\').replace('"', '\\"')
+        to = f'make new to recipient at end of to recipients with properties {{address:"{q(a.to)}"}}' if a.to else ''
+        osa(f'tell application "Mail"\nset m to make new outgoing message with properties {{subject:"{q(a.subject)}", content:"{q(a.body)}", visible:false}}\ntell m\n{to}\nend tell\nsave m\nend tell')
+        return print(f'Draft saved in Mail{" to " + a.to if a.to else ""}: “{a.subject}”. Nothing was sent.')
+    if a.cmd == 'apps':
+        front = osa('tell application "System Events" to return name of first process whose frontmost is true')
+        names = osa('tell application "System Events" to return name of every process whose background only is false')
+        return print(f'In front: {front}\nOpen apps: {names}')
+    if a.cmd == 'open':
+        r = subprocess.run(['open', '-a', a.app], capture_output=True, text=True)
+        return print(f'Opened {a.app}.' if not r.returncode else f"Couldn't find an app called {a.app}.")
+    if a.cmd == 'window':
+        target = f'process "{a.app}"' if a.app else 'first process whose frontmost is true'
+        box = {'left': '{0, 25}, {w / 2, h - 25}', 'right': '{w / 2, 25}, {w / 2, h - 25}', 'full': '{0, 25}, {w, h - 25}', 'center': '{w / 6, 60}, {w * 2 / 3, h - 120}'}[a.where]
+        pos, size = box.split('}, {')
+        osa(f'tell application "Finder" to set b to bounds of window of desktop\nset w to item 3 of b\nset h to item 4 of b\n'
+            f'tell application "System Events" to tell {target}\nset position of window 1 to {pos}}}\nset size of window 1 to {{{size}\nend tell')
+        return print(f'Moved the {a.app or "front"} window {a.where}.')
+    if a.cmd == 'screen':
+        path = f'{FLEET_DIR}/screens/latest.jpg'
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        r = subprocess.run(['screencapture', '-x', '-t', 'jpg', path], capture_output=True, text=True)
+        if r.returncode or not os.path.exists(path):
+            sys.exit('Could not capture the screen: allow Screen Recording for Fleet in System Settings → Privacy & Security.')
+        subprocess.run(['sips', '-Z', '1600', path], capture_output=True)
+        return print(f'Screenshot saved: {path} (read it to see the screen)')
+
+
+HOTKEY_LABEL = 'com.wgrazz.fleet-hotkey'
+
+
+def mac_hotkey(action):
+    """⌃⌥Space anywhere on the Mac opens Jarvis, ready to talk."""
+    plist = f'{HOME}/Library/LaunchAgents/{HOTKEY_LABEL}.plist'
+    domain = f'gui/{os.getuid()}'
+    subprocess.run(['launchctl', 'bootout', f'{domain}/{HOTKEY_LABEL}'], capture_output=True)
+    if action == 'uninstall':
+        if os.path.exists(plist):
+            os.remove(plist)
+        return print('⌃⌥Space hotkey removed.')
+    import plistlib
+    src = os.path.join(os.path.dirname(FLEET), 'dashboard', 'mac', 'hotkey.swift')
+    binary = f'{FLEET_DIR}/bin/fleet-hotkey'
+    os.makedirs(os.path.dirname(binary), exist_ok=True)
+    r = subprocess.run(['swiftc', '-O', '-o', binary, src], capture_output=True, text=True)
+    if r.returncode:
+        sys.exit(f'Could not build the hotkey helper: {r.stderr.strip()[:300]}')
+    cfg = config()
+    ts = tailscale()
+    host = json.loads(out(ts, 'status', '--json') or '{}').get('Self', {}).get('DNSName', '').rstrip('.') if ts else ''
+    url = f'https://{host}/#/jarvis/talk' if host else f'http://127.0.0.1:{cfg["port"]}/#/jarvis/talk'
+    with open(plist, 'wb') as f:
+        plistlib.dump({'Label': HOTKEY_LABEL, 'ProgramArguments': [binary, url], 'RunAtLoad': True, 'KeepAlive': True,
+                       'StandardErrorPath': f'{FLEET_DIR}/hotkey.log'}, f)
+    subprocess.run(['launchctl', 'bootstrap', domain, plist], check=True)
+    print('⌃⌥Space now opens Jarvis anywhere on this Mac (starts at login). Add Fleet to your Dock first (fleet dash app) so it opens as its own app.')
+
+
+def mac_setup(quiet=False):
+    """Build the Calendar/Reminders helper. Permissions are asked on first use (or from Settings → Mac access)."""
+    src = os.path.join(os.path.dirname(FLEET), 'dashboard', 'mac')
+    os.makedirs(os.path.dirname(KIT), exist_ok=True)
+    r = subprocess.run(['swiftc', '-O', '-o', KIT, f'{src}/fleetkit.swift', '-Xlinker', '-sectcreate', '-Xlinker', '__TEXT',
+                        '-Xlinker', '__info_plist', '-Xlinker', f'{src}/Info.plist'], capture_output=True, text=True)
+    if r.returncode:
+        sys.exit(f'Could not build the Calendar helper (needs Xcode command line tools): {r.stderr.strip()[:300]}')
+    if not quiet:
+        print('Mac helpers ready. Calendar, Reminders, Spotify, Mail and window control ask for permission the first time.')
+
+
 def tts_install():
     """Natural voice for Jarvis: Kokoro (open-weight, Apache-2.0) in its own Python env under ~/.fleet/tts (~350 MB)."""
     d = f'{FLEET_DIR}/tts'
@@ -1014,6 +1205,8 @@ def main(args):
         return dash()
     if cmd == 'dash' and rest[:1] == ['install'] and set(rest[1:]) <= {'--local'}:
         return dash_install(local='--local' in rest)
+    if cmd == 'mac' and rest:
+        return mac(rest)
     if cmd == 'dash' and rest == ['app']:
         return dash_app()
     if cmd == 'dash' and rest == ['update']:

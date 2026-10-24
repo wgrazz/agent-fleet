@@ -46,6 +46,7 @@ when present, so Linux works too; it just doesn't block sleep.
 | `fleet json` | The agent list as JSON (what the dashboard reads) |
 | `fleet dash` | Open the dashboard |
 | `fleet hooks install` / `uninstall` | Add or remove the Claude Code hooks that report status to the dashboard |
+| `fleet mac …` | Jarvis's Mac abilities: `music`, `calendar`, `event`, `reminders`, `remind`, `draft`, `apps`, `open`, `window`, `screen`, `hotkey install` |
 | `fleet tts install` | A natural voice for Jarvis (Kokoro, runs on this Mac, ~350 MB in `~/.fleet/tts`) |
 | `fleet resume [NAME]` | Reattach (no name: the only session, or a list) |
 | `fleet peek NAME` | Print the last 40 lines of NAME's screen without attaching |
@@ -145,6 +146,20 @@ folders.
 - It answers out loud and can speak alerts when agents need you (a setting, off by default).
 - Voice input uses the browser's speech recognition, and you can always type instead.
 
+**Jarvis on your Mac.** One assistant for agents and your day, from your phone or the Mac.
+- **Music (Spotify):** "pause", "next song", "what's playing", "volume 30", "play some lo-fi".
+- **Calendar and Reminders:** "what's on tomorrow?", "remind me Friday at 9 to check Kroger".
+  These go through EventKit, so recurring events and every account on the Mac are included.
+- **Email:** "draft a reply to Sam saying I'll send it Monday" saves a draft in Mail. Nothing is
+  ever sent.
+- **Apps and windows:** "open Figma", "put Safari on the left".
+- **Your screen:** "what's on my screen?" (Jarvis takes a screenshot and reads it).
+- **⌃⌥Space** anywhere on the Mac opens Jarvis ready to talk (`fleet mac hotkey install`).
+
+Reading things and music happen right away. Calendar events, reminders and email drafts show an
+**Approve** card first. Each ability asks macOS for permission once: Settings → **Mac access** →
+**Set up all**, while you're at the Mac.
+
 **Jarvis outside the dashboard.** `fleet ask "what needs me?"` talks to the same Jarvis, with the
 same memory, cost cap and actions, from any terminal or script. That makes it easy to connect to:
 
@@ -159,10 +174,6 @@ same memory, cost cap and actions, from any terminal or script. That makes it ea
   4. **Speak Text.**
 
   Then say "Hey Siri, Jarvis". Tailscale must be on.
-- **[Atticus](https://github.com/SaarthurR/atticus-mac).** A free Mac voice assistant on your
-  Claude plan, with a Mac-wide ⌃⌥Space hotkey and on-device speech. After installing it, tell it:
-  *"Remember: for anything about my coding agents, my ideas or Fleet, run `fleet ask` with what I
-  said, and read me the answer."*
 
 **Keys:**
 

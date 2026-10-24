@@ -149,6 +149,7 @@ async function doAction(a: JarvisAction): Promise<string> {
   if (a.type === 'start') return `started ${(await startAgent({ tool: a.tool || undefined, model: a.model, effort: a.effort, prompt: a.text, name: a.name })).name}`
   if (a.type === 'idea') ideas.addIdea(a.text, a.list || 'Brain Dump')
   if (a.type === 'remember') J.remember(a.text)
+  if (a.type === 'mac' && a.mac) return (await fleet(['mac', ...J.macArgv(a.mac)])).trim()
   return `${a.type === 'remember' ? 'remembered' : a.type}${a.agent ? ` ${a.agent}` : ''}${a.key ? ` ${a.key}` : ''}`
 }
 
@@ -193,6 +194,17 @@ async function runJarvis(said: string, opts: JarvisOpts = {}) {
     return reply(`${r.summary}${top ? ` Next up: ${top}.` : ''}`, { mode: 'claude' })
   }
 
+  // music, "what's playing", "what's on today", "open Spotify": straight to the Mac, no Claude
+  const mac = J.instantMac(said)
+  if (mac) {
+    try {
+      const out = (await fleet(['mac', ...mac.argv])).trim()
+      return reply(out.replace(/\n/g, '. ').replace(/\s*\[[^\]]+\]/g, ''), { mode: 'instant' })
+    } catch (e) {
+      return reply((e as Error).message, { mode: 'instant' })
+    }
+  }
+
   // things you said directly ("tell walmart yes") happen right away
   const quick = J.instant(said, list())
   if (quick) {
@@ -217,7 +229,7 @@ async function runJarvis(said: string, opts: JarvisOpts = {}) {
   // Jarvis only reads; anything that changes an agent becomes a proposal you approve
   const proposed = []
   for (const a of answer.value.actions) {
-    if (a.type === 'idea' || a.type === 'remember') done.push(await doAction(a).catch(e => `couldn't ${a.type}: ${(e as Error).message}`))
+    if (!J.needsApproval(a)) done.push(await doAction(a).catch(e => `couldn't ${a.type}: ${(e as Error).message}`))
     else proposed.push(J.propose(t.id, a))
   }
   const after = await budget()
@@ -385,6 +397,17 @@ const routes: [string, RegExp, Route][] = [
     return { ok: true }
   }],
   ['GET', /^\/api\/tts\/voices$/, async () => voices()],
+  ['POST', /^\/api\/mac\/check$/, async req => {
+    const what = str((await body(req)).what, 20)
+    const argv: Record<string, string[]> = { calendar: ['calendar', 'today'], reminders: ['reminders'], music: ['music', 'now'], apps: ['apps'], screen: ['screen'] }
+    if (!argv[what]) throw new HttpError(400, 'check one of calendar, reminders, music, apps, screen')
+    try {
+      const out = await run(FLEET_BIN, ['mac', ...argv[what]])
+      return { ok: true, detail: out.trim().split('\n')[0].slice(0, 120) }
+    } catch (e: any) {
+      return { ok: false, detail: (e.stderr || e.message || '').trim().split('\n').pop() }
+    }
+  }],
   ['POST', /^\/api\/ai\/improve$/, async req => {
     const b = await body(req)
     if (!str(b.text, 20_000).trim()) throw new HttpError(400, 'nothing to improve')

@@ -112,6 +112,8 @@ export function SettingsPage({ usage, push, onBack, onError }: { usage: Usage[];
           </div>
         </Section>
 
+        <MacAccess />
+
         <Section title="Jarvis's budget" hint="Jarvis's share of your weekly Claude limit, worked out from what all your Claude sessions cost this week.">
           {budget && <p className="set-stat">This week: <b>{budget.jarvis_pct < 0.1 ? 'under 0.1' : budget.jarvis_pct.toFixed(1)}%</b> of your weekly limit (all smart features: {budget.ai_pct.toFixed(2)}%)</p>}
           <div className="form-row">
@@ -147,5 +149,40 @@ export function SettingsPage({ usage, push, onBack, onError }: { usage: Usage[];
         </Section>
       </div>
     </main>
+  )
+}
+
+const ABILITIES: [string, string, string][] = [
+  ['calendar', 'Calendar', '“What’s on tomorrow?”, and events you approve'],
+  ['reminders', 'Reminders', '“What reminders do I have?”, and ones you approve'],
+  ['music', 'Spotify', 'Play, pause, skip, what’s playing, volume'],
+  ['apps', 'Apps and windows', 'Open apps, snap windows left/right (also needs Accessibility)'],
+  ['screen', 'Your screen', '“What’s on my screen?” (Screen Recording)'],
+]
+
+/** Each check runs from the dashboard itself, so the macOS prompt that appears gives Jarvis the access. */
+function MacAccess() {
+  const [state, setState] = useState<Record<string, { ok: boolean; detail: string } | 'busy'>>({})
+  const check = async (what: string) => {
+    setState(s => ({ ...s, [what]: 'busy' }))
+    const r = await api.post<{ ok: boolean; detail: string }>('/api/mac/check', { what }).catch(e => ({ ok: false, detail: (e as Error).message }))
+    setState(s => ({ ...s, [what]: r }))
+  }
+  const all = async () => { for (const [what] of ABILITIES) await check(what) }
+  return (
+    <Section title="Mac access" hint="Jarvis can use these on your Mac, from your phone too. Run the checks while you're at the Mac: each one asks macOS once, and you click Allow. Email drafts use Mail the same way.">
+      {ABILITIES.map(([what, label, desc]) => {
+        const st = state[what]
+        return (
+          <div className="access" key={what}>
+            <div className="access-text"><b>{label}</b><span>{desc}</span>
+              {st && st !== 'busy' && <span className={st.ok ? 'ok' : 'bad'}>{st.ok ? '✓ Working' : st.detail}</span>}
+            </div>
+            <button className="btn small" onClick={() => check(what)} disabled={st === 'busy'}>{st === 'busy' ? 'Checking…' : 'Check'}</button>
+          </div>
+        )
+      })}
+      <div className="set-row"><button className="btn primary" onClick={all}>Set up all</button></div>
+    </Section>
   )
 }

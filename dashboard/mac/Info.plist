@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleIdentifier</key><string>com.wgrazz.fleetkit</string>
+  <key>CFBundleName</key><string>Fleet</string>
+  <key>NSCalendarsFullAccessUsageDescription</key><string>Jarvis reads your calendar to tell you what's coming up, and adds events you approve.</string>
+  <key>NSRemindersFullAccessUsageDescription</key><string>Jarvis reads your reminders and adds ones you approve.</string>
+</dict>
+</plist>

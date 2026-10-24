@@ -3,7 +3,7 @@
 // wants to do to your agents, which wait for your OK.
 import { appendFileSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import type { JarvisAction, JarvisReply } from './ai.ts'
+import type { JarvisAction, JarvisReply, MacAction } from './ai.ts'
 import type { Agent } from './state.ts'
 import { db, FLEET_DIR } from './store.ts'
 
@@ -67,7 +67,37 @@ export const deleteThread = (id: number) => {
 
 export type Proposal = { id: number; thread_id: number; action: string; summary: string; state: 'pending' | 'approved' | 'declined'; result: string | null; created_at: number }
 
+const MAC_NEEDS_OK = new Set(['event', 'remind', 'draft'])
+/** Mac actions that write something (calendar, reminders, an email draft) wait for your OK; music and windows don't. */
+export const needsApproval = (a: JarvisAction) => a.type === 'mac' ? MAC_NEEDS_OK.has(a.mac?.command ?? '') : !['idea', 'remember'].includes(a.type)
+
+/** `fleet mac …` argv for a Mac action. Only known commands; values go in as separate arguments. */
+export function macArgv(m: MacAction): string[] {
+  const v = (x: string) => (x ?? '').trim()
+  switch (m.command) {
+    case 'music_play': return ['music', 'play', ...(v(m.value).startsWith('spotify:') ? [v(m.value)] : [])]
+    case 'music_pause': return ['music', 'pause']
+    case 'music_next': return ['music', 'next']
+    case 'music_previous': return ['music', 'previous']
+    case 'music_volume': return ['music', 'volume', String(Math.max(0, Math.min(100, Number(v(m.value)) || 50)))]
+    case 'music_search': return ['music', 'search', v(m.value) || v(m.title)]
+    case 'open_app': return ['open', v(m.app)]
+    case 'window': return ['window', ['left', 'right', 'full', 'center'].includes(v(m.where)) ? v(m.where) : 'center', ...(v(m.app) ? [v(m.app)] : [])]
+    case 'event': return ['event', v(m.title), '--at', v(m.when), '--minutes', String(Number(v(m.minutes)) || 30), ...(v(m.calendar) ? ['--calendar', v(m.calendar)] : [])]
+    case 'remind': return ['remind', v(m.title), ...(v(m.when) ? ['--due', v(m.when)] : []), ...(v(m.calendar) ? ['--list', v(m.calendar)] : [])]
+    case 'draft': return ['draft', '--to', v(m.to), '--subject', v(m.subject), '--body', m.body ?? '']
+    default: throw new Error(`unknown Mac command ${m.command}`)
+  }
+}
+
 export function summarize(a: JarvisAction): string {
+  if (a.type === 'mac' && a.mac) {
+    const m = a.mac
+    if (m.command === 'event') return `Add to your calendar: “${m.title}”, ${m.when}${m.minutes ? ` for ${m.minutes} min` : ''}${m.calendar ? ` (${m.calendar})` : ''}`
+    if (m.command === 'remind') return `Add a reminder: “${m.title}”${m.when ? `, ${m.when}` : ''}${m.calendar ? ` in ${m.calendar}` : ''}`
+    if (m.command === 'draft') return `Save an email draft${m.to ? ` to ${m.to}` : ''}: “${m.subject}”\n\n${m.body.slice(0, 600)}`
+    return `${m.command.replace('_', ' ')} ${m.app || m.value || m.title}`.trim()
+  }
   if (a.type === 'start') return `Start a ${a.tool ? a.tool[0].toUpperCase() + a.tool.slice(1) : 'Claude'} agent${a.name ? ` called ${a.name}` : ''}${a.model ? ` (${a.model})` : ''}: “${a.text.slice(0, 160)}”`
   if (a.type === 'reply') return `Send to ${a.agent}: “${a.text.slice(0, 160)}”`
   if (a.type === 'key') return `Press ${a.key} in ${a.agent}`
@@ -163,3 +193,20 @@ export function instant(said: string, agents: Agent[]): JarvisReply | null {
 /** "what should I do next", "rank my notes", "prioritize my ideas", "sort my notes by importance" */
 export const wantsRanking = (said: string) =>
   /\b(what should i (do|work on|tackle) (next|first|now)|what('?s| is) (most )?important|(rank|prioriti[sz]e|triage)\b.*\b(notes?|ideas?|todos?|tasks?|lists?)|sort\b.*\b(notes?|ideas?|tasks?)\b.*\b(importan|priorit))/i.test(said)
+
+/** Mac requests answered without Claude: music controls, what's playing, today's/tomorrow's calendar, opening an app. */
+export function instantMac(said: string): { argv: string[]; say?: string } | null {
+  const t = said.trim().toLowerCase().replace(/[.!?]+$/, '').replace(/^(jarvis,?\s*)?(please\s+)?/, '')
+  if (/^(pause|stop)( the)?( music| spotify| song)?$/.test(t)) return { argv: ['music', 'pause'] }
+  if (/^(play|resume|unpause)( the)?( music| spotify)?$/.test(t)) return { argv: ['music', 'play'] }
+  if (/^(next|skip)( this)?( song| track)?$/.test(t)) return { argv: ['music', 'next'] }
+  if (/^(previous|go back|last)( song| track)$/.test(t)) return { argv: ['music', 'previous'] }
+  if (/^(what'?s|what is) (playing|this song)$|^what song is this$/.test(t)) return { argv: ['music', 'now'] }
+  let m = t.match(/^(?:set )?(?:the )?volume (?:to )?(\d{1,3})( percent)?$/)
+  if (m) return { argv: ['music', 'volume', m[1]] }
+  m = t.match(/^what'?s on (?:my )?(?:calendar )?(today|tomorrow|this week)$|^what do i have (today|tomorrow|this week)$/)
+  if (m) return { argv: ['calendar', (m[1] ?? m[2]).replace('this week', 'week')] }
+  m = t.match(/^open ([a-z0-9 .&-]{2,40})$/)
+  if (m && !/\b(agent|idea|note|list|folder)\b/.test(m[1])) return { argv: ['open', m[1].replace(/\b\w/g, c => c.toUpperCase())] }
+  return null
+}

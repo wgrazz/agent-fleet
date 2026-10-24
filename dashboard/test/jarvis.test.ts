@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
 process.env.FLEET_DIR = mkdtempSync(join(tmpdir(), 'fleet-jarvis-'))
-const { instant, findAgent, summary, remember, memory, approvalWord, threadFor, newThread, addMessage, threads, messages, propose, pendingProposals, settleProposal, summarize, wantsRanking } = await import('../server/jarvis.ts')
+const { instant, findAgent, summary, remember, memory, approvalWord, threadFor, newThread, addMessage, threads, messages, propose, pendingProposals, settleProposal, summarize, wantsRanking, needsApproval, macArgv, instantMac } = await import('../server/jarvis.ts')
 
 const agent = (name: string, extra: object = {}) => ({
   name, controllable: true, tool: 'claude', pid: 1, cwd: '', task: '', age_s: 1, session_id: '', status: 'working', status_since: 0,
@@ -77,5 +77,40 @@ describe('ranking requests', () => {
   it('recognises asking what to do next', () => {
     for (const q of ['what should I do next?', 'rank my notes', 'prioritize my ideas', 'sort my notes by what is important', "what's most important"]) expect(wantsRanking(q)).toBe(true)
     for (const q of ['what needs me?', 'idea: rank the retailers', 'tell walmart yes']) expect(wantsRanking(q)).toBe(false)
+  })
+})
+
+describe('Mac abilities', () => {
+  const mac = (m: object) => ({ type: 'mac', agent: '', text: '', key: '', tool: '', model: '', effort: '', list: '', name: '',
+    mac: { command: '', title: '', when: '', minutes: '', calendar: '', to: '', subject: '', body: '', app: '', where: '', value: '', ...m } }) as any
+  it('writes wait for approval, music and windows do not', () => {
+    expect(needsApproval(mac({ command: 'event' }))).toBe(true)
+    expect(needsApproval(mac({ command: 'draft' }))).toBe(true)
+    expect(needsApproval(mac({ command: 'remind' }))).toBe(true)
+    expect(needsApproval(mac({ command: 'music_pause' }))).toBe(false)
+    expect(needsApproval(mac({ command: 'window' }))).toBe(false)
+    expect(needsApproval({ type: 'start' } as any)).toBe(true)
+    expect(needsApproval({ type: 'idea' } as any)).toBe(false)
+  })
+  it('turns actions into fleet mac argv', () => {
+    expect(macArgv(mac({ command: 'event', title: 'Dentist', when: '2026-10-30 15:00', minutes: '45' }).mac)).toEqual(['event', 'Dentist', '--at', '2026-10-30 15:00', '--minutes', '45'])
+    expect(macArgv(mac({ command: 'draft', to: 'sam@x.com', subject: 'Hi', body: 'Hello' }).mac)).toEqual(['draft', '--to', 'sam@x.com', '--subject', 'Hi', '--body', 'Hello'])
+    expect(macArgv(mac({ command: 'window', where: 'sideways', app: 'Safari' }).mac)).toEqual(['window', 'center', 'Safari'])
+    expect(macArgv(mac({ command: 'music_volume', value: '400' }).mac)).toEqual(['music', 'volume', '100'])
+    expect(() => macArgv(mac({ command: 'rm -rf' }).mac)).toThrow()
+  })
+  it('instant music and calendar', () => {
+    expect(instantMac('pause')!.argv).toEqual(['music', 'pause'])
+    expect(instantMac('Next song.')!.argv).toEqual(['music', 'next'])
+    expect(instantMac("what's playing?")!.argv).toEqual(['music', 'now'])
+    expect(instantMac('set volume to 30')!.argv).toEqual(['music', 'volume', '30'])
+    expect(instantMac("what's on today")!.argv).toEqual(['calendar', 'today'])
+    expect(instantMac('what do I have this week?')!.argv).toEqual(['calendar', 'week'])
+    expect(instantMac('open spotify')!.argv).toEqual(['open', 'Spotify'])
+    expect(instantMac('open the walmart agent')).toBeNull()
+    expect(instantMac('pause walmart')).toBeNull()
+  })
+  it('approval cards say exactly what will happen', () => {
+    expect(summarize(mac({ command: 'event', title: 'Dentist', when: '2026-10-30 15:00', minutes: '45' }))).toBe('Add to your calendar: “Dentist”, 2026-10-30 15:00 for 45 min')
   })
 })

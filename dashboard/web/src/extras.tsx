@@ -183,7 +183,7 @@ type Thread = { id: number; title: string; updated_at: number; count?: number }
 const IDLE_MS = 2 * 3600 * 1000
 type VoiceState = 'off' | 'listening' | 'thinking' | 'speaking'
 
-export function Jarvis({ onClose, onChanged, asPage }: { onClose: () => void; onChanged: () => void; asPage?: boolean }) {
+export function Jarvis({ onClose, onChanged, asPage, autoTalk }: { onClose: () => void; onChanged: () => void; asPage?: boolean; autoTalk?: boolean }) {
   const [threadId, setThreadId] = useState<number | null>(null)
   const [title, setTitle] = useState('')
   const [lines, setLines] = useState<Line[]>([])
@@ -226,6 +226,13 @@ export function Jarvis({ onClose, onChanged, asPage }: { onClose: () => void; on
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { box.current?.scrollTo(0, box.current.scrollHeight) }, [lines, thinking, proposals])
   useEffect(() => () => { try { rec.current?.abort() } catch {} ; stopSpeaking() }, [])
+  // opened by ⌃⌥Space: start listening straight away (the browser may still want a tap first)
+  useEffect(() => {
+    if (!autoTalk) return
+    history.replaceState(null, '', '#/jarvis')
+    const t = setTimeout(() => startVoice(), 400)
+    return () => clearTimeout(t)
+  }, [autoTalk]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const ask = async (text: string, override = false): Promise<string> => {
     if (!text.trim()) return ''
