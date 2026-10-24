@@ -582,6 +582,11 @@ def dash_install(local=False):
     if not os.path.exists(f'{dash_dir}/dist/index.html'):
         subprocess.run(['npm', 'run', 'build'], cwd=dash_dir, check=True)
     cfg = config()
+    if not cfg.get('cwd'):  # where dashboard-started agents run unless you pick a folder: here
+        cfg['cwd'] = os.getcwd()
+        with open(f'{FLEET_DIR}/config.json', 'w') as f:
+            json.dump(cfg, f)
+        print(f'Agents started from the dashboard will run in {cfg["cwd"]} (change "cwd" in {FLEET_DIR}/config.json).')
     env = {'PATH': f'{os.path.dirname(node)}:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:{HOME}/.local/bin'}
     if 'FLEET_DIR' in os.environ:
         env['FLEET_DIR'] = FLEET_DIR

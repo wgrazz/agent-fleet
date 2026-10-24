@@ -28,6 +28,7 @@ type Hook = { status: Status; at: number; message: string }
 export const alerts = new EventEmitter() // 'alert' (agent: Agent) on entering needs_you, done or crashed
 
 let agents: Agent[] = []
+let polled = false // true after the first refresh
 const screens = new Map<string, { text: string; changedAt: number }>()
 const tools = new Map<string, string>()           // session -> tool, remembered so dead panes keep their tool
 const hooksBySession = new Map<string, Hook>()    // Claude session_id -> latest hook
@@ -124,8 +125,10 @@ async function refresh() {
   for (const a of next) {
     const before = prev.get(a.name)
     if (before && before.status === a.status) a.status_since = before.status_since
-    // first sight after a server start never alerts; a status re-entered within 30 s doesn't alert twice
-    if (before && before.status !== a.status && ['needs_you', 'done', 'crashed'].includes(a.status)) {
+    // Agents already running when the server starts don't alert; one started later alerts even on first sight
+    // (it often opens straight into a question). A status re-entered within 30 s doesn't alert twice.
+    const changed = before ? before.status !== a.status : polled
+    if (changed && ['needs_you', 'done', 'crashed'].includes(a.status)) {
       const key = `${a.name}:${a.status}`
       if (now - (lastAlert.get(key) ?? 0) > 30_000) {
         lastAlert.set(key, now)
@@ -135,6 +138,7 @@ async function refresh() {
   }
   for (const name of screens.keys()) if (!next.some(a => a.name === name)) screens.delete(name)
   agents = next
+  polled = true
 }
 
 // One refresh at a time: the timer and actions (new, pause, kill) both call this.
