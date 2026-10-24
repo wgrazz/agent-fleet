@@ -84,3 +84,77 @@ export async function usage(): Promise<Usage[]> {
     { tool: 'cursor', windows: [], updated: null, note: "Cursor doesn't expose its limits" },
     { tool: 'agy', windows: [], updated: null, note: "Antigravity doesn't expose its limits" }]
 }
+
+// ---------- how much of the weekly Claude limit the dashboard's own AI uses ----------
+// Claude reports the weekly window as a percentage, not dollars. So: add up what every Claude Code session
+// cost this window (API-equivalent, from the transcripts' token counts), add the dashboard's one-shot calls
+// (which leave no transcript), and give Jarvis its proportional share of the weekly percentage.
+
+// $ per million tokens: input, output, cache read (cache writes are 1.25x input)
+const PRICES: [RegExp, number, number, number][] = [
+  [/fable|mythos/, 10, 50, 0.25], [/opus-5-5/, 4, 20, 0.2], [/opus/, 5, 25, 0.5],
+  [/sonnet/, 2, 10, 0.2], [/haiku-5-5/, 0.1, 0.5, 0.01], [/haiku/, 1, 5, 0.1],
+]
+
+function messageCost(model: string, u: any) {
+  const [, input, output, read] = PRICES.find(([re]) => re.test(model)) ?? PRICES[3]
+  return ((u.input_tokens ?? 0) * input + (u.output_tokens ?? 0) * output + (u.cache_read_input_tokens ?? 0) * read
+    + (u.cache_creation_input_tokens ?? 0) * input * 1.25) / 1e6
+}
+
+type FileCost = { offset: number; msgs: Map<string, { at: number; cost: number }> }
+const fileCosts = new Map<string, FileCost>()
+
+async function transcriptCost(sinceS: number) {
+  const { openSync, readSync, closeSync } = await import('node:fs')
+  let total = 0
+  const files: string[] = []
+  for (const pattern of ['*/*.jsonl', '*/*/subagents/*.jsonl'])
+    for await (const f of glob(join(homedir(), '.claude', 'projects', pattern))) files.push(f)
+  for (const f of files) {
+    let st
+    try { st = statSync(f) } catch { continue }
+    if (st.mtimeMs / 1000 < sinceS) continue
+    const fc = fileCosts.get(f) ?? { offset: 0, msgs: new Map() }
+    if (st.size > fc.offset) {
+      // read only what was appended since last time, up to the last complete line
+      const fd = openSync(f, 'r')
+      const buf = Buffer.alloc(st.size - fc.offset)
+      readSync(fd, buf, 0, buf.length, fc.offset)
+      closeSync(fd)
+      const text = buf.toString('utf8')
+      const end = text.lastIndexOf('\n') + 1
+      for (const line of text.slice(0, end).split('\n')) {
+        if (!line.includes('"usage"')) continue
+        try {
+          const d = JSON.parse(line)
+          const m = d.message
+          if (d.type !== 'assistant' || !m?.usage) continue
+          // one reply is logged once per content block with the same usage: count it once
+          fc.msgs.set(m.id ?? d.uuid, { at: Date.parse(d.timestamp) / 1000, cost: messageCost(String(m.model ?? ''), m.usage) })
+        } catch {}
+      }
+      fc.offset += Buffer.byteLength(text.slice(0, end))
+      fileCosts.set(f, fc)
+    }
+    for (const { at, cost } of fc.msgs.values()) if (at >= sinceS) total += cost
+  }
+  return total
+}
+
+export type AiBudget = { weekly_pct: number | null; jarvis_pct: number; ai_pct: number; jarvis_usd: number; ai_usd: number; claude_usd: number; warn_pct: number; max_pct: number; since: number }
+
+export async function aiBudget(warnPct = 5, maxPct = 10): Promise<AiBudget> {
+  const claudeUsage = json(join(FLEET_DIR, 'claude-usage.json'))?.rate_limits?.seven_day
+  const resets = typeof claudeUsage?.resets_at === 'number' ? claudeUsage.resets_at : null
+  const since = resets && resets * 1000 > Date.now() ? resets - 7 * 86400 : Math.floor(Date.now() / 1000) - 7 * 86400
+  const { db } = await import('./store.ts')
+  const sum = (where: string) => (db.prepare(`SELECT coalesce(sum(cost_usd), 0) AS c FROM ai_usage WHERE at >= ? ${where}`).get(since) as { c: number }).c
+  const jarvis = sum("AND feature = 'jarvis'")
+  const ai = sum('')
+  const oneShot = sum('AND persisted = 0') // these leave no transcript, so add them to the total
+  const claude = (await transcriptCost(since)) + oneShot
+  const weekly = typeof claudeUsage?.used_percentage === 'number' ? claudeUsage.used_percentage : null
+  const share = (x: number) => (weekly !== null && claude > 0 ? (weekly * x) / claude : 0)
+  return { weekly_pct: weekly, jarvis_pct: share(jarvis), ai_pct: share(ai), jarvis_usd: jarvis, ai_usd: ai, claude_usd: claude, warn_pct: warnPct, max_pct: maxPct, since }
+}

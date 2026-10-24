@@ -436,3 +436,42 @@ export const SparkIcon = () => svg(<path d="M8 1.5 9.4 6.6 14.5 8 9.4 9.4 8 14.5
 export const WandIcon = () => svg(<><path d="m3 13 7-7" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" /><path d="M11 1.5v3M9.5 3h3M13.5 6v2M12.5 7h2" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" /></>, 12)
 export const MicIcon = () => svg(<><rect x="5.5" y="1.5" width="5" height="8" rx="2.5" fill="currentColor" /><path d="M3 8a5 5 0 0 0 10 0M8 13v2" stroke="currentColor" strokeWidth="1.5" fill="none" strokeLinecap="round" /></>, 16)
 export const SearchIcon = () => svg(<><circle cx="7" cy="7" r="4.5" stroke="currentColor" strokeWidth="1.6" fill="none" /><path d="m10.5 10.5 3 3" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" /></>)
+
+/** Pause an agent until a time; it comes back on its own with the same conversation. */
+export function PauseUntil({ name, usage, onClose, onPick }: { name: string; usage: Usage[]; onClose: () => void; onPick: (epochS: number) => void }) {
+  const at = (h: number, m = 0, dayOffset = 0) => {
+    const d = new Date()
+    d.setDate(d.getDate() + dayOffset)
+    d.setHours(h, m, 0, 0)
+    if (d.getTime() < Date.now()) d.setDate(d.getDate() + 1)
+    return Math.floor(d.getTime() / 1000)
+  }
+  const fmt = (s: number) => new Date(s * 1000).toLocaleString([], { weekday: 'short', hour: 'numeric', minute: '2-digit' })
+  const claude = usage.find(u => u.tool === 'claude')
+  const reset5h = claude?.windows.find(w => w.label === '5 hours')?.resets_at
+  const now = Math.floor(Date.now() / 1000)
+  const presets: [string, number][] = [
+    ['In 1 hour', now + 3600], ['In 3 hours', now + 3 * 3600], ['This evening', at(19)], ['Tomorrow morning', at(9, 0, new Date().getHours() < 9 ? 0 : 1)],
+    ...(reset5h && reset5h > now ? [[`When Claude's 5-hour limit resets`, reset5h + 60] as [string, number]] : []),
+  ]
+  const [custom, setCustom] = useState('')
+  return (
+    <Dialog title={`Pause ${name} until…`} onClose={onClose}>
+      <p className="dialog-text">It stops now and comes back on its own with the same conversation (while the dashboard is running on your Mac).</p>
+      <div className="presets">
+        {presets.map(([label, s]) => (
+          <button key={label} className="preset" onClick={() => onPick(s)}><b>{label}</b><span>{fmt(s)}</span></button>
+        ))}
+      </div>
+      <form className="form" onSubmit={e => { e.preventDefault(); const s = Math.floor(new Date(custom).getTime() / 1000); if (s > now) onPick(s) }}>
+        <div className="form-row">
+          <label>Or pick a time<input type="datetime-local" value={custom} onChange={e => setCustom(e.target.value)} /></label>
+        </div>
+        <div className="form-actions">
+          <button type="button" className="btn" onClick={onClose}>Cancel</button>
+          <button type="submit" className="btn primary" disabled={!custom}>Pause until then</button>
+        </div>
+      </form>
+    </Dialog>
+  )
+}

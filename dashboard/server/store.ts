@@ -10,7 +10,7 @@ export const FLEET_DIR = process.env.FLEET_DIR ?? join(homedir(), '.fleet')
 export const FLEET_BIN = process.env.FLEET_BIN ?? join(REPO, 'fleet')
 mkdirSync(FLEET_DIR, { recursive: true, mode: 0o700 })
 
-export type Config = { port: number; key: string; cwd?: string }
+export type Config = { port: number; key: string; cwd?: string; jarvis_warn_pct?: number; jarvis_max_pct?: number }
 
 // Same format and creation rule as config() in the fleet CLI: whoever runs first writes it, readable only by you.
 export function readSecret<T>(file: string, make: () => T): T {
@@ -38,5 +38,6 @@ const IDEA_COLUMNS: Record<string, string> = {
 }
 const have = new Set((db.prepare('PRAGMA table_info(ideas)').all() as { name: string }[]).map(c => c.name))
 for (const [col, type] of Object.entries(IDEA_COLUMNS)) if (!have.has(col)) db.exec(`ALTER TABLE ideas ADD COLUMN ${col} ${type}`)
+if (!(db.prepare('PRAGMA table_info(paused)').all() as { name: string }[]).some(c => c.name === 'resume_at')) db.exec('ALTER TABLE paused ADD COLUMN resume_at INTEGER')
 // ideas jotted into a list that doesn't exist yet (fleet idea -l NewList) get that list
 db.exec("INSERT OR IGNORE INTO lists (name, position) SELECT DISTINCT list, 100 FROM ideas")

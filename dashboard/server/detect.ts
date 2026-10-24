@@ -51,3 +51,21 @@ export function question(screen: string): string {
   const above = menu >= 0 ? lines.slice(0, menu) : lines
   return above.filter(l => l.includes('?')).at(-1) ?? above.filter(Boolean).at(-1) ?? ''
 }
+
+// The permission/edit mode the agent shows in its footer, e.g. Claude's "⏵⏵ auto mode on" or Copilot's
+// "Interactive · Manual Approval". Shift+Tab cycles it in Claude, Copilot and Antigravity.
+export function mode(screen: string): string {
+  const bottom = tail(screen, 6)
+  const m = bottom.match(/(auto mode|plan mode|accept edits|auto-accept edits|bypass permissions)\s+on/i)
+    ?? bottom.match(/Interactive · ([A-Za-z ]+?)(?:\s{2,}|·|$)/m)
+  return m ? m[1].trim() : ''
+}
+
+// What a busy agent is doing right now, from its spinner line ("Catapulting… (4s · ↓ 24 tokens)").
+export function workingLine(tool: string, screen: string): string {
+  const patterns = (WORKING[tool] ?? []).filter(r => !/esc to cancel/.test(r.source))
+  const line = tail(screen).split('\n').reverse().find(l => patterns.some(r => r.test(l)))
+  return line
+    ? line.replace(/^[\s\W⠀-⣿]+/, '').replace(/\s*[•·]?\s*(esc to interrupt|esc interrupt|ctrl\+c to stop)\)?/i, ')').replace(/\(\)$/, '').replace(/\s+\)$/, ')').trim().slice(0, 90)
+    : ''
+}

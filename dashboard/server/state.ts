@@ -1,7 +1,7 @@
 // The agent list and each agent's status. `fleet json` is the source of truth for which agents exist; tmux panes
 // add the screen and the exit code; Claude Code hooks (via `fleet hook`) give exact status for Claude.
 import { EventEmitter } from 'node:events'
-import { detect, question, quickReplies, type QuickReply, type Status } from './detect.ts'
+import { detect, mode, question, quickReplies, workingLine, type QuickReply, type Status } from './detect.ts'
 import { FLEET_BIN, REPO } from './store.ts'
 import { capture, panes, run } from './tmux.ts'
 
@@ -20,6 +20,8 @@ export type Agent = {
   last_line: string
   message: string         // what a hook said, e.g. "Claude needs your permission to use Bash"
   exit: string            // "exit 1" / "killed by kill" for a dead pane
+  mode: string            // footer mode, e.g. "auto mode" (Shift+Tab cycles it)
+  working_line: string    // spinner line while busy, e.g. "Catapulting… (4s · ↓ 24 tokens)"
 }
 
 type FleetRow = { pid: number; tool: string; age_s: number; cwd: string; session: string | null; task: string; session_id: string }
@@ -107,6 +109,7 @@ async function refresh() {
       name, controllable: !!r.session, tool: r.tool, pid: r.pid, cwd: r.cwd, task: r.task, age_s: r.age_s,
       session_id: r.session_id, status, status_since: now, quick_replies: status === 'needs_you' ? quickReplies(screen) : [],
       last_line: lastLine(screen), message: status === 'needs_you' ? (hook?.message || question(screen)) : '', exit: '',
+      mode: mode(screen), working_line: status === 'working' ? workingLine(r.tool, screen) : '',
     })
   }
 
@@ -118,7 +121,7 @@ async function refresh() {
       name: p.session, controllable: true, tool: tools.get(p.session) ?? prev.get(p.session)?.tool ?? 'unknown', pid: null,
       cwd: prev.get(p.session)?.cwd ?? '', task: prev.get(p.session)?.task ?? '', age_s: 0, session_id: '',
       status: crashed ? 'crashed' : 'done', status_since: now, quick_replies: [], last_line: lastLine(screen),
-      message: '', exit: p.signal ? `killed by ${p.signal}` : `exit ${p.exitStatus ?? 0}`,
+      message: '', exit: p.signal ? `killed by ${p.signal}` : `exit ${p.exitStatus ?? 0}`, mode: '', working_line: '',
     })
   }
 

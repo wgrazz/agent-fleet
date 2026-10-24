@@ -1,7 +1,7 @@
 import { readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { detect, question, quickReplies } from '../server/detect.ts'
+import { detect, mode, question, quickReplies, workingLine } from '../server/detect.ts'
 
 // fixtures/<tool>/<expected state>-<label>.txt, captured with `tmux capture-pane -p` from real sessions
 const root = join(import.meta.dirname, 'fixtures')
@@ -65,5 +65,19 @@ describe('hookStatus', async () => {
   it('ignores the idle reminder Claude sends a minute after finishing', () => {
     expect(hookStatus({ event: 'notify', notification_type: 'idle_prompt' })).toBeNull()
     expect(hookStatus({ event: 'bogus' })).toBeNull()
+  })
+})
+
+describe('mode and working line', () => {
+  const fx = (p: string) => readFileSync(join(root, p), 'utf8')
+  it('reads the footer mode', () => {
+    expect(mode(fx('claude/done-1.txt'))).toBe('auto mode')
+    expect(mode(fx('copilot/done-2.txt'))).toBe('Manual Approval')
+    expect(mode(fx('codex/done-1.txt'))).toBe('')
+  })
+  it('reads what a busy agent is doing', () => {
+    expect(workingLine('claude', fx('claude/working-1.txt'))).toBe('Catapulting… (4s · ↓ 24 tokens)')
+    expect(workingLine('codex', fx('codex/working-1.txt'))).toBe('Working (2s)')
+    expect(workingLine('claude', fx('claude/done-1.txt'))).toBe('')
   })
 })

@@ -5,7 +5,7 @@ import { createReadStream, existsSync, statSync } from 'node:fs'
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import { homedir } from 'node:os'
 import { extname, join, normalize } from 'node:path'
-import { improvePrompt, interviewPrompt, jarvis, recommend } from './ai.ts'
+import { improvePrompt, interviewPrompt, jarvisBrain, recommend, type JarvisReply } from './ai.ts'
 import { changes } from './git.ts'
 import { conversations, transcript } from './history.ts'
 import * as ideas from './ideas.ts'
@@ -13,7 +13,8 @@ import { notify, publicKey, subscribe } from './push.ts'
 import { alerts, ingestHook, list, poll, startPolling } from './state.ts'
 import { config, db, FLEET_BIN } from './store.ts'
 import { run, sendKey, sendText } from './tmux.ts'
-import { usage } from './usage.ts'
+import { aiBudget, usage } from './usage.ts'
+import * as J from './jarvis.ts'
 import { attach } from './ws.ts'
 
 const NAME = /^[A-Za-z0-9._-]{1,40}$/ // same rule as the fleet CLI
@@ -131,25 +132,64 @@ function jarvisContext() {
   return `Agents:\n${agents.join('\n') || '- none running'}\nIdea lists: ${lists}\nTime: ${new Date().toLocaleString()}`
 }
 
-async function runJarvis(said: string) {
-  const { say, actions } = await jarvis(said, jarvisContext())
+const budget = () => aiBudget(config.jarvis_warn_pct ?? 5, config.jarvis_max_pct ?? 10)
+
+async function runJarvis(said: string, override = false) {
+  let reply: JarvisReply | null = J.instant(said, list())
+  let used: 'instant' | 'claude' = 'instant'
+  if (!reply) {
+    const b = await budget()
+    if (b.jarvis_pct >= b.max_pct && !override)
+      return { say: `I've used about ${b.jarvis_pct.toFixed(1)} percent of your weekly Claude limit this week, past the ${b.max_pct} percent cap you set. Quick commands still work; say "allow" in the panel to go past it once.`, done: [], blocked: true, mode: used }
+    const project = config.cwd && existsSync(config.cwd) ? config.cwd : homedir()
+    const prior = J.session()
+    try {
+      const a = await jarvisBrain(said, jarvisContext(), J.memory(), { cwd: project, resume: prior })
+      reply = a.value
+      if (a.session_id) J.saveSession(a.session_id)
+    } catch (e) {
+      if (!prior) throw e
+      J.resetSession() // yesterday's or a broken conversation: start fresh once
+      const a = await jarvisBrain(said, jarvisContext(), J.memory(), { cwd: project })
+      reply = a.value
+      if (a.session_id) J.saveSession(a.session_id)
+    }
+    used = 'claude'
+  }
   const done: string[] = []
-  for (const a of actions) {
+  for (const a of reply.actions) {
     try {
       const target = a.agent ? list().find(x => x.name === a.agent && x.controllable) : undefined
       if ((a.type === 'reply' || a.type === 'key' || a.type === 'pause') && !target) throw new Error(`no agent named ${a.agent}`)
       if (a.type === 'reply') await sendText(target!.name, a.text)
       if (a.type === 'key') await sendKey(target!.name, a.key)
-      if (a.type === 'pause') await fleet(['pause', target!.name])
+      if (a.type === 'pause') await fleet(['pause', target!.name, ...(a.text ? ['--until', a.text] : [])])
       if (a.type === 'start') done.push(`started ${(await startAgent({ tool: a.tool || undefined, model: a.model, effort: a.effort, prompt: a.text, name: a.name })).name}`)
       if (a.type === 'idea') ideas.addIdea(a.text, a.list || 'Brain Dump')
+      if (a.type === 'remember') J.remember(a.text)
       if (a.type !== 'start') done.push(`${a.type}${a.agent ? ` ${a.agent}` : ''}${a.key ? ` ${a.key}` : ''}`)
     } catch (e) {
       done.push(`couldn't ${a.type}: ${(e as Error).message}`)
     }
   }
-  if (actions.length) await poll()
-  return { say, done }
+  if (reply.actions.length) await poll()
+  const b = used === 'claude' ? await budget() : null
+  return { say: reply.say, done, mode: used, warning: b && b.jarvis_pct >= b.warn_pct ? `Jarvis has used ${b.jarvis_pct.toFixed(1)}% of your weekly Claude limit this week.` : undefined }
+}
+
+// Paused agents with a resume time come back on their own (checked every 30 s while the dashboard runs).
+async function resumeDue() {
+  const due = db.prepare('SELECT id, name FROM paused WHERE resume_at IS NOT NULL AND resume_at <= ?').all(Math.floor(Date.now() / 1000)) as { id: number; name: string }[]
+  for (const p of due) {
+    try {
+      await run(FLEET_BIN, ['unpause', String(p.id), '--detach'])
+      notify({ name: p.name, status: 'resumed', message: 'Back from its scheduled pause', exit: '', last_line: '', task: '' } as any).catch(() => {})
+    } catch (e) {
+      console.error(`couldn't resume ${p.name}:`, (e as Error).message)
+      db.prepare('UPDATE paused SET resume_at = NULL WHERE id = ?').run(p.id) // don't retry forever; it stays in Paused
+    }
+  }
+  if (due.length) await poll()
 }
 
 const int = (v: string) => Number.parseInt(v, 10)
@@ -170,9 +210,10 @@ const routes: [string, RegExp, Route][] = [
     return { ok: true }
   }],
 
-  ['POST', /^\/api\/agents\/([^/]+)\/pause$/, async (_req, [name]) => {
+  ['POST', /^\/api\/agents\/([^/]+)\/pause$/, async (req, [name]) => {
     agentOr404(name)
-    await fleet(['pause', name])
+    const until = (await body(req)).until
+    await fleet(['pause', name, ...(typeof until === 'number' && until > Date.now() / 1000 ? ['--until', String(Math.floor(until))] : [])])
     await poll() // so the next list the page sees already reflects this
     return { ok: true }
   }],
@@ -194,6 +235,16 @@ const routes: [string, RegExp, Route][] = [
     db.prepare('UPDATE ideas SET agent = ? WHERE agent = ?').run(to, name)
     await poll()
     return { name: to }
+  }],
+
+  ['POST', /^\/api\/agents\/([^/]+)\/adopt$/, async (req, [name]) => {
+    const a = list().find(a => a.name === name)
+    if (!a?.pid || a.controllable) throw new HttpError(400, `${name} isn't an agent outside Fleet`)
+    const b = await body(req)
+    const out = await fleet(['adopt', String(a.pid), ...(str(b.name, 40) ? [str(b.name, 40)] : []), ...(b.force ? ['--force'] : [])])
+    await poll()
+    const moved = out.match(/into Fleet as (\S+)\./)?.[1]
+    return { name: moved ?? name }
   }],
 
   ['GET', /^\/api\/agents\/([^/]+)\/changes$/, async (_req, [name]) => {
@@ -276,10 +327,13 @@ const routes: [string, RegExp, Route][] = [
     return started
   }],
   ['POST', /^\/api\/jarvis$/, async req => {
-    const said = str((await body(req)).text, 2000).trim()
+    const b = await body(req)
+    const said = str(b.text, 2000).trim()
     if (!said) throw new HttpError(400, "didn't catch that")
-    return runJarvis(said)
+    return runJarvis(said, b.override === true)
   }],
+  ['GET', /^\/api\/jarvis\/status$/, async () => ({ budget: await budget(), memory: J.memory(), session: !!J.session() })],
+  ['POST', /^\/api\/jarvis\/reset$/, async () => { J.resetSession(); return { ok: true } }],
 
   // ---------- ideas ----------
   ['GET', /^\/api\/lists$/, async () => ideas.lists()],
@@ -458,5 +512,6 @@ if (import.meta.main) {
   attach(server, authorized)
   alerts.on('alert', a => notify(a).catch(e => console.error('notify failed:', e)))
   startPolling()
+  setInterval(() => resumeDue().catch(e => console.error('resume check failed:', e)), 30_000)
   server.listen(config.port, '127.0.0.1', () => console.log(`fleet dashboard on http://127.0.0.1:${config.port}`))
 }

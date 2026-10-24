@@ -48,3 +48,13 @@ CREATE TABLE IF NOT EXISTS lists (
   archived INTEGER NOT NULL DEFAULT 0
 );
 INSERT OR IGNORE INTO lists (name, color, position) VALUES ('Priority', '#ff3b30', -2), ('Brain Dump', '#8e8e93', -1);
+-- every smart-feature call (Jarvis, Improve, Suggest, Sort): API-equivalent cost as Claude Code reports it
+CREATE TABLE IF NOT EXISTS ai_usage (
+  id INTEGER PRIMARY KEY,
+  at INTEGER NOT NULL,
+  feature TEXT NOT NULL,
+  cost_usd REAL NOT NULL,
+  input_tokens INTEGER, output_tokens INTEGER, cache_read INTEGER, cache_write INTEGER,
+  persisted INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS ai_usage_at ON ai_usage (at);

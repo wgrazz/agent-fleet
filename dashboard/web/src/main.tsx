@@ -3,7 +3,7 @@ import { createRoot } from 'react-dom/client'
 import { api, remember, Unauthorized, usePoll, type Conversation, type Folder, type Idea, type List, type LiveAgent, type Paused, type Profile, type Usage } from './api.ts'
 import { AgentList, AgentView, PausedList } from './agents.tsx'
 import {
-  COLORS, Confirm, CustomForm, InterviewForm, isPhone, MenuHost, MicIcon, NameDialog, NewAgentButton, openMenu, ORDER, Sidebar, UsageMeters,
+  COLORS, Confirm, CustomForm, InterviewForm, isPhone, MenuHost, MicIcon, NameDialog, NewAgentButton, openMenu, ORDER, PauseUntil, Sidebar, UsageMeters,
   type MenuItem, type StartFields, useHold,
 } from './components.tsx'
 import { ConversationView, HistoryPane, Jarvis, Palette, speak, spokenAlerts } from './extras.tsx'
@@ -26,7 +26,7 @@ type Modal =
   | { kind: 'interview'; topic?: string; ideaId?: number }
   | { kind: 'name'; title: string; initial?: string; color?: string; action?: string; submit: (name: string, color: string) => void }
   | { kind: 'confirm'; title: string; text: string; action: string; yes: () => void }
-  | { kind: 'capture' } | { kind: 'import' } | { kind: 'sort' } | { kind: 'palette' }
+  | { kind: 'capture' } | { kind: 'import' } | { kind: 'sort' } | { kind: 'palette' } | { kind: 'pause'; name: string }
   | null
 
 function App() {
@@ -135,13 +135,23 @@ function App() {
     ...(a.controllable ? [{ label: 'Full terminal', onClick: () => setTerminal(a.name) }] : []),
     ...(a.controllable && a.pid !== null ? [{ label: 'Rename…', onClick: () => setModal({ kind: 'name', title: `Rename ${a.name}`, initial: a.name, action: 'Rename',
       submit: (to: string) => { setModal(null); act(api.post<{ name: string }>(`/api/agents/${enc(a.name)}/rename`, { to }).then(r => { if (route.a === a.name) openAgent(r.name) })) } }) }] : []),
+    ...(!a.controllable && a.pid !== null && a.session_id ? [{ label: 'Add to Fleet…', onClick: () => adopt(a) }] : []),
     { label: 'Move to folder', items: folderItems(a.key, a.folder_id) },
-    ...(a.controllable && a.pid !== null && a.session_id ? [{ label: 'Pause', onClick: () => act(api.post(`/api/agents/${enc(a.name)}/pause`)) }] : []),
+    ...(a.controllable && a.pid !== null && a.session_id ? [
+      { label: 'Pause', onClick: () => act(api.post(`/api/agents/${enc(a.name)}/pause`)) },
+      { label: 'Pause until…', onClick: () => setModal({ kind: 'pause', name: a.name }) },
+    ] : []),
     ...(a.controllable ? ['sep' as const, { label: a.pid === null ? 'Close session' : 'Kill…', danger: true, onClick: () => setModal({
       kind: 'confirm', title: `Kill ${a.name}?`, action: 'Kill', text: 'This stops the agent and closes its session. Pause instead if you want to come back to the conversation.',
       yes: () => act(api.del(`/api/agents/${enc(a.name)}`), () => route.a === a.name && go(lastListRoute.current)),
     }) }] : []),
   ], a.name)
+
+  const adopt = (a: LiveAgent) => setModal({
+    kind: 'confirm', title: `Add ${a.name} to Fleet?`, action: 'Add to Fleet',
+    text: `${a.status === 'working' ? 'It is in the middle of something, so this interrupts it. ' : ''}The agent in your terminal window stops, and the same conversation continues inside Fleet, where you can answer it from your phone. Its terminal window will say it exited.`,
+    yes: () => act(api.post<{ name: string }>(`/api/agents/${enc(a.name)}/adopt`, { force: a.status === 'working' }).then(r => openAgent(r.name))),
+  })
 
   const conversationMenu = (c: Conversation, x: number, y: number) => openMenu(x, y, [
     ...(c.running ? [{ label: `Open ${c.running}`, onClick: () => openAgent(c.running!) }] : [{ label: 'Resume', onClick: () => resume(c) }]),
@@ -283,7 +293,7 @@ function App() {
   if (agentFromRoute) {
     detail = <AgentView key={agentFromRoute.name} agent={agentFromRoute} onBack={() => go(lastListRoute.current)} onTerminal={() => setTerminal(agentFromRoute.name)}
       onPause={() => act(api.post(`/api/agents/${enc(agentFromRoute.name)}/pause`), () => go('#/paused'))}
-      onMenu={(x, y) => agentMenu(agentFromRoute, x, y)} send={send(agentFromRoute.name)} />
+      onMenu={(x, y) => agentMenu(agentFromRoute, x, y)} onAdopt={() => adopt(agentFromRoute)} send={send(agentFromRoute.name)} />
   } else if (route.view === 'idea' && ideaItem) {
     detail = <IdeaDetail key={ideaItem.id} idea={ideaItem} lists={allLists} onBack={() => go(`#/ideas/${enc(ideaItem.list)}`)}
       onChange={() => { ideas.refresh(); lists.refresh(); api.get<Idea[]>(`/api/ideas?list=${enc(ideaItem.list)}`).then(xs => setIdeaItem(xs.find(i => i.id === ideaItem.id) ?? null)) }}
@@ -341,6 +351,8 @@ function App() {
         openAgent(name)
       }} />}
       {modal?.kind === 'name' && <NameDialog title={modal.title} initial={modal.initial} color={modal.color} action={modal.action} onSubmit={modal.submit} onClose={() => setModal(null)} />}
+      {modal?.kind === 'pause' && <PauseUntil name={modal.name} usage={usage.data ?? []} onClose={() => setModal(null)}
+        onPick={until => { const n = modal.name; setModal(null); act(api.post(`/api/agents/${enc(n)}/pause`, { until }), () => go('#/paused')) }} />}
       {modal?.kind === 'confirm' && <Confirm title={modal.title} text={modal.text} action={modal.action} onYes={modal.yes} onClose={() => setModal(null)} />}
       {modal?.kind === 'capture' && <QuickCapture lists={allLists} onClose={() => { setModal(null); refreshAll() }} onError={fail} />}
       {modal?.kind === 'import' && <ImportNotes onClose={() => setModal(null)} onDone={refreshAll} />}

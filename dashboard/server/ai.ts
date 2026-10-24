@@ -1,34 +1,46 @@
 // The dashboard's smart features, run through the Claude Code CLI on your own subscription (no API key):
 // prompt improver, model recommender, Brain Dump sorter, interview prompt and Jarvis's brain.
-// Every call is a one-shot `claude -p` in ~/.fleet/ai with structured output and no saved session.
+// Calls skip your plugins, MCP servers and unused tools (--strict-mcp-config --setting-sources project --tools …),
+// which measured ~14x cheaper than a default `claude -p`. Every call's cost is recorded in ai_usage.
 import { execFile } from 'node:child_process'
 import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
-import { FLEET_DIR } from './store.ts'
+import { db, FLEET_DIR } from './store.ts'
 
 const AI_DIR = join(FLEET_DIR, 'ai')
 mkdirSync(AI_DIR, { recursive: true })
 export const AI_MODEL = process.env.FLEET_AI_MODEL ?? 'sonnet'
 
 type Schema = Record<string, unknown>
+type AskOpts = { tools?: string[]; timeoutMs?: number; cwd?: string; feature?: string; resume?: string; persist?: boolean }
+export type Answer<T> = { value: T; session_id: string; cost: number }
 
-export function ask<T>(task: string, system: string, schema: Schema, opts: { tools?: string[]; timeoutMs?: number; cwd?: string } = {}): Promise<T> {
-  const args = ['-p', '--model', AI_MODEL, '--output-format', 'json', '--no-session-persistence',
-    '--system-prompt', system, '--json-schema', JSON.stringify(schema),
-    ...(opts.tools?.length ? ['--allowedTools', ...opts.tools] : []), '--', task]
+export function askFull<T>(task: string, system: string, schema: Schema, opts: AskOpts = {}): Promise<Answer<T>> {
+  const tools = opts.tools ?? []
+  const args = ['-p', '--model', AI_MODEL, '--output-format', 'json', '--strict-mcp-config', '--setting-sources', 'project',
+    '--tools', tools.join(','), ...(tools.length ? ['--allowedTools', ...tools] : []),
+    ...(opts.persist ? [] : ['--no-session-persistence']), ...(opts.resume ? ['--resume', opts.resume] : []),
+    '--system-prompt', system, '--json-schema', JSON.stringify(schema), '--', task]
   return new Promise((resolve, reject) => {
     execFile('claude', args, { cwd: opts.cwd ?? AI_DIR, timeout: opts.timeoutMs ?? 120_000, maxBuffer: 16 << 20 }, (err, stdout) => {
       if (err && !stdout) return reject(new Error(err.killed ? 'Claude took too long' : `claude failed: ${err.message.split('\n')[0]}`))
       try {
         const out = JSON.parse(stdout)
+        const u = out.usage ?? {}
+        db.prepare('INSERT INTO ai_usage (at, feature, cost_usd, input_tokens, output_tokens, cache_read, cache_write, persisted) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+          .run(Math.floor(Date.now() / 1000), opts.feature ?? 'other', Number(out.total_cost_usd) || 0, u.input_tokens ?? 0, u.output_tokens ?? 0,
+            u.cache_read_input_tokens ?? 0, u.cache_creation_input_tokens ?? 0, opts.persist ? 1 : 0)
         if (out.is_error || !out.structured_output) return reject(new Error(out.result || 'Claude returned no answer'))
-        resolve(out.structured_output as T)
+        resolve({ value: out.structured_output as T, session_id: out.session_id ?? '', cost: Number(out.total_cost_usd) || 0 })
       } catch {
         reject(new Error('could not read Claude’s answer'))
       }
     })
   })
 }
+
+export const ask = <T,>(task: string, system: string, schema: Schema, opts: AskOpts = {}) =>
+  askFull<T>(task, system, schema, opts).then(a => a.value)
 
 const obj = (properties: Schema, required = Object.keys(properties)) => ({ type: 'object', properties, required, additionalProperties: false })
 const str = { type: 'string' }
@@ -53,7 +65,7 @@ export type Improved = { prompt: string; changes: string[]; questions: string[] 
 export const improvePrompt = (text: string, project = '') =>
   ask<Improved>(`${project ? `The agent will run in ${project}. You may look around it briefly (a few reads or searches) to get file names, paths and commands right; don't try to solve the task.\n\n` : ''}Prompt to improve:\n<prompt>\n${text}\n</prompt>`, IMPROVE_SYSTEM,
     obj({ prompt: str, changes: { type: 'array', items: str }, questions: { type: 'array', items: str } }),
-    project ? { cwd: project, tools: ['Read', 'Glob', 'Grep'], timeoutMs: 150_000 } : {})
+    project ? { cwd: project, tools: ['Read', 'Glob', 'Grep'], timeoutMs: 150_000, feature: 'improve' } : { feature: 'improve' })
 
 // ---------- model recommender ----------
 
@@ -75,7 +87,7 @@ export const recommend = (task: string, usage: string) =>
     obj({
       tool: { type: 'string', enum: ['claude', 'codex', 'cursor', 'copilot', 'agy'] }, model: str, effort: { type: 'string', enum: ['', 'low', 'medium', 'high', 'xhigh', 'max'] },
       why: str, alternative: obj({ tool: { type: 'string', enum: ['claude', 'codex', 'cursor', 'copilot', 'agy'] }, model: str, why: str }),
-    }))
+    }), { feature: 'suggest' })
 
 // ---------- Brain Dump sorter ----------
 
@@ -88,7 +100,7 @@ export const sortIdeas = (items: { id: number; text: string }[], lists: { name: 
     `Lists:\n${lists.map(l => `- ${l.name}${l.examples.length ? `: e.g. ${l.examples.map(e => `"${e.slice(0, 80)}"`).join('; ')}` : ''}`).join('\n')}\n\nNotes to sort:\n${items.map(i => `${i.id}: ${i.text.slice(0, 400)}`).join('\n')}`,
     SORT_SYSTEM,
     obj({ suggestions: { type: 'array', items: obj({ id: { type: 'integer' }, list: { type: 'string', enum: [...lists.map(l => l.name), 'Brain Dump'] }, confidence: { type: 'number' } }) } }),
-    { timeoutMs: 180_000 })
+    { timeoutMs: 180_000, feature: 'sort' })
 
 // ---------- interview agent ----------
 
@@ -105,23 +117,29 @@ When you have enough (or I say "wrap up"), propose two or three approaches with 
 
 // ---------- Jarvis ----------
 
-const JARVIS_SYSTEM = `You are Jarvis, the voice assistant inside the developer's Fleet dashboard, which runs their coding agents. Answer out loud: one to three short spoken sentences, no markdown, no lists, no code. Use agent names as written.
+const JARVIS_SYSTEM = `You are Jarvis, the assistant built into the developer's Fleet dashboard, which runs their coding agents (Claude Code, Codex, Cursor, Copilot, Antigravity) and holds their idea lists. Think J.A.R.V.I.S.: calm, precise, quietly witty, unflappable, with a light British turn of phrase. Don't call the developer "sir" or by any title; just speak to them.
 
-You can act through "actions" (they run after you answer):
-- reply: send text to an agent that is waiting (agent, text)
-- key: press one key in an agent's menu, e.g. "1", "2", "Enter", "Escape" (agent, key)
-- pause: pause an agent, keeping its conversation (agent)
-- start: start a new agent (tool, prompt; optional name, model, effort)
-- idea: add an idea to a list (text; optional list, default "Brain Dump")
-Only act when the developer asked for it; for questions just answer. Never kill agents (say they can do that from the dashboard). If the request names an agent that doesn't exist or is ambiguous, ask which one instead of guessing. For general questions (weather, scores, news) use web search and answer briefly.`
+Your replies are spoken aloud, so keep "say" to one to three short sentences: no markdown, lists, code or file paths read out character by character. Use agent names as written.
 
-export type JarvisAction = { type: 'reply' | 'key' | 'pause' | 'start' | 'idea'; agent: string; text: string; key: string; tool: string; model: string; effort: string; list: string; name: string }
+You are also their general project agent. You run inside their project folder and can read files and search the code (Read, Glob, Grep) and the web (WebSearch, WebFetch) to answer questions about the project, its plans and docs, or anything else. Look things up rather than guessing, but keep it quick.
 
-export const jarvis = (said: string, context: string) =>
-  ask<{ say: string; actions: JarvisAction[] }>(`What's going on right now:\n${context}\n\nThe developer said: "${said}"`, JARVIS_SYSTEM,
+To act, return "actions" (they run after you answer):
+- reply: send text to an agent (agent, text)
+- key: press one key in an agent's menu, e.g. "1", "2", "Enter", "Escape", "BTab" for shift+tab (agent, key)
+- pause: pause an agent, keeping its conversation (agent; optional text = when to resume, like "18:30" or "+2h")
+- start: start a new agent (text = its task; optional tool, model, effort, name)
+- idea: add an idea (text; optional list, default "Brain Dump")
+- remember: save a lasting note about the developer or project for future conversations (text)
+Only act when asked; for questions just answer. Never kill agents (they can do that from the dashboard). If an agent name is ambiguous or missing, ask instead of guessing.`
+
+export type JarvisAction = { type: 'reply' | 'key' | 'pause' | 'start' | 'idea' | 'remember'; agent: string; text: string; key: string; tool: string; model: string; effort: string; list: string; name: string }
+export type JarvisReply = { say: string; actions: JarvisAction[] }
+
+export const jarvisBrain = (said: string, context: string, memory: string, opts: { cwd: string; resume?: string }) =>
+  askFull<JarvisReply>(`${memory ? `What you remember about the developer and project:\n${memory}\n\n` : ''}What's going on right now:\n${context}\n\nThe developer said: "${said}"`, JARVIS_SYSTEM,
     obj({
       say: str,
       actions: { type: 'array', items: obj({
-        type: { type: 'string', enum: ['reply', 'key', 'pause', 'start', 'idea'] }, agent: str, text: str, key: str, tool: str, model: str, effort: str, list: str, name: str,
+        type: { type: 'string', enum: ['reply', 'key', 'pause', 'start', 'idea', 'remember'] }, agent: str, text: str, key: str, tool: str, model: str, effort: str, list: str, name: str,
       }) },
-    }), { tools: ['WebSearch', 'WebFetch'], timeoutMs: 90_000 })
+    }), { tools: ['Read', 'Glob', 'Grep', 'WebSearch', 'WebFetch'], timeoutMs: 150_000, cwd: opts.cwd, resume: opts.resume, persist: true, feature: 'jarvis' })

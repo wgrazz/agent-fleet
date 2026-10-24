@@ -16,6 +16,8 @@ export type Agent = {
   last_line: string
   message: string
   exit: string
+  mode: string
+  working_line: string
 }
 export type Placed = { key: string; folder_id: number | null }
 export type LiveAgent = Agent & Placed
@@ -33,7 +35,7 @@ export type RepoChanges = { repo: string; branch: string; files: { status: strin
 export type Route = { tool: string; model: string; effort: string; why: string; alternative: { tool: string; model: string; why: string } }
 export type Improved = { prompt: string; changes: string[]; questions: string[] }
 
-export type Paused = { id: number; name: string; tool: string; session_id: string; cwd: string; paused_at: number }
+export type Paused = { id: number; name: string; tool: string; session_id: string; cwd: string; paused_at: number; resume_at: number | null }
 export type Profile = { name: string; tool: string; model: string | null; effort: string | null; args: string | null; cwd: string | null; is_default: number }
 
 export class Unauthorized extends Error {}
@@ -87,3 +89,5 @@ export const remember = {
     } catch {}
   },
 }
+
+export type AiBudget = { weekly_pct: number | null; jarvis_pct: number; ai_pct: number; jarvis_usd: number; ai_usd: number; claude_usd: number; warn_pct: number; max_pct: number; since: number }

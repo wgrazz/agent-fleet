@@ -14,7 +14,7 @@ export function AgentList({ agents, selected, header, past, onMenu, empty }: {
       {header}
       <div className="scroll">
         {ORDER.map(status => {
-          const group = agents.filter(a => a.status === status)
+          const group = agents.filter(a => a.controllable && a.status === status)
           if (!group.length) return null
           return (
             <div key={status}>
@@ -23,6 +23,12 @@ export function AgentList({ agents, selected, header, past, onMenu, empty }: {
             </div>
           )
         })}
+        {agents.some(a => !a.controllable) && (
+          <div className="outside">
+            <div className="grp">Outside Fleet<span className="grp-hint">plain terminal windows · hold one to add it</span></div>
+            {agents.filter(a => !a.controllable).map(a => <AgentRow key={a.name} a={a} on={a.name === selected} onMenu={(x, y) => onMenu(a, x, y)} />)}
+          </div>
+        )}
         {past && past.length > 0 && (
           <div>
             <div className="grp">Past conversations</div>
@@ -39,7 +45,7 @@ function AgentRow({ a, on, onMenu }: { a: LiveAgent; on: boolean; onMenu: (x: nu
   const hold = useHold(onMenu)
   return (
     <a href={`#/agent/${encodeURIComponent(a.name)}`} draggable onDragStart={e => e.dataTransfer.setData('fleet/key', a.key)}
-      className={`it ${on ? 'on' : ''} ${a.status === 'needs_you' ? 'need' : ''}`} {...hold}>
+      className={`it ${on ? 'on' : ''} ${a.status === 'needs_you' && a.controllable ? 'need' : ''} ${a.controllable ? '' : 'outside-row'}`} {...hold}>
       <Avatar tool={a.tool} status={a.status} />
       <span className="nm">{a.name}</span>
       <span className="tm">{age(a.age_s)}</span>
@@ -73,7 +79,7 @@ export function PausedList({ items, header, onResume, onForget }: {
             <Avatar tool={p.tool} />
             <span className="nm">{p.name}</span>
             <span className="tm">{new Date(p.paused_at * 1000).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}</span>
-            <span className="pv">{p.cwd.split('/').slice(-2).join('/')}</span>
+            <span className="pv">{p.resume_at ? `Back ${new Date(p.resume_at * 1000).toLocaleString([], { weekday: 'short', hour: 'numeric', minute: '2-digit' })}` : p.cwd.split('/').slice(-2).join('/')}</span>
             <span className="row-actions">
               <button className="btn small primary" onClick={() => onResume(p)}>Resume</button>
               <button className="btn small" onClick={() => onForget(p)}>Forget</button>
@@ -90,10 +96,15 @@ export function PausedList({ items, header, onResume, onForget }: {
 
 type Tab = 'chat' | 'terminal' | 'changes'
 
-export function AgentView({ agent, onBack, onTerminal, onPause, onMenu, send }: {
+export function AgentView({ agent, onBack, onTerminal, onPause, onMenu, onAdopt, send }: {
   agent: LiveAgent; onBack: () => void; onTerminal: () => void; onPause: () => void; onMenu: (x: number, y: number) => void
-  send: (body: { text?: string; key?: string }) => Promise<void>
+  onAdopt: () => void; send: (body: { text?: string; key?: string }) => Promise<void>
 }) {
+  const [pending, setPending] = useState('')
+  const sendTracked = (body: { text?: string; key?: string }) => {
+    if (body.text) setPending(body.text)
+    return send(body).catch(e => { setPending(''); throw e })
+  }
   const chat = (agent.tool === 'claude' || agent.tool === 'codex') && !!agent.session_id
   const [tab, setTabState] = useState<Tab>(() => {
     const saved = remember.get(isPhone() ? 'tab.phone' : 'tab.desk') as Tab
@@ -113,6 +124,9 @@ export function AgentView({ agent, onBack, onTerminal, onPause, onMenu, send }: 
             <span className="ellip">{toolLabel(agent.tool)} · {agent.cwd.split('/').pop() || '~'}</span>
           </div>
         </div>
+        {!agent.controllable && agent.pid !== null && agent.session_id && (
+          <div className="acts"><button className="btn primary" onClick={onAdopt}>Add to Fleet</button></div>
+        )}
         {agent.controllable && (
           <div className="acts">
             {agent.pid !== null && <button className="btn" onClick={onPause} disabled={!agent.session_id}
@@ -132,8 +146,8 @@ export function AgentView({ agent, onBack, onTerminal, onPause, onMenu, send }: 
       {!agent.controllable ? (
         chat ? (
           <>
-            <ChatView tool={agent.tool} id={agent.session_id} live />
-            <div className="ended">Started in a plain terminal window, so this is read-only here. Agents started with New agent or <code>fleet new</code> can be answered from the dashboard.</div>
+            <ChatView tool={agent.tool} id={agent.session_id} live working={agent.status === 'working' ? agent.working_line || 'Working…' : ''} />
+            <div className="ended">This one runs in a plain terminal window, so it's read-only here. <b>Add to Fleet</b> moves it into Fleet with the same conversation, so you can answer it from anywhere.</div>
           </>
         ) : (
           <div className="empty big">
@@ -142,13 +156,14 @@ export function AgentView({ agent, onBack, onTerminal, onPause, onMenu, send }: 
           </div>
         )
       ) : shown === 'chat' ? (
-        <ChatView tool={agent.tool} id={agent.session_id} live waiting={agent.status === 'needs_you' ? agent.message : ''} />
+        <ChatView tool={agent.tool} id={agent.session_id} live waiting={agent.status === 'needs_you' ? agent.message : ''}
+          working={agent.status === 'working' ? agent.working_line || 'Working…' : ''} pending={pending} onSeen={() => setPending('')} />
       ) : shown === 'changes' ? (
         <ChangesView name={agent.name} />
       ) : (
         <ScreenView name={agent.name} />
       )}
-      {agent.controllable && agent.pid !== null && <Composer agent={agent} send={send} />}
+      {agent.controllable && agent.pid !== null && <Composer agent={agent} send={sendTracked} />}
       {agent.controllable && agent.pid === null && <div className="ended">This agent exited ({agent.exit}). Its last screen is kept under Screen.</div>}
     </main>
   )
@@ -177,6 +192,9 @@ function Composer({ agent, send }: { agent: LiveAgent; send: (body: { text?: str
           <button className="q" onClick={() => send({ key: 'Enter' })}><kbd>⏎</kbd>Select</button>
         </>}
         <button className="q" onClick={() => send({ key: 'Escape' })}><kbd>esc</kbd>Interrupt</button>
+        {(agent.mode || ['claude', 'copilot', 'agy'].includes(agent.tool)) && (
+          <button className="q mode" onClick={() => send({ key: 'BTab' })} title="Shift+Tab: cycle the agent's mode"><kbd>⇧⇥</kbd>{agent.mode || 'Mode'}</button>
+        )}
       </div>
       <div className="row">
         <textarea id="composer" rows={1} value={text} placeholder={`Reply to ${agent.name}…`} enterKeyHint="send"
@@ -197,7 +215,9 @@ function Composer({ agent, send }: { agent: LiveAgent; send: (body: { text?: str
 // ---------- chat ----------
 
 /** A conversation as chat bubbles, read from the tool's own log. Live views poll and stick to the bottom. */
-export function ChatView({ tool, id, live, waiting }: { tool: string; id: string; live?: boolean; waiting?: string }) {
+export function ChatView({ tool, id, live, waiting, working, pending, onSeen }: {
+  tool: string; id: string; live?: boolean; waiting?: string; working?: string; pending?: string; onSeen?: () => void
+}) {
   const [messages, setMessages] = useState<Message[] | null>(null)
   const [error, setError] = useState('')
   const box = useRef<HTMLDivElement>(null)
@@ -217,7 +237,12 @@ export function ChatView({ tool, id, live, waiting }: { tool: string; id: string
   useLayoutEffect(() => {
     const el = box.current
     if (el && pinned.current) el.scrollTop = el.scrollHeight
-  }, [messages, waiting])
+  }, [messages, waiting, working, pending])
+
+  // what you just sent shows right away, until it appears in the agent's own log
+  const norm = (t: string) => t.replace(/\s+/g, ' ').trim()
+  const seen = !!pending && !!messages?.some(m => m.role === 'user' && norm(m.text).includes(norm(pending).slice(0, 60)))
+  useEffect(() => { if (seen) onSeen?.() }, [seen]) // eslint-disable-line react-hooks/exhaustive-deps
 
   if (error) return <div className="empty big">{error}</div>
   if (!messages) return <div className="chat"><div className="empty">Loading…</div></div>
@@ -233,6 +258,8 @@ export function ChatView({ tool, id, live, waiting }: { tool: string; id: string
       {blocks.map((b, i) => Array.isArray(b) ? <ToolRun key={i} tools={b} /> : (
         <div key={i} className={`bubble ${b.role}`}><Markdown text={b.text} /></div>
       ))}
+      {pending && !seen && <div className="bubble user sending">{pending}</div>}
+      {working && <div className="bubble working"><span className="dots"><i /><i /><i /></span>{working}</div>}
       {waiting && <div className="bubble waiting">Waiting for you: {waiting}</div>}
       {!messages.length && <div className="empty">No messages yet.</div>}
     </div>

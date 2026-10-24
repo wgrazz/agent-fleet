@@ -15,7 +15,8 @@ SEE
   fleet json             the same agents as JSON (what the dashboard reads)
 
 LATER
-  fleet pause NAME       stop NAME's agent but keep its conversation, to pick up later
+  fleet pause NAME [--until WHEN]   stop NAME's agent but keep its conversation; WHEN (18:30, +2h) brings it back
+  fleet adopt PID [NAME] move an agent running in a plain terminal window into Fleet, same conversation
   fleet paused           list paused agents
   fleet unpause ID|NAME  bring a paused agent back in a new session with its conversation
   fleet idea [-l LIST] TEXT   jot an idea (lands in Brain Dump unless you name a list)
@@ -23,6 +24,7 @@ LATER
 
 DASHBOARD
   fleet dash             open the dashboard in your browser
+  fleet ask TEXT         ask Jarvis (the dashboard's assistant) from any terminal or script
   fleet dash install     run the dashboard at login and put it on your tailnet for your phone (--local: Mac only)
   fleet dash update      after changing the dashboard's code: rebuild the page and restart the server
   fleet dash uninstall   stop it and remove it from login items
@@ -130,7 +132,7 @@ def service(procs, pid):
         return 'chrome bridge'
     if 'claude-mem' in parent:
         return 'claude-mem observer'
-    if '--no-session-persistence' in cmd:
+    if '--no-session-persistence' in cmd or '--json-schema' in cmd:
         return 'one-shot helper'  # e.g. the dashboard's smart features (claude -p)
 
 
@@ -215,7 +217,9 @@ def session_id(tool_name, pid, cwd, started_s):
             with open(f'{HOME}/.claude/sessions/{pid}.json') as f:
                 return json.load(f).get('sessionId', '')
         except (OSError, ValueError):
-            return ''
+            # no session file (some terminals): the newest transcript in this folder's project dir
+            slug = re.sub(r'[^A-Za-z0-9]', '-', cwd or '')
+            return newest_since(f'{HOME}/.claude/projects/{slug}/*.jsonl', started_s, '.jsonl') if cwd else ''
     if tool_name == 'codex':
         dbs = sorted(glob.glob(f'{HOME}/.codex/state_*.sqlite'))
         try:
@@ -400,6 +404,8 @@ def db():
     for col, kind in IDEA_COLUMNS.items():  # same list as dashboard/server/store.ts
         if col not in have:
             con.execute(f'ALTER TABLE ideas ADD COLUMN {col} {kind}')
+    if 'resume_at' not in {r[1] for r in con.execute('PRAGMA table_info(paused)')}:
+        con.execute('ALTER TABLE paused ADD COLUMN resume_at INTEGER')
     return con
 
 
@@ -456,18 +462,72 @@ def new(args):
     attach(a.name)
 
 
-def pause(name):
+def parse_when(text):
+    """'2026-10-24 18:30', '18:30' (today, or tomorrow if past), '+2h', '+45m', or epoch seconds → epoch seconds."""
+    import datetime
+    text = text.strip()
+    if text.isdigit():
+        return int(text)
+    m = re.fullmatch(r'\+(\d+)([mhd])', text)
+    if m:
+        return int(time.time()) + int(m.group(1)) * {'m': 60, 'h': 3600, 'd': 86400}[m.group(2)]
+    for fmt in ('%Y-%m-%d %H:%M', '%Y-%m-%dT%H:%M', '%H:%M'):
+        try:
+            t = datetime.datetime.strptime(text, fmt)
+        except ValueError:
+            continue
+        if fmt == '%H:%M':
+            now = datetime.datetime.now()
+            t = now.replace(hour=t.hour, minute=t.minute, second=0, microsecond=0)
+            if t <= now:
+                t += datetime.timedelta(days=1)
+        return int(t.timestamp())
+    sys.exit(f"Can't read the time {text!r}: use 18:30, '2026-10-24 18:30', +2h or +45m.")
+
+
+def pause(name, until=None):
     row = next((r for r in rows(snapshot()) if r['session'] == name), None)
     if not row:
         sys.exit(f'No agent running in a session named {name}.')
     if not row['session_id']:
         sys.exit(f"Can't pause {name}: no resumable session id found for {row['tool']}.")
+    resume_at = parse_when(until) if until else None
     con = db()
     with con:
-        con.execute('INSERT INTO paused (name, tool, session_id, cwd, paused_at) VALUES (?, ?, ?, ?, ?)',
-                    (name, row['tool'], row['session_id'], row['cwd'] or HOME, int(time.time())))
+        con.execute('INSERT INTO paused (name, tool, session_id, cwd, paused_at, resume_at) VALUES (?, ?, ?, ?, ?, ?)',
+                    (name, row['tool'], row['session_id'], row['cwd'] or HOME, int(time.time()), resume_at))
     subprocess.run(['tmux', 'kill-session', '-t', f'={name}'], capture_output=True)
-    print(f'Paused {name}. fleet unpause {name} brings it back.')
+    when = f" It comes back on its own at {time.strftime('%a %H:%M', time.localtime(resume_at))} while the dashboard runs." if resume_at else ''
+    print(f'Paused {name}.{when} fleet unpause {name} brings it back now.')
+
+
+def adopt(pid, name=None, force=False):
+    """Move an agent running in a plain terminal window into a protected Fleet session, same conversation."""
+    procs = snapshot()
+    row = next((r for r in rows(procs) if r['pid'] == pid), None)
+    if not row:
+        sys.exit(f'No agent with PID {pid} (see fleet).')
+    if row['session']:
+        sys.exit(f"PID {pid} is already in Fleet as {row['session']}.")
+    if not row['session_id'] or LAUNCH.get(row['tool'], {}).get('resume') is None:
+        sys.exit(f"Can't move PID {pid} into Fleet: no resumable conversation found for {row['tool']}.")
+    if row['task'].startswith('[busy]') and not force:
+        sys.exit(f'PID {pid} is in the middle of something. Wait for it to finish, or use --force (it will be interrupted).')
+    if not name:
+        title = re.sub(r'^\[[a-z]+\]\s*', '', row['task'])
+        name = re.sub(r'[^a-z0-9]+', '-', title.lower()).strip('-')[:30] or f"{row['tool']}-{pid}"
+        while has_session(name):
+            name = f'{name[:34]}-{secrets.token_hex(2)}'
+    check_name(name)
+    kill_tree(procs, pid)  # the old window shows the agent exited; the conversation carries on in Fleet
+    for _ in range(50):
+        if pid not in snapshot():
+            break
+        time.sleep(0.2)
+    else:
+        sys.exit(f'PID {pid} did not stop, so it was not moved.')
+    start(name, row['cwd'] or HOME, launch_argv(row['tool'], resume=row['session_id']))
+    print(f'Moved PID {pid} into Fleet as {name}.')
 
 
 def rename(old, new_name):
@@ -690,6 +750,17 @@ def hooks(action, path=None):
     print(f'{verb} {changed} Claude Code hook(s) in {path}.' if changed else 'Nothing to change.')
 
 
+def ask(text):
+    """Ask the dashboard's Jarvis from a terminal or another assistant (Atticus, Siri via Shortcuts)."""
+    try:
+        r = api('POST', '/api/jarvis', {'text': text}, timeout=150)
+    except Exception as e:
+        sys.exit(f'The dashboard is not answering ({e}). Is it installed? fleet dash install')
+    print(r.get('say', ''))
+    for d in r.get('done') or []:
+        print(f'  · {d}')
+
+
 def dash():
     cfg = config()
     url = f'http://127.0.0.1:{cfg["port"]}/?key={cfg["key"]}'
@@ -868,6 +939,9 @@ def selftest():
                                 ('plain line', False, False)], note_lines(blob)
     assert notes_list_name('000 Brain Dump:') == 'Brain Dump' and notes_list_name('001 PRIORITY:') == 'Priority'
     assert notes_list_name('011 Optimal Data Public Face') == 'Optimal Data Public Face'
+    t = parse_when('+2h')
+    assert abs(t - time.time() - 7200) < 5 and parse_when('1800000000') == 1800000000
+    assert parse_when('23:59') > time.time() and parse_when('2030-01-02 03:04') > time.time()
     print('ok')
 
 
@@ -887,6 +961,13 @@ def main(args):
         return rename(*rest)
     if cmd == 'pause' and len(rest) == 1:
         return pause(rest[0])
+    if cmd == 'pause' and len(rest) == 3 and rest[1] == '--until':
+        return pause(rest[0], rest[2])
+    if cmd == 'adopt' and rest and rest[0].isdigit():
+        names = [a for a in rest[1:] if a != '--force']
+        return adopt(int(rest[0]), names[0] if names else None, force='--force' in rest)
+    if cmd == 'ask' and rest:
+        return ask(' '.join(rest))
     if cmd == 'paused' and not rest:
         return paused_list()
     if cmd == 'unpause' and rest and rest[0] != '--detach':
