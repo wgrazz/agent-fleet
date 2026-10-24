@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
 process.env.FLEET_DIR = mkdtempSync(join(tmpdir(), 'fleet-jarvis-'))
-const { instant, findAgent, summary, remember, memory } = await import('../server/jarvis.ts')
+const { instant, findAgent, summary, remember, memory, approvalWord, threadFor, newThread, addMessage, threads, messages, propose, pendingProposals, settleProposal, summarize } = await import('../server/jarvis.ts')
 
 const agent = (name: string, extra: object = {}) => ({
   name, controllable: true, tool: 'claude', pid: 1, cwd: '', task: '', age_s: 1, session_id: '', status: 'working', status_since: 0,
@@ -44,4 +44,31 @@ describe('instant commands', () => {
     expect(instant('pause the UI agents', agents)).toBeNull()
   })
   it('summary when quiet', () => expect(summary([])).toBe('Nothing needs you right now.'))
+})
+
+describe('conversations and approvals', () => {
+  it('reuses the active conversation and starts fresh on request', () => {
+    const t1 = threadFor()
+    addMessage(t1, 'you', 'where are we on the Target scraper?')
+    expect(threadFor().id).toBe(t1.id)
+    expect(threads()[0]).toMatchObject({ id: t1.id, title: 'where are we on the Target scraper?' })
+    const t2 = newThread()
+    expect(t2.id).not.toBe(t1.id)
+    expect(threadFor(t1.id).id).toBe(t1.id)
+    expect(messages(t1.id)).toHaveLength(1)
+  })
+  it('agent changes wait for a yes', () => {
+    const t = newThread()
+    const p = propose(t.id, { type: 'start', agent: '', text: 'fix Walmart pagination', key: '', tool: 'claude', model: '', effort: '', list: '', name: '' })
+    expect(p.summary).toBe('Start a Claude agent: “fix Walmart pagination”')
+    expect(pendingProposals(t.id)).toHaveLength(1)
+    settleProposal(p.id, 'approved', 'started walmart-fix')
+    expect(pendingProposals(t.id)).toHaveLength(0)
+    expect(summarize({ type: 'key', agent: 'scraper', key: '1' } as any)).toBe('Press 1 in scraper')
+  })
+  it('understands yes and no', () => {
+    for (const y of ['yes', 'Yeah.', 'do it', 'go ahead', 'sure', 'approve it', 'yes please']) expect(approvalWord(y)).toBe('yes')
+    for (const n of ['no', 'Nope', 'cancel', 'never mind']) expect(approvalWord(n)).toBe('no')
+    expect(approvalWord('yes and also check the logs')).toBeNull()
+  })
 })

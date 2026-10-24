@@ -5,7 +5,7 @@ import { createReadStream, existsSync, statSync } from 'node:fs'
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import { homedir } from 'node:os'
 import { extname, join, normalize } from 'node:path'
-import { improvePrompt, interviewPrompt, jarvisBrain, recommend, type JarvisReply } from './ai.ts'
+import { improvePrompt, interviewPrompt, jarvisBrain, recommend, type JarvisAction } from './ai.ts'
 import { changes } from './git.ts'
 import { conversations, transcript } from './history.ts'
 import * as ideas from './ideas.ts'
@@ -137,47 +137,83 @@ function jarvisContext() {
 
 const budget = () => aiBudget(config.jarvis_warn_pct ?? 5, config.jarvis_max_pct ?? 10)
 
-async function runJarvis(said: string, override = false) {
-  let reply: JarvisReply | null = J.instant(said, list())
-  let used: 'instant' | 'claude' = 'instant'
-  if (!reply) {
-    const b = await budget()
-    if (b.jarvis_pct >= b.max_pct && !override)
-      return { say: `I've used about ${b.jarvis_pct.toFixed(1)} percent of your weekly Claude limit this week, past the ${b.max_pct} percent cap you set. Quick commands still work; say "allow" in the panel to go past it once.`, done: [], blocked: true, mode: used }
-    const project = config.cwd && existsSync(config.cwd) ? config.cwd : homedir()
-    const prior = J.session()
-    try {
-      const a = await jarvisBrain(said, jarvisContext(), J.memory(), { cwd: project, resume: prior })
-      reply = a.value
-      if (a.session_id) J.saveSession(a.session_id)
-    } catch (e) {
-      if (!prior) throw e
-      J.resetSession() // yesterday's or a broken conversation: start fresh once
-      const a = await jarvisBrain(said, jarvisContext(), J.memory(), { cwd: project })
-      reply = a.value
-      if (a.session_id) J.saveSession(a.session_id)
-    }
-    used = 'claude'
+type JarvisOpts = { threadId?: number; override?: boolean }
+
+/** Carry out one action. Anything Claude wants to do to an agent only gets here after you approve it. */
+async function doAction(a: JarvisAction): Promise<string> {
+  const target = a.agent ? list().find(x => x.name === a.agent && x.controllable) : undefined
+  if ((a.type === 'reply' || a.type === 'key' || a.type === 'pause') && !target) throw new Error(`no agent named ${a.agent}`)
+  if (a.type === 'reply') await sendText(target!.name, a.text)
+  if (a.type === 'key') await sendKey(target!.name, a.key)
+  if (a.type === 'pause') await fleet(['pause', target!.name, ...(a.text ? ['--until', a.text] : [])])
+  if (a.type === 'start') return `started ${(await startAgent({ tool: a.tool || undefined, model: a.model, effort: a.effort, prompt: a.text, name: a.name })).name}`
+  if (a.type === 'idea') ideas.addIdea(a.text, a.list || 'Brain Dump')
+  if (a.type === 'remember') J.remember(a.text)
+  return `${a.type === 'remember' ? 'remembered' : a.type}${a.agent ? ` ${a.agent}` : ''}${a.key ? ` ${a.key}` : ''}`
+}
+
+async function settle(p: J.Proposal, approve: boolean) {
+  if (!approve) { J.settleProposal(p.id, 'declined'); return `declined: ${p.summary}` }
+  try {
+    const result = await doAction(JSON.parse(p.action))
+    J.settleProposal(p.id, 'approved', result)
+    return result
+  } catch (e) {
+    J.settleProposal(p.id, 'approved', `failed: ${(e as Error).message}`)
+    return `couldn't: ${(e as Error).message}`
   }
+}
+
+async function runJarvis(said: string, opts: JarvisOpts = {}) {
+  const t = J.threadFor(opts.threadId)
+  J.addMessage(t, 'you', said)
   const done: string[] = []
-  for (const a of reply.actions) {
-    try {
-      const target = a.agent ? list().find(x => x.name === a.agent && x.controllable) : undefined
-      if ((a.type === 'reply' || a.type === 'key' || a.type === 'pause') && !target) throw new Error(`no agent named ${a.agent}`)
-      if (a.type === 'reply') await sendText(target!.name, a.text)
-      if (a.type === 'key') await sendKey(target!.name, a.key)
-      if (a.type === 'pause') await fleet(['pause', target!.name, ...(a.text ? ['--until', a.text] : [])])
-      if (a.type === 'start') done.push(`started ${(await startAgent({ tool: a.tool || undefined, model: a.model, effort: a.effort, prompt: a.text, name: a.name })).name}`)
-      if (a.type === 'idea') ideas.addIdea(a.text, a.list || 'Brain Dump')
-      if (a.type === 'remember') J.remember(a.text)
-      if (a.type !== 'start') done.push(`${a.type}${a.agent ? ` ${a.agent}` : ''}${a.key ? ` ${a.key}` : ''}`)
-    } catch (e) {
-      done.push(`couldn't ${a.type}: ${(e as Error).message}`)
-    }
+  const reply = (say: string, meta: object = {}) => {
+    J.addMessage(t, 'bot', say, { done, ...meta })
+    return { thread_id: t.id, say, done, ...meta }
   }
-  if (reply.actions.length) await poll()
-  const b = used === 'claude' ? await budget() : null
-  return { say: reply.say, done, mode: used, warning: b && b.jarvis_pct >= b.warn_pct ? `Jarvis has used ${b.jarvis_pct.toFixed(1)}% of your weekly Claude limit this week.` : undefined }
+
+  // "yes" / "no" answers whatever is waiting for approval in this conversation
+  const pending = J.pendingProposals(t.id)
+  const word = pending.length ? J.approvalWord(said) : null
+  if (word) {
+    for (const p of pending) done.push(await settle(p, word === 'yes'))
+    await poll()
+    return reply(word === 'yes' ? (pending.length === 1 ? 'Done.' : `Done, all ${pending.length}.`) : 'Cancelled.', { mode: 'instant' })
+  }
+
+  // things you said directly ("tell walmart yes") happen right away
+  const quick = J.instant(said, list())
+  if (quick) {
+    for (const a of quick.actions) done.push(await doAction(a).catch(e => `couldn't ${a.type}: ${(e as Error).message}`))
+    if (quick.actions.length) await poll()
+    return reply(quick.say, { mode: 'instant' })
+  }
+
+  const b = await budget()
+  if (b.jarvis_pct >= b.max_pct && !opts.override)
+    return reply(`I've used about ${b.jarvis_pct.toFixed(1)} percent of your weekly Claude limit this week, past the ${b.max_pct} percent cap you set. Quick commands still work; tap Allow once to go past it.`, { blocked: said, mode: 'claude' })
+  const project = config.cwd && existsSync(config.cwd) ? config.cwd : homedir()
+  let answer
+  try {
+    answer = await jarvisBrain(said, jarvisContext(), J.memory(), { cwd: project, resume: t.session_id ?? undefined })
+  } catch (e) {
+    if (!t.session_id) throw e
+    answer = await jarvisBrain(said, jarvisContext(), J.memory(), { cwd: project }) // the old session is gone: carry on fresh
+  }
+  if (answer.session_id) J.setThreadSession(t.id, answer.session_id)
+
+  // Jarvis only reads; anything that changes an agent becomes a proposal you approve
+  const proposed = []
+  for (const a of answer.value.actions) {
+    if (a.type === 'idea' || a.type === 'remember') done.push(await doAction(a).catch(e => `couldn't ${a.type}: ${(e as Error).message}`))
+    else proposed.push(J.propose(t.id, a))
+  }
+  const after = await budget()
+  return reply(answer.value.say, {
+    mode: 'claude', proposals: proposed,
+    warning: after.jarvis_pct >= after.warn_pct ? `Jarvis has used ${after.jarvis_pct.toFixed(1)}% of your weekly Claude limit this week.` : undefined,
+  })
 }
 
 // Paused agents with a resume time come back on their own (checked every 30 s while the dashboard runs).
@@ -360,10 +396,27 @@ const routes: [string, RegExp, Route][] = [
     const b = await body(req)
     const said = str(b.text, 2000).trim()
     if (!said) throw new HttpError(400, "didn't catch that")
-    return runJarvis(said, b.override === true)
+    return runJarvis(said, { threadId: typeof b.thread_id === 'number' ? b.thread_id : undefined, override: b.override === true })
   }],
-  ['GET', /^\/api\/jarvis\/status$/, async () => ({ budget: await budget(), memory: J.memory(), session: !!J.session() })],
-  ['POST', /^\/api\/jarvis\/reset$/, async () => { J.resetSession(); return { ok: true } }],
+  ['GET', /^\/api\/jarvis\/status$/, async () => ({ budget: await budget(), memory: J.memory() })],
+  ['GET', /^\/api\/jarvis\/threads$/, async () => J.threads()],
+  ['POST', /^\/api\/jarvis\/threads$/, async () => J.newThread()],
+  ['GET', /^\/api\/jarvis\/threads\/(\d+)$/, async (_req, [id]) => {
+    const t = J.thread(int(id))
+    if (!t) throw new HttpError(404, 'no such conversation')
+    return { thread: t, messages: J.messages(t.id), proposals: J.proposals(t.id) }
+  }],
+  ['DELETE', /^\/api\/jarvis\/threads\/(\d+)$/, async (_req, [id]) => { J.deleteThread(int(id)); return { ok: true } }],
+  ['POST', /^\/api\/jarvis\/proposals\/(\d+)\/(approve|decline)$/, async (_req, [id, verb]) => {
+    const p = J.proposal(int(id))
+    if (!p) throw new HttpError(404, 'no such proposal')
+    if (p.state !== 'pending') return { state: p.state, result: p.result }
+    const result = await settle(p, verb === 'approve')
+    const t = J.thread(p.thread_id)
+    if (t) J.addMessage(t, 'bot', verb === 'approve' ? `Done: ${result}` : 'Cancelled.', { done: [result], mode: 'instant' })
+    await poll()
+    return { state: verb === 'approve' ? 'approved' : 'declined', result }
+  }],
 
   // ---------- ideas ----------
   ['GET', /^\/api\/lists$/, async () => ideas.lists()],

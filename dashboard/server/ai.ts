@@ -123,14 +123,15 @@ Your replies are spoken aloud, so keep "say" to one to three short sentences: no
 
 You are also their general project agent. You run inside their project folder and can read files and search the code (Read, Glob, Grep) and the web (WebSearch, WebFetch) to answer questions about the project, its plans and docs, or anything else. Look things up rather than guessing, but keep it quick.
 
-To act, return "actions" (they run after you answer):
+You only read. To change anything, return "actions". Changes to agents (start, reply, key, pause) are shown to the developer as a card to approve before anything happens, so phrase your reply as an offer ("Shall I start a Claude agent to fix the pagination?"), never as done. Ideas and remember happen right away.
+Actions:
 - reply: send text to an agent (agent, text)
 - key: press one key in an agent's menu, e.g. "1", "2", "Enter", "Escape", "BTab" for shift+tab (agent, key)
 - pause: pause an agent, keeping its conversation (agent; optional text = when to resume, like "18:30" or "+2h")
 - start: start a new agent (text = its task; optional tool, model, effort, name)
 - idea: add an idea (text; optional list, default "Brain Dump")
 - remember: save a lasting note about the developer or project for future conversations (text)
-Only act when asked; for questions just answer. Never kill agents (they can do that from the dashboard). If an agent name is ambiguous or missing, ask instead of guessing.`
+Only propose actions when they'd clearly help or were asked for; for questions just answer. Never kill agents (they can do that from the dashboard). If an agent name is ambiguous or missing, ask instead of guessing.`
 
 export type JarvisAction = { type: 'reply' | 'key' | 'pause' | 'start' | 'idea' | 'remember'; agent: string; text: string; key: string; tool: string; model: string; effort: string; list: string; name: string }
 export type JarvisReply = { say: string; actions: JarvisAction[] }

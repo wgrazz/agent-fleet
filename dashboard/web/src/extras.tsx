@@ -100,7 +100,6 @@ export function Palette({ agents, lists, actions, onClose }: {
 
 // ---------- Jarvis ----------
 
-type Said = { who: 'you' | 'bot'; text: string; done?: string[]; instant?: boolean; blocked?: string; warning?: string }
 
 const Recognition: any = (window as any).SpeechRecognition ?? (window as any).webkitSpeechRecognition
 
@@ -119,15 +118,19 @@ export function pickVoice(): SpeechSynthesisVoice | undefined {
     ?? all.find(v => v.lang === 'en-GB')
 }
 
-function speakOnDevice(text: string) {
-  if (!('speechSynthesis' in window) || !text) return
+function speakOnDevice(text: string): Promise<void> {
+  if (!('speechSynthesis' in window) || !text) return Promise.resolve()
   speechSynthesis.cancel()
-  const u = new SpeechSynthesisUtterance(text)
-  const v = pickVoice()
-  if (v) { u.voice = v; u.lang = v.lang }
-  u.rate = 1.02
-  u.pitch = 0.92
-  speechSynthesis.speak(u)
+  return new Promise(resolve => {
+    const u = new SpeechSynthesisUtterance(text)
+    const v = pickVoice()
+    if (v) { u.voice = v; u.lang = v.lang }
+    u.rate = 1.02
+    u.pitch = 0.92
+    u.onend = () => resolve()
+    u.onerror = () => resolve()
+    speechSynthesis.speak(u)
+  })
 }
 
 // Natural voices are made on the Mac and played here. iPhones only let a page play sound it started during a tap,
@@ -146,7 +149,7 @@ let voiceSettings: Settings | null = null
 export const setVoiceSettings = (s: Settings) => { voiceSettings = s }
 const loadVoiceSettings = () => voiceSettings ? Promise.resolve(voiceSettings) : api.get<Settings>('/api/settings').then(s => (voiceSettings = s)).catch(() => null)
 
-export async function speak(text: string, override?: { engine: string; voice: string; speed: number }) {
+export async function speak(text: string, override?: { engine: string; voice: string; speed: number }): Promise<void> {
   if (!text) return
   const s = override ?? await loadVoiceSettings().then(v => v && { engine: v.voice_engine, voice: v.voice, speed: v.voice_speed })
   if (!s || s.engine === 'device' || !player) return speakOnDevice(text)
@@ -157,66 +160,108 @@ export async function speak(text: string, override?: { engine: string; voice: st
     const url = URL.createObjectURL(await res.blob())
     player.pause()
     player.src = url
-    player.onended = () => URL.revokeObjectURL(url)
-    await player.play()
+    await new Promise<void>((resolve, reject) => {
+      player.onended = () => { URL.revokeObjectURL(url); resolve() }
+      player.onpause = () => resolve() // interrupted
+      player.onerror = () => reject(new Error('playback failed'))
+      player.play().catch(reject)
+    })
   } catch {
-    speakOnDevice(text) // the Mac voice isn't available right now: still answer out loud
+    return speakOnDevice(text) // the Mac voice isn't available right now: still answer out loud
   }
 }
 
 export const stopSpeaking = () => { player?.pause(); window.speechSynthesis?.cancel() }
 
-export const spokenRepliesSetting = () => spokenReplies
 export const spokenAlerts = { get: () => remember.get('jarvis.alerts') === '1', set: (on: boolean) => remember.set('jarvis.alerts', on ? '1' : '') }
 export const spokenReplies = { get: () => remember.get('jarvis.quiet') !== '1', set: (on: boolean) => remember.set('jarvis.quiet', on ? '' : '1') }
 
-let keptLog: Said[] = [] // the conversation survives closing the panel
+type Proposal = { id: number; summary: string; state: 'pending' | 'approved' | 'declined'; result?: string | null }
+type Line = { who: 'you' | 'bot'; text: string; meta?: { done?: string[]; mode?: string; warning?: string; blocked?: string; proposals?: Proposal[] } }
+type Thread = { id: number; title: string; updated_at: number; count?: number }
+
+const IDLE_MS = 2 * 3600 * 1000
+type VoiceState = 'off' | 'listening' | 'thinking' | 'speaking'
 
 export function Jarvis({ onClose, onChanged, asPage }: { onClose: () => void; onChanged: () => void; asPage?: boolean }) {
-  const [log, setLogState] = useState<Said[]>(keptLog)
-  const setLog = (f: (l: Said[]) => Said[]) => setLogState(l => (keptLog = f(l)))
-  const [listening, setListening] = useState(false)
+  const [threadId, setThreadId] = useState<number | null>(null)
+  const [title, setTitle] = useState('')
+  const [lines, setLines] = useState<Line[]>([])
+  const [proposals, setProposals] = useState<Record<number, Proposal>>({})
+  const [list, setList] = useState<Thread[] | null>(null)
   const [thinking, setThinking] = useState(false)
   const [draft, setDraft] = useState('')
-  const [settings, setSettings] = useState(false)
-  const [alerts, setAlerts] = useState(spokenAlerts.get())
-  const [talk, setTalk] = useState(spokenReplies.get())
+  const [muted, setMuted] = useState(!spokenReplies.get())
   const [budget, setBudget] = useState<AiBudget | null>(null)
+  const [voice, setVoiceState] = useState<VoiceState>('off')
+  const [caption, setCaption] = useState('')
+  const voiceRef = useRef<VoiceState>('off')
+  const mutedRef = useRef(muted)
+  mutedRef.current = muted
+  const threadRef = useRef<number | null>(null)
+  threadRef.current = threadId
   const rec = useRef<any>(null)
   const box = useRef<HTMLDivElement>(null)
+  const quiet = useRef(0)
+  const setVoice = (v: VoiceState) => { voiceRef.current = v; setVoiceState(v) }
+  const voiceNow = (): VoiceState => voiceRef.current // read fresh: it changes while we await
 
   const loadBudget = () => api.get<{ budget: AiBudget }>('/api/jarvis/status').then(r => setBudget(r.budget)).catch(() => {})
-  useEffect(() => { loadBudget() }, [])
-  useEffect(() => { box.current?.scrollTo(0, box.current.scrollHeight) }, [log, thinking])
-  useEffect(() => () => { try { rec.current?.abort() } catch {} }, [])
+  const openThread = (id: number) => api.get<{ thread: Thread; messages: { who: 'you' | 'bot'; text: string; meta: string }[]; proposals: Proposal[] }>(`/api/jarvis/threads/${id}`)
+    .then(r => {
+      setThreadId(r.thread.id)
+      setTitle(r.thread.title)
+      remember.set('jarvis.thread', String(r.thread.id))
+      setLines(r.messages.map(m => ({ who: m.who, text: m.text, meta: JSON.parse(m.meta || '{}') })))
+      setProposals(Object.fromEntries(r.proposals.map(p => [p.id, p])))
+      setList(null)
+    }).catch(() => fresh())
+  const fresh = () => { setThreadId(null); setTitle(''); setLines([]); setProposals({}); setList(null); remember.set('jarvis.thread', '') }
 
-  const ask = async (text: string, override = false) => {
-    if (!text.trim()) return
-    if (talk) unlockAudio()
-    if (!override) setLog(l => [...l, { who: 'you', text }])
+  useEffect(() => {
+    loadBudget()
+    // pick up where you left off if the last conversation was recent; otherwise start clean
+    const id = Number(remember.get('jarvis.thread'))
+    if (id) api.get<{ thread: Thread }>(`/api/jarvis/threads/${id}`).then(r => (Date.now() - r.thread.updated_at * 1000 < IDLE_MS ? openThread(id) : fresh())).catch(fresh)
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { box.current?.scrollTo(0, box.current.scrollHeight) }, [lines, thinking, proposals])
+  useEffect(() => () => { try { rec.current?.abort() } catch {} ; stopSpeaking() }, [])
+
+  const ask = async (text: string, override = false): Promise<string> => {
+    if (!text.trim()) return ''
+    if (!mutedRef.current) unlockAudio()
+    if (!override) setLines(l => [...l, { who: 'you', text }])
     setThinking(true)
     try {
-      const r = await api.post<{ say: string; done: string[]; mode: string; blocked?: boolean; warning?: string }>('/api/jarvis', { text, override })
-      setLog(l => [...l, { who: 'bot', text: r.say, done: r.done, instant: r.mode === 'instant', blocked: r.blocked ? text : undefined, warning: r.warning }])
-      if (talk) speak(r.say)
+      const r = await api.post<{ thread_id: number; say: string; done: string[]; mode: string; blocked?: string; warning?: string; proposals?: Proposal[] }>(
+        '/api/jarvis', { text, override, thread_id: threadRef.current ?? undefined })
+      if (r.thread_id !== threadRef.current) { setThreadId(r.thread_id); remember.set('jarvis.thread', String(r.thread_id)); if (!title) setTitle(text.slice(0, 70)) }
+      setLines(l => [...l, { who: 'bot', text: r.say, meta: { done: r.done, mode: r.mode, warning: r.warning, blocked: r.blocked, proposals: r.proposals } }])
+      if (r.proposals?.length) setProposals(p => ({ ...p, ...Object.fromEntries(r.proposals!.map(x => [x.id, x])) }))
       if (r.done.length) onChanged()
       if (r.mode !== 'instant') loadBudget()
+      setThinking(false)
+      return r.say
     } catch (e) {
-      setLog(l => [...l, { who: 'bot', text: `Sorry, that didn't work: ${(e as Error).message}` }])
+      const msg = `Sorry, that didn't work: ${(e as Error).message}`
+      setLines(l => [...l, { who: 'bot', text: msg }])
+      setThinking(false)
+      return msg
     }
-    setThinking(false)
   }
 
-  const listen = () => {
-    if (!Recognition) return
-    if (talk) unlockAudio()
-    window.speechSynthesis?.cancel()
+  const decide = (p: Proposal, approve: boolean) => {
+    setProposals(x => ({ ...x, [p.id]: { ...p, state: approve ? 'approved' : 'declined' } }))
+    api.post<{ state: Proposal['state']; result: string }>(`/api/jarvis/proposals/${p.id}/${approve ? 'approve' : 'decline'}`)
+      .then(r => { setProposals(x => ({ ...x, [p.id]: { ...p, state: r.state, result: r.result } })); onChanged() })
+      .catch(e => setProposals(x => ({ ...x, [p.id]: { ...p, state: 'pending', result: (e as Error).message } })))
+  }
+
+  // ---------- voice mode: listen → think → speak → listen again ----------
+  const listenOnce = () => {
+    if (voiceRef.current === 'off') return
     let r: any
-    try {
-      r = new Recognition()
-    } catch {
-      return setLog(l => [...l, { who: 'bot', text: "Voice input isn't available here. Use the keyboard's mic key to dictate instead." }])
-    }
+    try { r = new Recognition() } catch { return endVoice("Voice input isn't available here. Use the keyboard's mic key to dictate instead.") }
     r.lang = navigator.language || 'en-US'
     r.interimResults = true
     r.continuous = false
@@ -224,29 +269,58 @@ export function Jarvis({ onClose, onChanged, asPage }: { onClose: () => void; on
     r.onresult = (e: any) => {
       let text = ''
       for (const res of e.results) text += res[0].transcript
-      setDraft(text)
+      setCaption(text)
       if (e.results[e.results.length - 1].isFinal) final = text
     }
-    r.onend = () => { clearTimeout(guard); setListening(false); if (final) { setDraft(''); ask(final) } }
     r.onerror = (e: any) => {
-      clearTimeout(guard)
-      setListening(false)
-      if (e?.error === 'not-allowed' || e?.error === 'service-not-allowed')
-        setLog(l => [...l, { who: 'bot', text: "I can't use the microphone here. Allow it in Settings, or use the keyboard's mic key to dictate." }])
+      if (e?.error === 'not-allowed' || e?.error === 'service-not-allowed') endVoice("I can't use the microphone here. Allow it in Settings, or type instead.")
     }
-    // if the browser never reports back, don't stay stuck "listening"
-    const guard = setTimeout(() => { try { r.abort() } catch {} ; setListening(false) }, 15000)
+    r.onend = async () => {
+      if (voiceRef.current !== 'listening') return
+      const said = final.trim()
+      setCaption('')
+      if (!said) {
+        // two silences in a row ends the conversation instead of listening forever
+        if (++quiet.current >= 2) return endVoice()
+        return listenOnce()
+      }
+      quiet.current = 0
+      if (/^(stop|that'?s all|that is all|goodbye|bye|thanks jarvis|end( conversation)?)[.!]*$/i.test(said)) return endVoice()
+      setVoice('thinking')
+      const reply = await ask(said)
+      if (voiceNow() === 'off') return
+      if (!mutedRef.current) {
+        setVoice('speaking')
+        await speak(reply)
+      }
+      if (voiceNow() === 'off') return
+      setVoice('listening')
+      listenOnce()
+    }
     rec.current = r
-    setListening(true)
-    try {
-      r.start()
-    } catch {
-      clearTimeout(guard)
-      setListening(false)
-    }
+    try { r.start() } catch { endVoice() }
   }
-  const stop = () => { try { rec.current?.stop() } catch {} ; setListening(false) }
-  const close = () => { try { rec.current?.abort() } catch {} ; stopSpeaking(); onClose() }
+  const startVoice = () => {
+    if (!Recognition) return setLines(l => [...l, { who: 'bot', text: "Voice conversations aren't available in this browser. Type, or use the keyboard's mic key." }])
+    unlockAudio()
+    stopSpeaking()
+    quiet.current = 0
+    setVoice('listening')
+    listenOnce()
+  }
+  const endVoice = (why?: string) => {
+    setVoice('off')
+    setCaption('')
+    try { rec.current?.abort() } catch {}
+    stopSpeaking()
+    if (why) setLines(l => [...l, { who: 'bot', text: why }])
+  }
+  const tapOrb = () => {
+    if (voice === 'speaking') { stopSpeaking(); setVoice('listening'); listenOnce() } // interrupt and talk
+    else if (voice === 'listening') { try { rec.current?.stop() } catch {} } // done talking: send now
+  }
+  const close = () => { endVoice(); onClose() }
+  const toggleMute = () => { const m = !muted; setMuted(m); spokenReplies.set(!m); if (m) stopSpeaking() }
 
   const pct = budget ? budget.jarvis_pct : 0
   return (
@@ -254,42 +328,81 @@ export function Jarvis({ onClose, onChanged, asPage }: { onClose: () => void; on
     {!asPage && <div className="jarvis-backdrop" onClick={close} />}
     <div className={`jarvis ${asPage ? 'page' : ''}`} role={asPage ? undefined : 'dialog'} aria-label="Jarvis">
       <div className="jarvis-h">
-        <b>Jarvis</b>
-        {budget && (
-          <span className={`jarvis-budget ${pct >= budget.max_pct ? 'over' : pct >= budget.warn_pct ? 'warn' : ''}`}
-            title={`Jarvis ≈ $${budget.jarvis_usd.toFixed(2)} of $${budget.claude_usd.toFixed(0)} Claude use this week (API prices). All smart features: ${budget.ai_pct.toFixed(2)}%.`}>
-            {budget.weekly_pct === null ? 'cost: waiting for Claude usage' : `${pct < 0.1 ? '<0.1' : pct.toFixed(1)}% of weekly · cap ${budget.max_pct}%`}
-          </span>
-        )}
-        <button className="x small" onClick={() => setSettings(!settings)} aria-label="Jarvis settings">⚙</button>
+        <button className="jarvis-title" onClick={() => (list ? setList(null) : api.get<Thread[]>('/api/jarvis/threads').then(setList))} aria-expanded={!!list}>
+          <b>Jarvis</b><span>{title || 'New conversation'} ▾</span>
+        </button>
+        <button className={`icon-btn ${muted ? 'off' : ''}`} onClick={toggleMute} aria-label={muted ? 'Unmute Jarvis' : 'Mute Jarvis'} title={muted ? 'Muted: replies are text only' : 'Speaking replies'}>
+          {muted ? <SpeakerOffIcon /> : <SpeakerIcon />}
+        </button>
         <button className="jarvis-done" onClick={close}>{asPage ? 'Close' : 'Done'}</button>
       </div>
-      {settings && (
-        <div className="jarvis-settings">
-          <label className="check small"><input type="checkbox" checked={talk} onChange={e => { setTalk(e.target.checked); spokenReplies.set(e.target.checked) }} />Speak replies</label>
-          <label className="check small"><input type="checkbox" checked={alerts} onChange={e => { setAlerts(e.target.checked); spokenAlerts.set(e.target.checked) }} />Speak alerts</label>
-          <a className="btn small" href="#/settings" onClick={() => !asPage && onClose()}>Voice & more settings</a>
-          <button className="btn small" onClick={() => api.post('/api/jarvis/reset').then(() => setLog(() => []))}>New conversation</button>
+      {budget && budget.weekly_pct !== null && (
+        <div className={`jarvis-budget ${pct >= budget.max_pct ? 'over' : pct >= budget.warn_pct ? 'warn' : ''}`}
+          title={`Jarvis ≈ $${budget.jarvis_usd.toFixed(2)} of $${budget.claude_usd.toFixed(0)} Claude use this week (API prices)`}>
+          {pct < 0.1 ? 'under 0.1' : pct.toFixed(1)}% of your weekly limit · stops at {budget.max_pct}%
         </div>
       )}
-      <div className="jarvis-log" ref={box}>
-        {!log.length && <div className="hint">Type or talk. Instant (no AI): “what needs me?”, “tell walmart yes”, “pause walmart until 18:30”, “idea: …”, “remember …”. Anything else, like “where are we on the Target scraper?” or “start an agent to fix Walmart pagination”, goes to Claude, which can read your project and the web.</div>}
-        {log.map((m, i) => (
-          <div key={i} className={`said ${m.who}`}>
-            {m.text}
-            {(m.done?.length || m.instant) ? <div className="said-done">{[m.instant && 'instant', ...(m.done ?? [])].filter(Boolean).join(' · ')}</div> : null}
-            {m.warning && <div className="said-warn">{m.warning}</div>}
-            {m.blocked && <button className="btn small" onClick={() => ask(m.blocked!, true)}>Allow once</button>}
-          </div>
-        ))}
-        {thinking && <div className="said bot dim"><span className="dots"><i /><i /><i /></span></div>}
-      </div>
-      <form className="jarvis-in" onSubmit={e => { e.preventDefault(); const t = draft; setDraft(''); ask(t) }}>
-        {Recognition && <button type="button" className={`mic ${listening ? 'on' : ''}`} onClick={() => (listening ? stop() : listen())} aria-label={listening ? 'Stop listening' : 'Talk'}><MicIcon /></button>}
-        <input value={draft} onChange={e => setDraft(e.target.value)} placeholder={listening ? 'Listening…' : 'Ask Jarvis anything'} enterKeyHint="send" />
-      </form>
-      {listening && <button className="listening-bar" onClick={stop}>Listening… tap to stop</button>}
+      {list ? (
+        <div className="jarvis-threads">
+          <button className="thread new" onClick={fresh}>＋ New conversation</button>
+          {list.map(t => (
+            <button key={t.id} className={`thread ${t.id === threadId ? 'on' : ''}`} onClick={() => openThread(t.id)}>
+              <span className="thread-title">{t.title || 'Untitled'}</span>
+              <span className="thread-meta">{ago(t.updated_at * 1000) === 'now' ? 'just now' : `${ago(t.updated_at * 1000)} ago`} · {t.count} messages</span>
+            </button>
+          ))}
+          {!list.length && <div className="hint">No conversations yet.</div>}
+          <a className="hint" href="#/settings" onClick={() => !asPage && onClose()}>Voice and budget settings ›</a>
+        </div>
+      ) : (
+        <div className="jarvis-log" ref={box}>
+          {!lines.length && <div className="hint">Tap <b>Talk</b> for a back-and-forth voice conversation, or type. Instant: “what needs me?”, “tell walmart yes”, “pause walmart until 18:30”, “idea: …”, “remember …”. Ask anything else, like “where are we on the Target scraper?”; Jarvis can read your project and the web, and asks before it starts or touches an agent.</div>}
+          {lines.map((m, i) => (
+            <div key={i} className={`said ${m.who}`}>
+              {m.text}
+              {(m.meta?.done?.length || m.meta?.mode === 'instant') ? <div className="said-done">{[m.meta?.mode === 'instant' && 'instant', ...(m.meta?.done ?? [])].filter(Boolean).join(' · ')}</div> : null}
+              {m.meta?.warning && <div className="said-warn">{m.meta.warning}</div>}
+              {m.meta?.blocked && <button className="btn small" onClick={() => ask(m.meta!.blocked!, true)}>Allow once</button>}
+              {m.meta?.proposals?.map(x => {
+                const p = proposals[x.id] ?? x
+                return (
+                  <div key={p.id} className={`proposal ${p.state}`}>
+                    <div className="proposal-text">{p.summary}</div>
+                    {p.state === 'pending' ? (
+                      <div className="proposal-actions">
+                        <button className="btn small primary" onClick={() => decide(p, true)}>Approve</button>
+                        <button className="btn small" onClick={() => decide(p, false)}>No</button>
+                      </div>
+                    ) : <div className="said-done">{p.state === 'approved' ? (p.result || 'approved') : 'declined'}</div>}
+                  </div>
+                )
+              })}
+            </div>
+          ))}
+          {thinking && voice === 'off' && <div className="said bot dim"><span className="dots"><i /><i /><i /></span></div>}
+        </div>
+      )}
+      {voice !== 'off' ? (
+        <div className="voice-mode">
+          <button className={`orb ${voice}`} onClick={tapOrb} aria-label={voice === 'speaking' ? 'Interrupt' : voice === 'listening' ? 'Done talking' : 'Thinking'}>
+            <span /><span /><span />
+          </button>
+          <div className="voice-state">{voice === 'listening' ? (caption || 'Listening…') : voice === 'thinking' ? 'Thinking…' : 'Speaking · tap to interrupt'}</div>
+          <button className="btn" onClick={() => endVoice()}>End</button>
+        </div>
+      ) : (
+        <form className="jarvis-in" onSubmit={e => { e.preventDefault(); const t = draft; setDraft(''); ask(t).then(r => { if (!mutedRef.current && r) speak(r) }) }}>
+          <input value={draft} onChange={e => setDraft(e.target.value)} placeholder="Message Jarvis" enterKeyHint="send" autoComplete="off" />
+          {draft.trim()
+            ? <button type="submit" className="send" aria-label="Send"><SendIconSmall /></button>
+            : Recognition && <button type="button" className="talk" onClick={startVoice}><MicIcon />Talk</button>}
+        </form>
+      )}
     </div>
     </>
   )
 }
+
+const SpeakerIcon = () => <svg width="17" height="17" viewBox="0 0 16 16" aria-hidden><path d="M2.5 6h2.2L8 3.2v9.6L4.7 10H2.5z" fill="currentColor" /><path d="M10.5 5.5a3.5 3.5 0 0 1 0 5M12.3 3.8a6 6 0 0 1 0 8.4" stroke="currentColor" strokeWidth="1.4" fill="none" strokeLinecap="round" /></svg>
+const SpeakerOffIcon = () => <svg width="17" height="17" viewBox="0 0 16 16" aria-hidden><path d="M2.5 6h2.2L8 3.2v9.6L4.7 10H2.5z" fill="currentColor" /><path d="m10.5 6 3.5 4M14 6l-3.5 4" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" /></svg>
+const SendIconSmall = () => <svg width="13" height="13" viewBox="0 0 16 16" aria-hidden><path d="M8 13V3M3.5 7.5 8 3l4.5 4.5" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round" /></svg>

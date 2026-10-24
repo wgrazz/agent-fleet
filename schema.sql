@@ -58,3 +58,30 @@ CREATE TABLE IF NOT EXISTS ai_usage (
   persisted INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS ai_usage_at ON ai_usage (at);
+-- Jarvis conversations: each has its own Claude session; a new one starts after 2 hours of quiet
+CREATE TABLE IF NOT EXISTS jarvis_threads (
+  id INTEGER PRIMARY KEY,
+  title TEXT NOT NULL DEFAULT '',
+  session_id TEXT,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS jarvis_messages (
+  id INTEGER PRIMARY KEY,
+  thread_id INTEGER NOT NULL,
+  who TEXT NOT NULL,            -- 'you' | 'bot'
+  text TEXT NOT NULL,
+  meta TEXT NOT NULL DEFAULT '{}', -- done actions, instant, warning
+  at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS jarvis_messages_thread ON jarvis_messages (thread_id, id);
+-- things Jarvis wants to do to agents, waiting for your OK
+CREATE TABLE IF NOT EXISTS jarvis_proposals (
+  id INTEGER PRIMARY KEY,
+  thread_id INTEGER NOT NULL,
+  action TEXT NOT NULL,         -- JSON JarvisAction
+  summary TEXT NOT NULL,
+  state TEXT NOT NULL DEFAULT 'pending', -- pending | approved | declined
+  result TEXT,
+  created_at INTEGER NOT NULL
+);

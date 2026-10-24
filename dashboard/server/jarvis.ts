@@ -1,13 +1,13 @@
 // Jarvis's no-AI side: instant commands (borrowed from Atticus's idea that common requests shouldn't need a model),
-// memory ("remember …"), and one conversation per day so follow-up questions have context.
-import { readFileSync, rmSync, writeFileSync, appendFileSync } from 'node:fs'
+// memory ("remember …"), conversations (threads, each with its own Claude session), and proposals: things Jarvis
+// wants to do to your agents, which wait for your OK.
+import { appendFileSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { JarvisAction, JarvisReply } from './ai.ts'
 import type { Agent } from './state.ts'
-import { FLEET_DIR } from './store.ts'
+import { db, FLEET_DIR } from './store.ts'
 
 const MEMORY = join(FLEET_DIR, 'jarvis-memory.md')
-const SESSION = join(FLEET_DIR, 'jarvis-session.json')
 
 export function memory(): string {
   try {
@@ -19,17 +19,81 @@ export function memory(): string {
 
 export const remember = (text: string) => appendFileSync(MEMORY, `- ${text.trim().replace(/\n+/g, ' ')} (${new Date().toLocaleDateString()})\n`)
 
-export function session(): string | undefined {
-  try {
-    const s = JSON.parse(readFileSync(SESSION, 'utf8'))
-    return s.day === new Date().toDateString() ? s.id : undefined
-  } catch {
-    return undefined
-  }
+// ---------- conversations ----------
+
+export type Thread = { id: number; title: string; session_id: string | null; created_at: number; updated_at: number }
+export type Msg = { id: number; thread_id: number; who: 'you' | 'bot'; text: string; meta: string; at: number }
+const IDLE_S = 2 * 3600
+const now = () => Math.floor(Date.now() / 1000)
+
+export const thread = (id: number) => db.prepare('SELECT * FROM jarvis_threads WHERE id = ?').get(id) as Thread | undefined
+
+export function newThread(): Thread {
+  const r = db.prepare('INSERT INTO jarvis_threads (created_at, updated_at) VALUES (?, ?)').run(now(), now())
+  return thread(Number(r.lastInsertRowid))!
 }
 
-export const saveSession = (id: string) => writeFileSync(SESSION, JSON.stringify({ id, day: new Date().toDateString() }))
-export const resetSession = () => rmSync(SESSION, { force: true })
+/** The conversation to talk in: the one asked for, else the latest if it was active in the last 2 hours, else a new one. */
+export function threadFor(id?: number): Thread {
+  if (id) {
+    const t = thread(id)
+    if (t) return t
+  }
+  const latest = db.prepare('SELECT * FROM jarvis_threads ORDER BY updated_at DESC LIMIT 1').get() as Thread | undefined
+  return latest && now() - latest.updated_at < IDLE_S && !id ? latest : newThread()
+}
+
+export const threads = (limit = 60) =>
+  db.prepare(`SELECT t.*, (SELECT count(*) FROM jarvis_messages m WHERE m.thread_id = t.id) AS count
+    FROM jarvis_threads t WHERE EXISTS (SELECT 1 FROM jarvis_messages m WHERE m.thread_id = t.id) ORDER BY updated_at DESC LIMIT ?`).all(limit)
+
+export const messages = (threadId: number) =>
+  db.prepare('SELECT * FROM jarvis_messages WHERE thread_id = ? ORDER BY id').all(threadId) as Msg[]
+
+export function addMessage(t: Thread, who: 'you' | 'bot', text: string, meta: object = {}) {
+  db.prepare('INSERT INTO jarvis_messages (thread_id, who, text, meta, at) VALUES (?, ?, ?, ?, ?)').run(t.id, who, text, JSON.stringify(meta), now())
+  db.prepare("UPDATE jarvis_threads SET updated_at = ?, title = CASE WHEN title = '' AND ? = 'you' THEN ? ELSE title END WHERE id = ?")
+    .run(now(), who, text.replace(/\s+/g, ' ').slice(0, 70), t.id)
+}
+
+export const setThreadSession = (id: number, sid: string) => db.prepare('UPDATE jarvis_threads SET session_id = ? WHERE id = ?').run(sid, id)
+export const deleteThread = (id: number) => {
+  db.prepare('DELETE FROM jarvis_messages WHERE thread_id = ?').run(id)
+  db.prepare('DELETE FROM jarvis_proposals WHERE thread_id = ?').run(id)
+  db.prepare('DELETE FROM jarvis_threads WHERE id = ?').run(id)
+}
+
+// ---------- proposals: changes to agents wait for your OK ----------
+
+export type Proposal = { id: number; thread_id: number; action: string; summary: string; state: 'pending' | 'approved' | 'declined'; result: string | null; created_at: number }
+
+export function summarize(a: JarvisAction): string {
+  if (a.type === 'start') return `Start a ${a.tool ? a.tool[0].toUpperCase() + a.tool.slice(1) : 'Claude'} agent${a.name ? ` called ${a.name}` : ''}${a.model ? ` (${a.model})` : ''}: “${a.text.slice(0, 160)}”`
+  if (a.type === 'reply') return `Send to ${a.agent}: “${a.text.slice(0, 160)}”`
+  if (a.type === 'key') return `Press ${a.key} in ${a.agent}`
+  if (a.type === 'pause') return `Pause ${a.agent}${a.text ? ` until ${a.text}` : ''}`
+  return `${a.type} ${a.text}`
+}
+
+export function propose(threadId: number, a: JarvisAction) {
+  const summary = summarize(a)
+  const r = db.prepare('INSERT INTO jarvis_proposals (thread_id, action, summary, created_at) VALUES (?, ?, ?, ?)').run(threadId, JSON.stringify(a), summary, now())
+  return { id: Number(r.lastInsertRowid), summary, state: 'pending' as const }
+}
+
+export const proposals = (threadId: number) => db.prepare('SELECT * FROM jarvis_proposals WHERE thread_id = ? ORDER BY id').all(threadId) as Proposal[]
+export const pendingProposals = (threadId: number) => proposals(threadId).filter(p => p.state === 'pending')
+export const proposal = (id: number) => db.prepare('SELECT * FROM jarvis_proposals WHERE id = ?').get(id) as Proposal | undefined
+export const settleProposal = (id: number, state: 'approved' | 'declined', result = '') =>
+  db.prepare('UPDATE jarvis_proposals SET state = ?, result = ? WHERE id = ?').run(state, result, id)
+
+/** Spoken or typed yes/no when something is waiting for approval. */
+export function approvalWord(said: string): 'yes' | 'no' | null {
+  const t = said.trim().toLowerCase().replace(/[.!,]+$/, '')
+  if (/^(yes|yeah|yep|yup|sure|ok(ay)?|go( ahead)?|do it|approve( it)?|approved|sounds good|go for it|please do)( please)?$/.test(t)) return 'yes'
+  if (/^(no|nope|nah|cancel|don'?t|stop|never ?mind|decline)( thanks)?$/.test(t)) return 'no'
+  return null
+}
 
 const action = (a: Partial<JarvisAction>): JarvisAction =>
   ({ type: 'idea', agent: '', text: '', key: '', tool: '', model: '', effort: '', list: '', name: '', ...a })

@@ -125,8 +125,15 @@ folders.
 **Jarvis.** The mic in the sidebar, the middle of the phone tab bar, or `J`. Type or talk.
 - **Instant, no AI:** "what needs me?", "tell walmart yes", "pause walmart until 18:30",
   "idea: …", "remember …".
-- **Everything else goes to Claude as your project agent.** It reads the project and the web,
-  keeps one conversation a day, and keeps lasting notes in `~/.fleet/jarvis-memory.md`.
+- **Everything else goes to Claude as your project agent.** It only reads (the project and the web)
+  and keeps lasting notes in `~/.fleet/jarvis-memory.md`.
+- **It asks before touching agents.** Starting an agent or typing into one shows an **Approve / No**
+  card, and saying "yes" or "do it" approves it. Things you command directly ("tell walmart yes")
+  happen right away.
+- **Conversations.** Each has its own title and memory, and a new one starts after 2 hours of quiet.
+  Tap the title to switch or start fresh. They're shared between your phone and Mac.
+- **Talk** starts a voice conversation: it listens, answers out loud, and listens again until you
+  end it. Tap the orb to interrupt; saying "that's all" ends it. The speaker button mutes replies.
 - **Weekly cost cap.** Jarvis's share of your weekly Claude limit is shown in the panel, with a
   warning at 5% and a stop at 10% (`jarvis_warn_pct` / `jarvis_max_pct` in `~/.fleet/config.json`).
   The share is computed from what every Claude session cost this week.
