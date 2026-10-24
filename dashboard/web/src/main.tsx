@@ -3,7 +3,7 @@ import { createRoot } from 'react-dom/client'
 import { api, onOffline, remember, Unauthorized, usePoll, type Conversation, type Folder, type Idea, type List, type LiveAgent, type Paused, type Profile, type Usage } from './api.ts'
 import { AgentList, AgentView, PausedList } from './agents.tsx'
 import {
-  COLORS, Confirm, CustomForm, InterviewForm, isPhone, MenuHost, MicIcon, NameDialog, NewAgentButton, openMenu, ORDER, PauseUntil, Sidebar, UsageMeters,
+  COLORS, Confirm, CustomForm, InterviewForm, isPhone, MenuHost, MicIcon, PullToRefresh, NameDialog, NewAgentButton, openMenu, ORDER, PauseUntil, Sidebar, UsageMeters,
   type MenuItem, type StartFields, useHold,
 } from './components.tsx'
 import { ConversationView, HistoryPane, Jarvis, Palette, speak, spokenAlerts } from './extras.tsx'
@@ -388,6 +388,7 @@ function App() {
       ]} />}
       {terminal && <FullTerminal name={terminal} onClose={() => setTerminal('')} />}
       <MenuHost />
+      <PullToRefresh />
       {(offline.off || offline.pending > 0) && (
         <div className="offline-bar" role="status">
           {offline.off ? "Your Mac isn't reachable. Notes still work" : 'Back online'}{offline.pending ? ` · ${offline.pending} change${offline.pending > 1 ? 's' : ''} waiting to sync` : offline.off ? '; changes sync when it is.' : ''}

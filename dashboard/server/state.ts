@@ -1,7 +1,7 @@
 // The agent list and each agent's status. `fleet json` is the source of truth for which agents exist; tmux panes
 // add the screen and the exit code; Claude Code hooks (via `fleet hook`) give exact status for Claude.
 import { EventEmitter } from 'node:events'
-import { detect, mode, question, quickReplies, workingLine, type QuickReply, type Status } from './detect.ts'
+import { busy, detect, mode, question, quickReplies, workingLine, type QuickReply, type Status } from './detect.ts'
 import { FLEET_BIN, REPO } from './store.ts'
 import { capture, panes, run } from './tmux.ts'
 
@@ -36,6 +36,9 @@ const tools = new Map<string, string>()           // session -> tool, remembered
 const hooksBySession = new Map<string, Hook>()    // Claude session_id -> latest hook
 const hooksByPane = new Map<string, Hook>()       // tmux pane id -> latest hook
 const lastAlert = new Map<string, number>()       // `${name}:${status}` -> time
+// An agent that appeared while we were watching (started, or a chat resumed into Fleet) is 'ready', not 'done',
+// until it does real work: its screen redraws while it opens, which alone would read as working and then done.
+const fresh = new Set<string>()
 
 export const list = () => agents
 
@@ -109,6 +112,10 @@ async function refresh() {
       if (!stale) status = hook.status
       if (status === 'done' && seen === 'waiting') status = 'waiting' // Stop hook fired, but a background job will wake it
     }
+    if (!prev.has(name) && polled) fresh.add(name)
+    const worked = (hook?.status === 'working' && status === 'working') || (r.session ? busy(r.tool, screen) : /^\[busy\]/.test(r.task))
+    if (worked) fresh.delete(name) // answering a startup question (trust this folder?) isn't work
+    if (status === 'done' && fresh.has(name)) status = 'ready'
     next.push({
       name, controllable: !!r.session, tool: r.tool, pid: r.pid, cwd: r.cwd, task: r.task, age_s: r.age_s,
       session_id: r.session_id, status, status_since: now, quick_replies: status === 'needs_you' ? quickReplies(screen) : [],
@@ -144,6 +151,7 @@ async function refresh() {
     }
   }
   for (const name of screens.keys()) if (!next.some(a => a.name === name)) screens.delete(name)
+  for (const name of fresh) if (!next.some(a => a.name === name)) fresh.delete(name)
   agents = next
   polled = true
 }

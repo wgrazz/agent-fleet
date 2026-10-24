@@ -1,7 +1,7 @@
 // Reads an agent's screen and guesses what it is doing. Patterns come from real captures in test/fixtures/;
 // when a guess is wrong in practice, save that screen as a new fixture and adjust the table here.
 
-export type Status = 'working' | 'needs_you' | 'waiting' | 'done' | 'crashed' | 'unknown'
+export type Status = 'working' | 'needs_you' | 'waiting' | 'ready' | 'done' | 'crashed' | 'unknown'
 export type QuickReply = { key: string; label: string }
 
 // Selection menus and confirm prompts, shared by every tool.
@@ -28,10 +28,13 @@ const BACKGROUND = /·\s*\d+\s+(shells?|background tasks?|monitors?)\b/i
 
 const tail = (screen: string, n = 15) => screen.split('\n').filter(l => l.trim()).slice(-n).join('\n')
 
-export function detect(tool: string, screen: string, msSinceChange: number): Exclude<Status, 'crashed' | 'unknown'> {
+/** The tool's own busy marker is on screen (a spinner, "esc to interrupt"): real work, not just a redraw. */
+export const busy = (tool: string, screen: string) => (WORKING[tool] ?? []).some(r => r.test(tail(screen)))
+
+export function detect(tool: string, screen: string, msSinceChange: number): Exclude<Status, 'crashed' | 'unknown' | 'ready'> {
   const bottom = tail(screen)
   if (NEEDS.some(r => r.test(bottom))) return 'needs_you'
-  if ((WORKING[tool] ?? []).some(r => r.test(bottom))) return 'working'
+  if (busy(tool, screen)) return 'working'
   if (msSinceChange < 5000) return 'working'
   // ponytail: no busy marker and a quiet screen means done; tools with idle animations would need an idle pattern
   return BACKGROUND.test(tail(screen, 4)) ? 'waiting' : 'done'

@@ -5,9 +5,9 @@ export const TOOLS = ['claude', 'codex', 'cursor', 'copilot', 'agy'] as const
 const TOOL_LABEL: Record<string, string> = { claude: 'Claude', codex: 'Codex', cursor: 'Cursor', copilot: 'Copilot', agy: 'Antigravity' }
 const GLYPH: Record<string, string> = { claude: '✳', codex: '❯', cursor: '◢', copilot: '◉', agy: 'A' }
 export const STATUS_LABEL: Record<Status, string> = {
-  needs_you: 'Needs you', working: 'Working', waiting: 'Waiting on a job', done: 'Done', crashed: 'Crashed', unknown: 'Outside tmux',
+  needs_you: 'Needs you', working: 'Working', waiting: 'Waiting on a job', ready: 'Ready', done: 'Done', crashed: 'Crashed', unknown: 'Outside tmux',
 }
-export const ORDER: Status[] = ['needs_you', 'working', 'waiting', 'done', 'crashed', 'unknown']
+export const ORDER: Status[] = ['needs_you', 'working', 'waiting', 'ready', 'done', 'crashed', 'unknown']
 export const COLORS = ['#8e8e93', '#ff3b30', '#ff9500', '#ffcc00', '#34c759', '#00c7be', '#007aff', '#5856d6', '#af52de', '#ff2d55']
 
 export const toolLabel = (t: string) => TOOL_LABEL[t] ?? t
@@ -189,6 +189,48 @@ export function MenuHost() {
         ))}
         {sheet && <button className="menu-cancel" onClick={() => setStack([])}>Cancel</button>}
       </div>
+    </div>
+  )
+}
+
+// ---------- pull down to refresh ----------
+
+/** Pull down from the top of any list on a phone to reload: the home-screen app has no browser refresh button. */
+export function PullToRefresh() {
+  const [pull, setPull] = useState(0)
+  useEffect(() => {
+    let startY = -1
+    let dist = 0
+    // only when everything under the finger is scrolled to the top, and not in the terminal, a menu or a text box
+    const atTop = (el: Element | null) => {
+      for (; el && el !== document.body; el = el.parentElement) {
+        if (el.matches('.xterm, .menu-overlay, .dialog, input, textarea, [contenteditable]')) return false
+        if (el.scrollTop > 0) return false
+      }
+      return true
+    }
+    const down = (e: TouchEvent) => { startY = e.touches.length === 1 && atTop(e.target as Element) ? e.touches[0].clientY : -1; dist = 0 }
+    const move = (e: TouchEvent) => {
+      if (startY < 0) return
+      dist = Math.max(0, e.touches[0].clientY - startY)
+      setPull(dist > 12 ? Math.min(dist, 140) : 0)
+    }
+    const up = () => {
+      if (startY >= 0 && dist > 90) { setPull(-1); setTimeout(() => location.reload(), 150) }
+      else setPull(0)
+      startY = -1
+    }
+    addEventListener('touchstart', down, { passive: true })
+    addEventListener('touchmove', move, { passive: true })
+    addEventListener('touchend', up)
+    addEventListener('touchcancel', up)
+    return () => { removeEventListener('touchstart', down); removeEventListener('touchmove', move); removeEventListener('touchend', up); removeEventListener('touchcancel', up) }
+  }, [])
+  if (!pull) return null
+  const ready = pull < 0 || pull > 90
+  return (
+    <div className={`ptr ${ready ? 'ready' : ''}`} style={{ transform: `translate(-50%, ${pull < 0 ? 60 : Math.min(pull, 140) * 0.55}px)` }} role="status" aria-label={pull < 0 ? 'Refreshing' : ready ? 'Release to refresh' : 'Pull to refresh'}>
+      <span className={pull < 0 ? 'spin' : ''} style={pull < 0 ? undefined : { transform: `rotate(${pull * 2.5}deg)` }}>↻</span>
     </div>
   )
 }
