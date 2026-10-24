@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { api, remember, type Agent, type Paused, type Profile, type Status } from './api.ts'
-import { ScreenView } from './terminal.tsx'
+import { api, remember, type Agent, type Folder, type Improved, type List, type Profile, type Route, type Status, type Usage } from './api.ts'
 
 export const TOOLS = ['claude', 'codex', 'cursor', 'copilot', 'agy'] as const
 const TOOL_LABEL: Record<string, string> = { claude: 'Claude', codex: 'Codex', cursor: 'Cursor', copilot: 'Copilot', agy: 'Antigravity' }
@@ -9,25 +8,30 @@ export const STATUS_LABEL: Record<Status, string> = {
   needs_you: 'Needs you', working: 'Working', done: 'Done', crashed: 'Crashed', unknown: 'Outside tmux',
 }
 export const ORDER: Status[] = ['needs_you', 'working', 'done', 'crashed', 'unknown']
+export const COLORS = ['#8e8e93', '#ff3b30', '#ff9500', '#ffcc00', '#34c759', '#00c7be', '#007aff', '#5856d6', '#af52de', '#ff2d55']
 
 export const toolLabel = (t: string) => TOOL_LABEL[t] ?? t
 
 export const age = (s: number) =>
   !s ? '' : s < 60 ? 'now' : s < 3600 ? `${Math.floor(s / 60)}m` : s < 86400 ? `${Math.floor(s / 3600)}h` : `${Math.floor(s / 86400)}d`
 
+export const ago = (ms: number) => age(Math.max(1, Math.floor((Date.now() - ms) / 1000)))
+
 export const activity = (a: Agent) =>
   a.message || (a.status === 'crashed' ? `Crashed · ${a.exit}` : '') || a.task.replace(/^\[[a-z]+\]\s*/, '') || a.last_line
 
-export function Avatar({ tool, status, size }: { tool: string; status?: Status; size?: 'lg' }) {
+export const isPhone = () => matchMedia('(max-width: 700px)').matches
+
+export function Avatar({ tool, status, size }: { tool: string; status?: Status | 'gone'; size?: 'lg' | 'sm' }) {
   return (
     <span className={`tool ${size ?? ''}`}>
       <span className={`av av-${tool}`}>{GLYPH[tool] ?? '?'}</span>
-      {status && <span className={`st st-${status}`} aria-label={STATUS_LABEL[status]} />}
+      {status && status !== 'gone' && <span className={`st st-${status}`} aria-label={STATUS_LABEL[status]} />}
     </span>
   )
 }
 
-export function Dialog({ title, children, onClose }: { title: string; children: ReactNode; onClose: () => void }) {
+export function Dialog({ title, children, onClose, wide }: { title: string; children: ReactNode; onClose: () => void; wide?: boolean }) {
   useEffect(() => {
     const esc = (e: KeyboardEvent) => e.key === 'Escape' && onClose()
     addEventListener('keydown', esc)
@@ -35,9 +39,124 @@ export function Dialog({ title, children, onClose }: { title: string; children: 
   }, [onClose])
   return (
     <div className="overlay" onMouseDown={e => e.target === e.currentTarget && onClose()}>
-      <div className="dialog" role="dialog" aria-label={title}>
+      <div className={`dialog ${wide ? 'wide' : ''}`} role="dialog" aria-label={title}>
         <h3>{title}</h3>
         {children}
+      </div>
+    </div>
+  )
+}
+
+/** Name (and optionally color) for a new or renamed folder, list or agent. */
+export function NameDialog({ title, initial = '', color, placeholder, action = 'Save', onSubmit, onClose }: {
+  title: string; initial?: string; color?: string; placeholder?: string; action?: string
+  onSubmit: (name: string, color: string) => void; onClose: () => void
+}) {
+  const [name, setName] = useState(initial)
+  const [c, setC] = useState(color ?? '')
+  return (
+    <Dialog title={title} onClose={onClose}>
+      <form className="form" onSubmit={e => { e.preventDefault(); if (name.trim()) onSubmit(name.trim(), c) }}>
+        <input autoFocus value={name} onChange={e => setName(e.target.value)} placeholder={placeholder} maxLength={60} />
+        {color !== undefined && (
+          <div className="swatches" role="radiogroup" aria-label="Color">
+            {COLORS.map(x => <button type="button" key={x} role="radio" aria-checked={x === c} aria-label={x} className={x === c ? 'on' : ''}
+              style={{ background: x }} onClick={() => setC(x)} />)}
+          </div>
+        )}
+        <div className="form-actions">
+          <button type="button" className="btn" onClick={onClose}>Cancel</button>
+          <button type="submit" className="btn primary" disabled={!name.trim()}>{action}</button>
+        </div>
+      </form>
+    </Dialog>
+  )
+}
+
+export function Confirm({ title, text, action, onYes, onClose }: { title: string; text: string; action: string; onYes: () => void; onClose: () => void }) {
+  return (
+    <Dialog title={title} onClose={onClose}>
+      <p className="dialog-text">{text}</p>
+      <div className="form-actions">
+        <button className="btn" onClick={onClose} autoFocus>Cancel</button>
+        <button className="btn danger" onClick={() => { onClose(); onYes() }}>{action}</button>
+      </div>
+    </Dialog>
+  )
+}
+
+// ---------- hold / right-click menus ----------
+
+export type MenuItem = { label: string; onClick?: () => void; danger?: boolean; disabled?: boolean; items?: MenuItem[]; swatch?: string; checked?: boolean } | 'sep'
+type MenuState = { x: number; y: number; items: MenuItem[]; title?: string } | null
+let showMenu: (m: MenuState) => void = () => {}
+
+export const openMenu = (x: number, y: number, items: MenuItem[], title?: string) => showMenu({ x, y, items, title })
+
+/** Long-press on touch, right-click with a mouse. The click that follows a long press is swallowed. */
+export function useHold(onHold: (x: number, y: number) => void) {
+  const timer = useRef<number>(0)
+  const fired = useRef(false)
+  const start = useRef({ x: 0, y: 0 })
+  return {
+    onContextMenu: (e: React.MouseEvent) => { e.preventDefault(); onHold(e.clientX, e.clientY) },
+    onTouchStart: (e: React.TouchEvent) => {
+      fired.current = false
+      const t = e.touches[0]
+      start.current = { x: t.clientX, y: t.clientY }
+      timer.current = window.setTimeout(() => {
+        fired.current = true
+        navigator.vibrate?.(10)
+        onHold(start.current.x, start.current.y)
+      }, 480)
+    },
+    onTouchMove: (e: React.TouchEvent) => {
+      const t = e.touches[0]
+      if (Math.abs(t.clientX - start.current.x) + Math.abs(t.clientY - start.current.y) > 10) clearTimeout(timer.current)
+    },
+    onTouchEnd: () => clearTimeout(timer.current),
+    onClickCapture: (e: React.MouseEvent) => { if (fired.current) { e.preventDefault(); e.stopPropagation(); fired.current = false } },
+  }
+}
+
+export function MenuHost() {
+  const [stack, setStack] = useState<MenuState[]>([])
+  useEffect(() => {
+    showMenu = m => setStack(m ? [m] : [])
+    return () => { showMenu = () => {} }
+  }, [])
+  const top = stack.at(-1)
+  useEffect(() => {
+    if (!top) return
+    const esc = (e: KeyboardEvent) => e.key === 'Escape' && setStack([])
+    addEventListener('keydown', esc)
+    return () => removeEventListener('keydown', esc)
+  }, [top])
+  if (!top) return null
+  const phone = isPhone()
+  const style = phone ? {} : { left: Math.min(top.x, innerWidth - 240), top: Math.min(top.y, innerHeight - 40 - top.items.length * 34) }
+  return (
+    <div className="menu-overlay" onMouseDown={e => e.target === e.currentTarget && setStack([])} onTouchEnd={e => e.target === e.currentTarget && setStack([])}>
+      <div className={`menu ctx ${phone ? 'sheet' : ''}`} role="menu" style={style}>
+        {(top.title || stack.length > 1) && (
+          <div className="menu-title">
+            {stack.length > 1 && <button className="menu-back" onClick={() => setStack(stack.slice(0, -1))}>‹</button>}
+            {top.title}
+          </div>
+        )}
+        {top.items.map((it, i) => it === 'sep' ? <div className="menu-sep" key={i} /> : (
+          <button key={i} role="menuitem" disabled={it.disabled} className={it.danger ? 'danger' : ''} onClick={() => {
+            if (it.items) return setStack([...stack, { ...top, items: it.items, title: it.label }])
+            setStack([])
+            it.onClick?.()
+          }}>
+            {it.swatch && <span className="sq" style={{ background: it.swatch }} />}
+            <span className="menu-text">{it.label}</span>
+            {it.checked && <span className="check-mark">✓</span>}
+            {it.items && <span className="chev">›</span>}
+          </button>
+        ))}
+        {phone && <button className="menu-cancel" onClick={() => setStack([])}>Cancel</button>}
       </div>
     </div>
   )
@@ -46,36 +165,109 @@ export function Dialog({ title, children, onClose }: { title: string; children: 
 // ---------- sidebar ----------
 
 export function Sidebar(props: {
-  route: string; needs: number; paused: number; push: ReactNode
-  profiles: Profile[]; onNew: (p?: Profile) => void; onCustom: () => void; onDeleteProfile: (p: Profile) => void
+  route: string; needs: number; paused: number; folders: Folder[]; counts: Map<number, number>; lists: List[]; usage: Usage[]
+  newButton: ReactNode; push: ReactNode; onJarvis: () => void; onNewFolder: () => void; onFolderMenu: (f: Folder, x: number, y: number) => void
+  onNewList: () => void; onListMenu: (l: List, x: number, y: number) => void; onDrop: (folderId: number | null, key: string) => void
 }) {
+  const [over, setOver] = useState<number | 'all' | null>(null)
+  const dropProps = (target: number | null) => ({
+    onDragOver: (e: React.DragEvent) => { if (e.dataTransfer.types.includes('fleet/key')) { e.preventDefault(); setOver(target ?? 'all') } },
+    onDragLeave: () => setOver(null),
+    onDrop: (e: React.DragEvent) => { e.preventDefault(); setOver(null); props.onDrop(target, e.dataTransfer.getData('fleet/key')) },
+  })
   return (
     <aside className="nav">
-      <div className="brand"><span className="logo">F</span>Fleet</div>
-      <NewAgentButton {...props} />
-      <a className={`ni ${props.route === 'all' ? 'on' : ''}`} href="#/">
+      <div className="brand"><span className="logo">F</span>Fleet
+        <button className="brand-mic" onClick={props.onJarvis} aria-label="Jarvis (J)" title="Jarvis (J)"><MicIcon /></button>
+      </div>
+      {props.newButton}
+      <a className={`ni ${props.route === 'all' ? 'on' : ''} ${over === 'all' ? 'drop' : ''}`} href="#/" {...dropProps(null)}>
         <span className="sq" style={{ background: 'currentColor', opacity: 0.5 }} />All agents
         {props.needs > 0 && <span className="badge">{props.needs}</span>}
       </a>
-      <div className="sec">Later</div>
-      <a className={`ni ${props.route === 'paused' ? 'on' : ''}`} href="#/paused">
-        <PauseIcon />Paused<b>{props.paused || ''}</b>
-      </a>
-      <div className="foot">{props.push}</div>
+      <div className="sec">Folders<button className="sec-add" onClick={props.onNewFolder} aria-label="New folder">+</button></div>
+      {props.folders.map(f => (
+        <FolderRow key={f.id} f={f} on={props.route === `folder/${f.id}`} drop={over === f.id} count={props.counts.get(f.id) ?? 0}
+          dropProps={dropProps(f.id)} onMenu={(x, y) => props.onFolderMenu(f, x, y)} />
+      ))}
+      {!props.folders.length && <button className="ni ghost" onClick={props.onNewFolder}>New folder…</button>}
+      <div className="sec">Ideas<button className="sec-add" onClick={props.onNewList} aria-label="New list">+</button></div>
+      {props.lists.map(l => (
+        <ListRow key={l.id} l={l} on={props.route === `ideas/${l.name}`} onMenu={(x, y) => props.onListMenu(l, x, y)} />
+      ))}
+      <div className="sec">Library</div>
+      <a className={`ni ${props.route === 'history' ? 'on' : ''}`} href="#/history"><ClockIcon />History</a>
+      <a className={`ni ${props.route === 'paused' ? 'on' : ''}`} href="#/paused"><PauseIcon />Paused<b>{props.paused || ''}</b></a>
+      <div className="foot">
+        <UsageMeters usage={props.usage} compact />
+        {props.push}
+      </div>
     </aside>
   )
 }
 
-export function NewAgentButton({ profiles, onNew, onCustom, onDeleteProfile }: {
-  profiles: Profile[]; onNew: (p?: Profile) => void; onCustom: () => void; onDeleteProfile: (p: Profile) => void
+function FolderRow({ f, on, drop, count, dropProps, onMenu }: { f: Folder; on: boolean; drop: boolean; count: number; dropProps: object; onMenu: (x: number, y: number) => void }) {
+  const hold = useHold(onMenu)
+  return (
+    <a className={`ni ${on ? 'on' : ''} ${drop ? 'drop' : ''}`} href={`#/folder/${f.id}`} {...dropProps} {...hold}>
+      <span className="sq" style={{ background: f.color }} />{f.name}<b>{count || ''}</b>
+    </a>
+  )
+}
+
+function ListRow({ l, on, onMenu }: { l: List; on: boolean; onMenu: (x: number, y: number) => void }) {
+  const hold = useHold(onMenu)
+  const icon = l.name === 'Priority' ? <FlagIcon /> : l.name === 'Brain Dump' ? <InboxIcon /> : <span className="sq round" style={{ background: l.color }} />
+  return (
+    <a className={`ni ${on ? 'on' : ''}`} href={`#/ideas/${encodeURIComponent(l.name)}`} {...hold}>
+      {icon}{l.name}
+      {l.name === 'Brain Dump' && l.unsorted > 0 ? <span className="badge gray">{l.unsorted}</span> : <b>{l.open || ''}</b>}
+    </a>
+  )
+}
+
+export function UsageMeters({ usage, compact }: { usage: Usage[]; compact?: boolean }) {
+  const known = usage.filter(u => u.windows.length)
+  const unknown = usage.filter(u => !u.windows.length)
+  const resets = (s: number | null) => {
+    if (!s) return ''
+    const d = new Date(s * 1000)
+    const soon = d.getTime() - Date.now() < 86_400_000
+    return soon ? d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : d.toLocaleDateString([], { weekday: 'short' })
+  }
+  return (
+    <div className={`usage ${compact ? 'compact' : ''}`}>
+      {known.map(u => (
+        <div className="usage-row" key={u.tool}>
+          <div className="usage-tool">{toolLabel(u.tool)}</div>
+          {u.windows.map(w => (
+            <div className="usage-win" key={w.label} title={w.resets_at ? `resets ${new Date(w.resets_at * 1000).toLocaleString()}` : ''}>
+              <span className="usage-label">{w.label}</span>
+              <span className="meter"><span className={w.pct >= 85 ? 'hot' : w.pct >= 60 ? 'warm' : ''} style={{ width: `${Math.min(100, w.pct)}%` }} /></span>
+              <span className="usage-pct">{w.pct}%</span>
+              {!compact && w.resets_at && <span className="usage-reset">resets {resets(w.resets_at)}</span>}
+            </div>
+          ))}
+        </div>
+      ))}
+      {!compact && unknown.map(u => <div className="hint" key={u.tool}>{toolLabel(u.tool)}: {u.note}</div>)}
+    </div>
+  )
+}
+
+// ---------- new agent ----------
+
+export function NewAgentButton({ profiles, onNew, onCustom, onInterview, onDeleteProfile }: {
+  profiles: Profile[]; onNew: (p?: Profile) => void; onCustom: () => void; onInterview: () => void; onDeleteProfile: (p: Profile) => void
 }) {
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
   useEffect(() => {
     if (!open) return
-    const away = (e: MouseEvent) => !ref.current?.contains(e.target as Node) && setOpen(false)
+    const away = (e: MouseEvent | TouchEvent) => !ref.current?.contains(e.target as Node) && setOpen(false)
     addEventListener('mousedown', away)
-    return () => removeEventListener('mousedown', away)
+    addEventListener('touchstart', away)
+    return () => { removeEventListener('mousedown', away); removeEventListener('touchstart', away) }
   }, [open])
   const def = profiles.find(p => p.is_default)
   return (
@@ -83,13 +275,13 @@ export function NewAgentButton({ profiles, onNew, onCustom, onDeleteProfile }: {
       <button className="new-main" onClick={() => onNew(def)} title={def ? `Quick start: ${def.name}` : 'Quick start: Claude'}>
         <PlusIcon />New agent
       </button>
-      <button className="new-more" aria-label="Profiles and custom" aria-expanded={open} onClick={() => setOpen(!open)}>▾</button>
+      <button className="new-more" aria-label="Profiles and more" aria-expanded={open} onClick={() => setOpen(!open)}>▾</button>
       {open && (
         <div className="menu" role="menu">
           {profiles.map(p => (
             <div className="menu-row" key={p.name}>
               <button role="menuitem" onClick={() => { setOpen(false); onNew(p) }}>
-                <Avatar tool={p.tool} />
+                <Avatar tool={p.tool} size="sm" />
                 <span className="menu-text"><b>{p.name}</b><small>{[toolLabel(p.tool), p.model, p.effort].filter(Boolean).join(' · ')}</small></span>
                 {p.is_default ? <span className="chip">default</span> : null}
               </button>
@@ -98,43 +290,90 @@ export function NewAgentButton({ profiles, onNew, onCustom, onDeleteProfile }: {
           ))}
           {profiles.length > 0 && <div className="menu-sep" />}
           <button role="menuitem" className="menu-custom" onClick={() => { setOpen(false); onCustom() }}>Custom…</button>
+          <button role="menuitem" className="menu-custom" onClick={() => { setOpen(false); onInterview() }}>Interview me about an idea…</button>
         </div>
       )}
     </div>
   )
 }
 
-export function CustomForm({ onClose, onStarted, onError }: {
-  onClose: () => void; onStarted: (name: string) => void; onError: (e: Error) => void
-}) {
-  const [f, setF] = useState({
-    name: '', tool: 'claude', model: '', effort: '', cwd: remember.get('cwd'), prompt: '', profile: '', isDefault: false,
-  })
-  const [busy, setBusy] = useState(false)
-  const set = (k: keyof typeof f) => (e: { target: { value: string; checked?: boolean; type?: string } }) =>
-    setF({ ...f, [k]: e.target.type === 'checkbox' ? e.target.checked : e.target.value })
+export type StartFields = { name: string; tool: string; model: string; effort: string; cwd: string; prompt: string; folder_id: number | null }
 
+/** The full New agent form, also used to start an agent from an idea. Suggest picks a tool/model; Improve rewrites the prompt. */
+export function CustomForm({ title = 'New agent', initial, folders, onClose, onStart, onError }: {
+  title?: string; initial?: Partial<StartFields>; folders: Folder[]; onClose: () => void
+  onStart: (f: StartFields) => Promise<void>; onError: (e: Error) => void
+}) {
+  const [f, setF] = useState<StartFields & { profile: string; isDefault: boolean }>({
+    name: '', tool: 'claude', model: '', effort: '', cwd: remember.get('cwd'), prompt: '', folder_id: null, profile: '', isDefault: false, ...initial,
+  })
+  const [busy, setBusy] = useState<'' | 'start' | 'suggest' | 'improve'>('')
+  const [route, setRoute] = useState<Route | null>(null)
+  const [improved, setImproved] = useState<(Improved & { before: string }) | null>(null)
+  const set = (k: keyof typeof f) => (e: { target: { value: string; checked?: boolean; type?: string } }) =>
+    setF({ ...f, [k]: e.target.type === 'checkbox' ? e.target.checked : k === 'folder_id' ? (e.target.value ? Number(e.target.value) : null) : e.target.value })
+
+  const suggest = async () => {
+    setBusy('suggest')
+    try {
+      const r = await api.post<Route>('/api/ai/recommend', { task: f.prompt })
+      setRoute(r)
+      setF(x => ({ ...x, tool: r.tool, model: r.model === 'default' ? '' : r.model, effort: r.effort }))
+    } catch (e) { onError(e as Error) }
+    setBusy('')
+  }
+  const improve = async () => {
+    setBusy('improve')
+    try {
+      const r = await api.post<Improved>('/api/ai/improve', { text: f.prompt, cwd: f.cwd })
+      setImproved({ ...r, before: f.prompt })
+      setF(x => ({ ...x, prompt: r.prompt }))
+    } catch (e) { onError(e as Error) }
+    setBusy('')
+  }
   const submit = async (e: React.FormEvent) => {
     e.preventDefault()
-    setBusy(true)
+    setBusy('start')
     try {
       if (f.profile.trim())
         await api.put(`/api/profiles/${encodeURIComponent(f.profile.trim())}`,
           { tool: f.tool, model: f.model, effort: f.effort, cwd: f.cwd, is_default: f.isDefault })
-      const { name } = await api.post<{ name: string }>('/api/agents',
-        { name: f.name, tool: f.tool, model: f.model, effort: f.effort, cwd: f.cwd, prompt: f.prompt })
       if (f.cwd) remember.set('cwd', f.cwd)
-      onStarted(name)
+      await onStart(f)
     } catch (err) {
       onError(err as Error)
-      setBusy(false)
+      setBusy('')
     }
   }
 
   return (
-    <Dialog title="New agent" onClose={onClose}>
+    <Dialog title={title} onClose={onClose} wide>
       <form className="form" onSubmit={submit}>
-        <label>Name<input value={f.name} onChange={set('name')} placeholder="auto, e.g. claude-3f2a" pattern="[A-Za-z0-9._\-]{1,40}" /></label>
+        <label>What should it do?
+          <textarea rows={5} value={f.prompt} onChange={set('prompt')} autoFocus
+            placeholder="Optional. The agent starts on this right away. Type it rough; Improve can tidy it up." />
+        </label>
+        <div className="ai-row">
+          <button type="button" className="btn" onClick={improve} disabled={!f.prompt.trim() || !!busy}><SparkIcon />{busy === 'improve' ? 'Improving…' : 'Improve prompt'}</button>
+          <button type="button" className="btn" onClick={suggest} disabled={!f.prompt.trim() || !!busy}><WandIcon />{busy === 'suggest' ? 'Thinking…' : 'Suggest model'}</button>
+          {improved && <button type="button" className="btn ghost" onClick={() => { setF(x => ({ ...x, prompt: improved.before })); setImproved(null) }}>Undo</button>}
+        </div>
+        {improved && (improved.changes.length > 0 || improved.questions.length > 0) && (
+          <details className="ai-note" open={improved.questions.length > 0}>
+            <summary>{improved.questions.length ? `${improved.questions.length} question${improved.questions.length > 1 ? 's' : ''} worth answering in the prompt` : 'What changed'}</summary>
+            {improved.questions.length > 0 && <ul>{improved.questions.map((q, i) => <li key={i}>{q}</li>)}</ul>}
+            {improved.changes.length > 0 && <ul className="dim">{improved.changes.map((c, i) => <li key={i}>{c}</li>)}</ul>}
+          </details>
+        )}
+        {route && (
+          <div className="ai-note">
+            <b>{toolLabel(route.tool)}{route.model ? ` · ${route.model}` : ''}{route.effort ? ` · ${route.effort}` : ''}</b> — {route.why}
+            <button type="button" className="link" onClick={() => setF(x => ({ ...x, tool: route.alternative.tool, model: route.alternative.model, effort: '' }))}>
+              Or {toolLabel(route.alternative.tool)} · {route.alternative.model}
+            </button>
+            <div className="dim">{route.alternative.why}</div>
+          </div>
+        )}
         <div className="form-row">
           <label>Tool<select value={f.tool} onChange={set('tool')}>{TOOLS.map(t => <option key={t} value={t}>{toolLabel(t)}</option>)}</select></label>
           <label>Model<input value={f.model} onChange={set('model')} placeholder="tool default" /></label>
@@ -142,172 +381,55 @@ export function CustomForm({ onClose, onStarted, onError }: {
             {['', 'low', 'medium', 'high', 'xhigh', 'max'].map(v => <option key={v} value={v}>{v || 'default'}</option>)}
           </select></label>
         </div>
-        <label>Folder<input value={f.cwd} onChange={set('cwd')} placeholder="home folder" /></label>
-        <label>First prompt<textarea rows={4} value={f.prompt} onChange={set('prompt')} placeholder="Optional. The agent starts working on this right away." /></label>
+        <div className="form-row">
+          <label>Name<input value={f.name} onChange={set('name')} placeholder="auto" /></label>
+          <label>Folder<select value={f.folder_id ?? ''} onChange={set('folder_id')}>
+            <option value="">None</option>
+            {folders.map(x => <option key={x.id} value={x.id}>{x.name}</option>)}
+          </select></label>
+        </div>
+        <label>Runs in<input value={f.cwd} onChange={set('cwd')} placeholder="your project folder (from fleet dash install)" /></label>
         <div className="form-row save">
           <label>Save as profile<input value={f.profile} onChange={set('profile')} placeholder="optional name" /></label>
           <label className="check"><input type="checkbox" checked={f.isDefault} onChange={set('isDefault')} disabled={!f.profile.trim()} />Make default</label>
         </div>
         <div className="form-actions">
           <button type="button" className="btn" onClick={onClose}>Cancel</button>
-          <button type="submit" className="btn primary" disabled={busy}>{busy ? 'Starting…' : 'Start agent'}</button>
+          <button type="submit" className="btn primary" disabled={busy === 'start'}>{busy === 'start' ? 'Starting…' : 'Start agent'}</button>
         </div>
       </form>
     </Dialog>
   )
 }
 
-// ---------- list ----------
-
-export function AgentList({ agents, selected, header }: { agents: Agent[]; selected: string; header: ReactNode }) {
+export function InterviewForm({ initial = '', onClose, onStart }: { initial?: string; onClose: () => void; onStart: (topic: string) => Promise<void> }) {
+  const [topic, setTopic] = useState(initial)
+  const [busy, setBusy] = useState(false)
   return (
-    <section className="list">
-      {header}
-      <div className="scroll">
-        {ORDER.map(status => {
-          const group = agents.filter(a => a.status === status)
-          if (!group.length) return null
-          return (
-            <div key={status}>
-              <div className="grp">{STATUS_LABEL[status]}</div>
-              {group.map(a => (
-                <a key={a.name} href={`#/agent/${encodeURIComponent(a.name)}`}
-                  className={`it ${a.name === selected ? 'on' : ''} ${a.status === 'needs_you' ? 'need' : ''}`}>
-                  <Avatar tool={a.tool} status={a.status} />
-                  <span className="nm">{a.name}</span>
-                  <span className="tm">{age(a.age_s)}</span>
-                  <span className="pv">{activity(a)}</span>
-                </a>
-              ))}
-            </div>
-          )
-        })}
-        {!agents.length && <div className="empty">No agents running. Start one with <b>New agent</b>.</div>}
-      </div>
-    </section>
-  )
-}
-
-export function PausedList({ items, header, onResume, onForget }: {
-  items: Paused[]; header: ReactNode; onResume: (p: Paused) => void; onForget: (p: Paused) => void
-}) {
-  return (
-    <section className="list">
-      {header}
-      <div className="scroll">
-        {items.map(p => (
-          <div className="it paused" key={p.id}>
-            <Avatar tool={p.tool} />
-            <span className="nm">{p.name}</span>
-            <span className="tm">{new Date(p.paused_at * 1000).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}</span>
-            <span className="pv">{p.cwd.split('/').slice(-2).join('/')}</span>
-            <span className="row-actions">
-              <button className="btn small primary" onClick={() => onResume(p)}>Resume</button>
-              <button className="btn small" onClick={() => onForget(p)}>Forget</button>
-            </span>
-          </div>
-        ))}
-        {!items.length && <div className="empty">Nothing paused. Pause an agent to park it here with its conversation.</div>}
-      </div>
-    </section>
-  )
-}
-
-// ---------- agent view ----------
-
-export function AgentView({ agent, onBack, onTerminal, onPause, onKill, send }: {
-  agent: Agent; onBack: () => void; onTerminal: () => void; onPause: () => void; onKill: () => void
-  send: (body: { text?: string; key?: string }) => Promise<void>
-}) {
-  const [menu, setMenu] = useState(false)
-  return (
-    <main className="det">
-      <header className="dh">
-        <button className="back" onClick={onBack} aria-label="Back to agents">‹</button>
-        <Avatar tool={agent.tool} size="lg" />
-        <div className="dh-text">
-          <div className="t">{agent.name}</div>
-          <div className="meta">
-            <span className={`pill pill-${agent.status}`}>{STATUS_LABEL[agent.status]}</span>
-            <span className="ellip">{toolLabel(agent.tool)} · {agent.cwd.split('/').pop() || '~'}</span>
-          </div>
+    <Dialog title="Interview me about an idea" onClose={onClose}>
+      <form className="form" onSubmit={async e => { e.preventDefault(); setBusy(true); await onStart(topic).catch(() => setBusy(false)) }}>
+        <p className="dialog-text">A Claude agent asks you one question at a time (mostly multiple choice, so it works from your phone), pushes back where it should, and writes up a plan when you're done.</p>
+        <textarea rows={4} autoFocus value={topic} onChange={e => setTopic(e.target.value)} placeholder="The idea, as rough as you like" />
+        <div className="form-actions">
+          <button type="button" className="btn" onClick={onClose}>Cancel</button>
+          <button type="submit" className="btn primary" disabled={!topic.trim() || busy}>{busy ? 'Starting…' : 'Start interview'}</button>
         </div>
-        {agent.controllable && (
-          <div className="acts">
-            {agent.pid !== null && <button className="btn" onClick={onPause} disabled={!agent.session_id}
-              title={agent.session_id ? 'Stop the agent, keep the conversation' : 'No resumable conversation found yet'}><PauseIcon /><span className="lbl">Pause</span></button>}
-            <button className="btn" onClick={onTerminal}><TermIcon /><span className="lbl">Full terminal</span></button>
-            <div className="more">
-              <button className="btn" aria-label="More" aria-expanded={menu} onClick={() => setMenu(!menu)}>⋯</button>
-              {menu && (
-                <div className="menu right" role="menu" onMouseLeave={() => setMenu(false)}>
-                  <button role="menuitem" className="danger" onClick={() => { setMenu(false); onKill() }}>
-                    {agent.pid === null ? 'Close session' : 'Kill agent'}
-                  </button>
-                </div>
-              )}
-            </div>
-          </div>
-        )}
-      </header>
-      {agent.controllable ? (
-        <>
-          <ScreenView name={agent.name} />
-          {agent.pid !== null && <Composer agent={agent} send={send} />}
-          {agent.pid === null && <div className="ended">This agent exited ({agent.exit}). Its last screen is above.</div>}
-        </>
-      ) : (
-        <div className="empty big">
-          This agent was started in a plain terminal window, so the dashboard can see it but can't type into it.
-          Start agents with <b>New agent</b> or <code>fleet new</code> to control them from here.
-        </div>
-      )}
-    </main>
-  )
-}
-
-function Composer({ agent, send }: { agent: Agent; send: (body: { text?: string; key?: string }) => Promise<void> }) {
-  const [text, setText] = useState('')
-  const replies = agent.quick_replies
-  const nav = agent.status === 'needs_you' && !replies.length
-  const submit = () => {
-    if (!text.trim()) return
-    const t = text
-    setText('')
-    send({ text: t }).catch(() => setText(t))
-  }
-  return (
-    <div className="comp">
-      <div className="qr">
-        {replies.map(q => (
-          <button key={q.key} className="q" onClick={() => send({ key: q.key })}><kbd>{q.key}</kbd>{q.label}</button>
-        ))}
-        {nav && <>
-          <button className="q" onClick={() => send({ key: 'Up' })} aria-label="Up">↑</button>
-          <button className="q" onClick={() => send({ key: 'Down' })} aria-label="Down">↓</button>
-          <button className="q" onClick={() => send({ key: 'Enter' })}><kbd>⏎</kbd>Select</button>
-        </>}
-        <button className="q" onClick={() => send({ key: 'Escape' })}><kbd>esc</kbd>Interrupt</button>
-      </div>
-      <div className="row">
-        <textarea id="composer" rows={1} value={text} placeholder={`Reply to ${agent.name}…`}
-          onChange={e => setText(e.target.value)}
-          onKeyDown={e => {
-            if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
-              e.preventDefault()
-              submit()
-            }
-            if (e.key === 'Escape') e.currentTarget.blur()
-          }} />
-        <button className="send" onClick={submit} aria-label="Send" disabled={!text.trim()}><SendIcon /></button>
-      </div>
-    </div>
+      </form>
+    </Dialog>
   )
 }
 
 // ---------- icons ----------
 
-const PlusIcon = () => <svg width="13" height="13" viewBox="0 0 16 16" aria-hidden><path d="M8 3v10M3 8h10" stroke="currentColor" strokeWidth="2" strokeLinecap="round" /></svg>
-const PauseIcon = () => <svg width="12" height="12" viewBox="0 0 16 16" aria-hidden><rect x="4" y="3" width="2.6" height="10" rx="1" fill="currentColor" /><rect x="9.4" y="3" width="2.6" height="10" rx="1" fill="currentColor" /></svg>
-const TermIcon = () => <svg width="12" height="12" viewBox="0 0 16 16" aria-hidden><rect x="1.5" y="2.5" width="13" height="11" rx="2" stroke="currentColor" strokeWidth="1.5" fill="none" /><path d="m4.5 6.5 2 1.5-2 1.5M8 10h3" stroke="currentColor" strokeWidth="1.5" fill="none" strokeLinecap="round" /></svg>
-const SendIcon = () => <svg width="13" height="13" viewBox="0 0 16 16" aria-hidden><path d="M8 13V3M3.5 7.5 8 3l4.5 4.5" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round" /></svg>
+const svg = (d: ReactNode, size = 13) => <svg width={size} height={size} viewBox="0 0 16 16" aria-hidden>{d}</svg>
+export const PlusIcon = () => svg(<path d="M8 3v10M3 8h10" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />)
+export const PauseIcon = () => svg(<><rect x="4" y="3" width="2.6" height="10" rx="1" fill="currentColor" /><rect x="9.4" y="3" width="2.6" height="10" rx="1" fill="currentColor" /></>, 12)
+export const TermIcon = () => svg(<><rect x="1.5" y="2.5" width="13" height="11" rx="2" stroke="currentColor" strokeWidth="1.5" fill="none" /><path d="m4.5 6.5 2 1.5-2 1.5M8 10h3" stroke="currentColor" strokeWidth="1.5" fill="none" strokeLinecap="round" /></>, 12)
+export const SendIcon = () => svg(<path d="M8 13V3M3.5 7.5 8 3l4.5 4.5" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round" />)
+export const ClockIcon = () => svg(<><circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="1.6" fill="none" /><path d="M8 4.5V8l2.5 1.5" stroke="currentColor" strokeWidth="1.6" fill="none" strokeLinecap="round" /></>)
+export const FlagIcon = () => svg(<path d="M4 14V2.5M4 3h8l-2 3 2 3H4" stroke="#ff3b30" strokeWidth="1.6" fill="none" strokeLinejoin="round" strokeLinecap="round" />)
+export const InboxIcon = () => svg(<path d="M2 9.5 4 3h8l2 6.5V13H2zM2 9.5h3.5l1 1.5h3l1-1.5H14" stroke="currentColor" strokeWidth="1.4" fill="none" strokeLinejoin="round" />)
+export const SparkIcon = () => svg(<path d="M8 1.5 9.4 6.6 14.5 8 9.4 9.4 8 14.5 6.6 9.4 1.5 8l5.1-1.4z" fill="currentColor" />, 12)
+export const WandIcon = () => svg(<><path d="m3 13 7-7" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" /><path d="M11 1.5v3M9.5 3h3M13.5 6v2M12.5 7h2" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" /></>, 12)
+export const MicIcon = () => svg(<><rect x="5.5" y="1.5" width="5" height="8" rx="2.5" fill="currentColor" /><path d="M3 8a5 5 0 0 0 10 0M8 13v2" stroke="currentColor" strokeWidth="1.5" fill="none" strokeLinecap="round" /></>, 16)
+export const SearchIcon = () => svg(<><circle cx="7" cy="7" r="4.5" stroke="currentColor" strokeWidth="1.6" fill="none" /><path d="m10.5 10.5 3 3" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" /></>)

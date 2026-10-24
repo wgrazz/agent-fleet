@@ -13,7 +13,7 @@ let server: ChildProcess
 
 const api = async (method: string, path: string, body?: unknown) => {
   const res = await fetch(`http://127.0.0.1:${port}${path}`, {
-    method, headers: { 'X-Fleet-Key': key, 'Content-Type': 'application/json' }, body: body && JSON.stringify(body),
+    method, headers: { 'X-Fleet-Key': key, 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined,
   })
   return { status: res.status, data: res.status === 204 ? null : await res.json() }
 }

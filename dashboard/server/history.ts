@@ -123,6 +123,7 @@ function claudeMessages(path: string): Message[] {
   for (const line of readFileSync(path, 'utf8').split('\n')) {
     const d = parse(line)
     if (!d || d.isSidechain || d.isMeta || (d.type !== 'user' && d.type !== 'assistant')) continue
+    if (d.isCompactSummary) { out.push({ role: 'tool', text: 'Earlier conversation was summarized here to save space' }); continue }
     const c = d.message?.content
     if (typeof c === 'string') {
       if (d.type === 'user' && !isWrapper(c) && typed(c)) push(out, { role: 'user', text: typed(c) })
