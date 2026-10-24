@@ -210,18 +210,25 @@ export function PullToRefresh() {
       return true
     }
     const down = (e: TouchEvent) => { startY = e.touches.length === 1 && atTop(e.target as Element) ? e.touches[0].clientY : -1; dist = 0 }
+    let frame = 0
     const move = (e: TouchEvent) => {
       if (startY < 0) return
-      dist = Math.max(0, e.touches[0].clientY - startY)
-      setPull(dist > 12 ? Math.min(dist, 140) : 0)
+      const d = e.touches[0].clientY - startY
+      if (d < 0 && !dist) { startY = -1; return } // scrolling the list up: not a pull
+      // a pull: keep iOS from also rubber-banding the page underneath, which is what jittered
+      if (e.cancelable) e.preventDefault()
+      dist = Math.max(0, d)
+      cancelAnimationFrame(frame)
+      frame = requestAnimationFrame(() => setPull(dist > 12 ? Math.min(dist, 140) : 0))
     }
     const up = () => {
+      cancelAnimationFrame(frame)
       if (startY >= 0 && dist > 90) { setPull(-1); setTimeout(() => location.reload(), 150) }
       else setPull(0)
       startY = -1
     }
     addEventListener('touchstart', down, { passive: true })
-    addEventListener('touchmove', move, { passive: true })
+    addEventListener('touchmove', move, { passive: false }) // passive listeners can't stop the page scrolling
     addEventListener('touchend', up)
     addEventListener('touchcancel', up)
     return () => { removeEventListener('touchstart', down); removeEventListener('touchmove', move); removeEventListener('touchend', up); removeEventListener('touchcancel', up) }

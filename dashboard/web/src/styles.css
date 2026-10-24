@@ -27,6 +27,9 @@
 
 * { box-sizing: border-box; }
 html, body, #root { height: 100%; margin: 0; }
+/* the app scrolls inside its panes; the page itself never bounces (pull to refresh handles the top) */
+html, body { overflow: hidden; overscroll-behavior: none; }
+.scroll { overscroll-behavior-y: contain; }
 body { font: 13px/1.4 var(--font); color: var(--text); background: var(--bg); -webkit-font-smoothing: antialiased; }
 a { color: inherit; text-decoration: none; }
 button, input, select, textarea { font: inherit; color: inherit; }
