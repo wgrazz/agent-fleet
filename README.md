@@ -38,9 +38,11 @@ when present, so Linux works too; it just doesn't block sleep.
 | Command | What it does |
 | --- | --- |
 | `fleet new NAME` | Start a protected session called NAME in the current folder, then run `claude` / `codex` / `agent` inside it |
-| `fleet new NAME --tool T [--model M] [--effort E] [--profile P] [--detach] [PROMPT]` | Start NAME already running `claude`, `codex`, `cursor`, `copilot` or `agy`, optionally with a first prompt |
+| `fleet new NAME --tool T [--model M] [--effort E] [--profile P] [--detach] [PROMPT]` | Start NAME already running `claude`, `codex`, `cursor`, `copilot` or `agy`, optionally with a first prompt (`--resume ID` continues a past conversation) |
 | `fleet pause NAME` | Stop NAME's agent but keep its conversation; `fleet paused` lists, `fleet unpause ID\|NAME` brings it back |
 | `fleet idea [-l LIST] TEXT` | Jot an idea into `~/.fleet/fleet.db` (Brain Dump unless you name a list) |
+| `fleet import-notes [--dry-run]` | Copy your numbered Apple Notes checklists into Ideas, checked items as done (needs Full Disk Access) |
+| `fleet rename OLD NEW` | Rename a session |
 | `fleet json` | The agent list as JSON (what the dashboard reads) |
 | `fleet dash` | Open the dashboard |
 | `fleet hooks install` / `uninstall` | Add or remove the Claude Code hooks that report status to the dashboard |
@@ -59,8 +61,7 @@ transcript title) and Codex's thread database (`~/.codex/state_*.sqlite`). Curso
 
 ## Dashboard
 
-A web page for the same agents: who needs you, a live view of each screen, one-tap answers to
-their menus, a reply box, a full terminal, pause and resume, and push notifications on your phone.
+A web page for the same agents, on the Mac and as an iPhone home-screen app over Tailscale.
 
 ```
 fleet dash install       # runs the server at login (launchd) and publishes it to your tailnet
@@ -71,23 +72,93 @@ fleet dash update        # after changing the dashboard's code: rebuild + restar
 
 `fleet dash install` prints two links that end in `?key=…`. Open one once per device and the key
 is remembered. Without it the page shows "Fleet is locked". The key, push keys, profiles, paused
-sessions and ideas live in `~/.fleet/` (readable only by you). None of it is in this repo.
+sessions, folders and ideas live in `~/.fleet/` (readable only by you). None of it is in this repo.
 
-**iPhone:** open the tailnet link in Safari, then Share → Add to Home Screen, open Fleet from the
-new icon and tap **Enable notifications**. You get a push when an agent needs you, finishes, or
-crashes, and tapping it opens that agent. iOS only allows web push over HTTPS, so enable HTTPS
-certificates in the Tailscale admin console (DNS page) before running `fleet dash install`.
-Without Tailscale, use `fleet dash install --local` for a Mac-only dashboard.
+**Agents**
+- Status at a glance: needs you, working, done, crashed.
+- A live **Screen**, a readable **Chat** (Claude and Codex, read from their own logs), and
+  **Changes**: git files, commits and push state in the agent's repos.
+- One-tap answers to menus, a reply box, and a full terminal.
+- **Hold** (phone) or **right-click** (Mac) an agent for rename, move to folder, pause, terminal
+  and kill.
+- **Folders**: you make them, then drag agents in or use the menu. A folder follows the
+  conversation, so it survives renames and pause/resume. Past conversations can be filed too.
+
+**New agent**
+- Quick start with your default profile, saved profiles, or Custom.
+- Custom has **Improve prompt**: Claude rewrites a rough prompt the way Anthropic recommends
+  (goal, context, how to verify, real constraints) after a quick read-only look at the project
+  for real file names. It lists what it changed and any open questions.
+- **Suggest model** picks a tool, model and effort for the task, weighing how much of each
+  subscription is left, and offers an alternative.
+- **Interview me about an idea** starts a Claude agent that asks one question at a time, pushes
+  back, then writes a spec to `docs/ideas/` and adds it to Priority.
+
+**Ideas**
+- Checklist lists. Priority and Brain Dump are pinned; the rest are yours: rename, recolor,
+  reorder, delete.
+- Repeating items (daily, weekly on a day, monthly on a date, every N days) uncheck themselves
+  on schedule.
+- **Sort** walks Brain Dump one item at a time with Claude's guess at the right list. Enter
+  accepts, 1-9 picks a list, D deletes, A starts an agent, S skips. On a phone, swipe.
+- Any idea can become an agent (it shows the agent's status and offers "mark done" when it
+  finishes) or an interview.
+- Capture with ⌘I, `fleet idea "…"`, or Jarvis.
+- `fleet import-notes` (or Ideas ⋯ → Import from Apple Notes) copies your numbered checklist
+  notes, with checked items in Done. macOS only allows this from an app with Full Disk Access.
+
+**History.** Every past Claude and Codex conversation: search, read as chat, resume, file into
+folders.
+
+**Usage.** 5-hour and weekly limits:
+- Claude: from Claude Code's status line. Its `statusline.sh` writes `~/.fleet/claude-usage.json`.
+- Codex: from its session logs.
+- Copilot: from the plan counter it prints.
+- Cursor and Antigravity don't expose theirs.
+
+**Jarvis.** The mic in the sidebar, the middle of the phone tab bar, or `J`.
+- Ask "what needs me?", "tell walmart-fix yes", "pause the UI agents", "start a Claude agent
+  to …", "idea: …", or a general question; it can search the web.
+- It answers out loud and can speak alerts when agents need you (a setting, off by default).
+- Voice input uses the browser's speech recognition, and you can always type instead.
+
+**Keys:**
+
+| Key | Action |
+| --- | --- |
+| ⌘K | Jump anywhere |
+| ⌘I | New idea |
+| N | New agent |
+| J | Jarvis |
+| ↑ / ↓ | Move through agents |
+| 1-9 | Answer menus |
+| / | Reply box |
+
+The smart features (Improve, Suggest, Sort, Interview, Jarvis) run on your own Claude
+subscription through the Claude Code CLI (`claude -p`, Sonnet by default; set `FLEET_AI_MODEL`
+to change it). They don't use an API key.
+
+**iPhone:**
+1. Open the tailnet link in Safari, then Share → Add to Home Screen.
+2. Open Fleet from the new icon and tap **Enable notifications**.
+
+You get a push when an agent needs you, finishes or crashes, and tapping it opens that agent.
+iOS only allows web push over HTTPS, so enable HTTPS certificates in the Tailscale admin console
+(DNS page) before running `fleet dash install`. Without Tailscale, use
+`fleet dash install --local` for a Mac-only dashboard.
 
 **How status works:** Claude Code reports exactly through its hooks. Codex, Cursor, Copilot and
 Antigravity are read from their screens every 2 seconds, using patterns taken from real captures
-(`dashboard/test/fixtures/`). A guess will sometimes be wrong. When one is, save the screen
-(`tmux capture-pane -p -t =NAME: > dashboard/test/fixtures/<tool>/<state>-<label>.txt`) and fix the
-pattern in `dashboard/server/detect.ts`. Agents started in a plain terminal window show up, but
-only agents in tmux (`fleet new` or the dashboard) can be answered from it.
+(`dashboard/test/fixtures/`). When a guess is wrong, save the screen
+(`tmux capture-pane -p -t =NAME: > dashboard/test/fixtures/<tool>/<state>-<label>.txt`) and fix
+the pattern in `dashboard/server/detect.ts`. Agents started in a plain terminal window show up
+(Claude and Codex ones with their chat), but only agents in tmux (`fleet new` or the dashboard)
+can be answered from it.
 
-Needs Node.js 24+. `cd dashboard && npm test` runs the detector tests and an end-to-end test
-against a fake agent. `npm run dev` serves the page with hot reload against a running server.
+Needs Node.js 24+. In `dashboard/`:
+- `npm test` runs the detector, Ideas and end-to-end tests.
+- `npm run typecheck` checks types.
+- `npm run dev` serves the page with hot reload against a running server.
 
 ## agent-notify.sh
 

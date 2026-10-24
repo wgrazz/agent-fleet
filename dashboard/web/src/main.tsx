@@ -4,7 +4,7 @@ import { api, remember, Unauthorized, usePoll, type Conversation, type Folder, t
 import { AgentList, AgentView, PausedList } from './agents.tsx'
 import {
   COLORS, Confirm, CustomForm, InterviewForm, isPhone, MenuHost, MicIcon, NameDialog, NewAgentButton, openMenu, ORDER, Sidebar, UsageMeters,
-  type MenuItem, type StartFields,
+  type MenuItem, type StartFields, useHold,
 } from './components.tsx'
 import { ConversationView, HistoryPane, Jarvis, Palette, speak, spokenAlerts } from './extras.tsx'
 import { IdeaDetail, IdeasPane, ImportNotes, QuickCapture, SortMode } from './ideas.tsx'
@@ -241,10 +241,11 @@ function App() {
         <h4>{color && <span className="sq" style={{ background: color }} />}{title}</h4>
         <div className="lh-mobile">{newButton}</div>
       </div>
-      {isPhone() && (route.view === 'all' || route.view === 'folder' || route.view === 'agent') && folderList.length > 0 && (
+      {isPhone() && (route.view === 'all' || route.view === 'folder' || route.view === 'agent') && (
         <div className="chips">
           <a className={`chip-f ${folderId === null ? 'on' : ''}`} href="#/">All</a>
-          {folderList.map(f => <a key={f.id} className={`chip-f ${folderId === f.id ? 'on' : ''}`} href={`#/folder/${f.id}`}><span className="sq" style={{ background: f.color }} />{f.name}</a>)}
+          {folderList.map(f => <FolderChip key={f.id} f={f} on={folderId === f.id} onMenu={(x, y) => folderMenu(f, x, y)} />)}
+          <button className="chip-f add" onClick={() => newFolder()} aria-label="New folder">+ Folder</button>
         </div>
       )}
     </>
@@ -319,7 +320,8 @@ function App() {
         <a href="#/history" className={tab === 'history' ? 'on' : ''}>History</a>
         <a href="#/more" className={tab === 'more' ? 'on' : ''}>More</a>
       </nav>
-      {(route.view === 'ideas' || route.view === 'idea') && <IdeasListPicker lists={allLists} current={currentListName} />}
+      {(route.view === 'ideas' || route.view === 'idea') && <IdeasListPicker lists={allLists} current={currentListName}
+        onNew={() => setModal({ kind: 'name', title: 'New list', color: COLORS[6], action: 'Create', submit: (name, color) => { setModal(null); act(api.post('/api/lists', { name, color }), () => go(`#/ideas/${enc(name)}`)) } })} />}
 
       {jarvisOpen && <Jarvis onClose={() => setJarvisOpen(false)} onChanged={refreshAll} />}
 
@@ -366,7 +368,12 @@ function parseRouteOf(hash: string) {
 }
 
 /** Phone: a row of list chips above the Ideas pane, since the sidebar is hidden. */
-function IdeasListPicker({ lists, current }: { lists: List[]; current: string }) {
+function FolderChip({ f, on, onMenu }: { f: Folder; on: boolean; onMenu: (x: number, y: number) => void }) {
+  const hold = useHold(onMenu)
+  return <a className={`chip-f ${on ? 'on' : ''}`} href={`#/folder/${f.id}`} {...hold}><span className="sq" style={{ background: f.color }} />{f.name}</a>
+}
+
+function IdeasListPicker({ lists, current, onNew }: { lists: List[]; current: string; onNew: () => void }) {
   useEffect(() => { if (current) remember.set('lastList', current) }, [current])
   return (
     <div className="chips ideas-chips">
@@ -375,6 +382,7 @@ function IdeasListPicker({ lists, current }: { lists: List[]; current: string })
           <span className="sq round" style={{ background: l.color }} />{l.name}{l.name === 'Brain Dump' && l.unsorted > 0 ? ` ${l.unsorted}` : ''}
         </a>
       ))}
+      <button className="chip-f add" onClick={onNew} aria-label="New list">+ List</button>
     </div>
   )
 }

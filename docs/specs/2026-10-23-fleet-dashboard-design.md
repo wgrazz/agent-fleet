@@ -1,6 +1,6 @@
 # Fleet Dashboard: design
 
-Date: 2026-10-23 · Status: approved design, not yet built
+Date: 2026-10-23 · Status: built (phases 1-4), see "Built" at the end
 
 ## What it is
 
@@ -241,3 +241,42 @@ when done.
   Cursor and Antigravity expose.
 - Whether the Claude `Notification` hook fires for every input wait used in practice
   (permission prompts, questions, idle input), or whether screen detection must cover some.
+
+## Built (2026-10-23)
+
+All four phases shipped the same day, plus three features the owner added after testing phase 1.
+
+**Changes from the plan above:**
+- **Chat view is the phone default.** The first phone test found the terminal mirror cramped
+  and awkward to scroll.
+- **Hold (touch) and right-click menus on agents** for rename, move, pause, terminal and kill.
+- **Ideas came before folders and history** in priority. All three shipped together.
+- **Claude's `idle_prompt` notification is ignored.** It fires about 60 s after Claude
+  finishes, so mapping it to needs_you would turn every finished agent orange.
+- **A newly started agent alerts on first sight**, because it often opens straight into a
+  question. Agents already running when the server starts still don't.
+- **Dashboard-started agents run in `config.cwd`** (set by `fleet dash install` to the folder
+  it ran in), not the home folder. In the home folder, project permissions didn't apply.
+- **Folder placement follows the conversation id** when known, so it survives renames and
+  pause/resume.
+
+**Added:**
+- **Prompt improver.** It applies Anthropic's prompting guidance: goal, context, verification,
+  plain constraints with reasons, no pressure language or step scripts. It takes a read-only
+  look at the project.
+- **Model recommender.** It knows the installed tools and models, and weighs live usage limits.
+- **Interview agent.** One question at a time, then writes a spec to `docs/ideas/` and adds it
+  to Priority.
+- **Usage sources:**
+  - Claude: `statusline.sh` writes `~/.fleet/claude-usage.json` from the status line's
+    `rate_limits`.
+  - Codex: the rollout `token_count.rate_limits`.
+  - Copilot: the on-screen plan counter.
+
+**Not built or not verified:**
+- **Jarvis ⌥Space Mac-wide hotkey:** not built. The in-page `J` key and the mic buttons exist.
+- **Jarvis voice input** depends on the browser's speech recognition. It works in desktop
+  Chrome; iOS home-screen apps may not offer it, and the keyboard's dictation key works there.
+- **The Apple Notes import** couldn't run against the real database: macOS blocks it without
+  Full Disk Access. The parser is tested against a note built in the documented format.
+- **Calendar and reminders** (phase 5): not built.
