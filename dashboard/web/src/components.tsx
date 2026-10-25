@@ -99,10 +99,16 @@ export function useHold(onHold: (x: number, y: number) => void) {
   const timer = useRef<number>(0)
   const fired = useRef(false)
   const start = useRef({ x: 0, y: 0 })
+  const release = () => {
+    clearTimeout(timer.current)
+    setTimeout(() => { document.documentElement.classList.remove('holding'); if (fired.current) getSelection()?.removeAllRanges() }, 300)
+  }
   return {
     onContextMenu: (e: React.MouseEvent) => { e.preventDefault(); onHold(e.clientX, e.clientY) },
     onTouchStart: (e: React.TouchEvent) => {
       fired.current = false
+      // the row alone being unselectable isn't enough: iOS's own long-press then picks the nearest text it can select
+      document.documentElement.classList.add('holding')
       const t = e.touches[0]
       const el = e.currentTarget as HTMLElement
       start.current = { x: t.clientX, y: t.clientY }
@@ -119,7 +125,8 @@ export function useHold(onHold: (x: number, y: number) => void) {
       const t = e.touches[0]
       if (Math.abs(t.clientX - start.current.x) + Math.abs(t.clientY - start.current.y) > 10) clearTimeout(timer.current)
     },
-    onTouchEnd: () => clearTimeout(timer.current),
+    onTouchEnd: () => release(),
+    onTouchCancel: () => release(), // a scroll that took over the touch
     onClickCapture: (e: React.MouseEvent) => { if (fired.current) { e.preventDefault(); e.stopPropagation(); fired.current = false } },
   }
 }

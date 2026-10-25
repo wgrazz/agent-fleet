@@ -412,7 +412,7 @@ details.ai-note { display: block; }
 }
 
 /* Holding a row opens Fleet's own menu: stop iOS from also showing its link preview and selecting text */
-.it, .it *, .idea-body, .idea-body *, .chip-f, .ni, .hit, .q, .tabs a {
+html.holding, html.holding *, .it, .it *, .idea-body, .idea-body *, .chip-f, .ni, .hit, .q, .tabs a {
   -webkit-touch-callout: none;
   -webkit-user-select: none;
   user-select: none;
