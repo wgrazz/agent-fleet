@@ -499,6 +499,12 @@ html.holding, html.holding *, .it, .it *, .idea-body, .idea-body *, .chip-f, .ni
   .app { height: var(--vvh, 100%); }
   .jarvis.page { height: 100%; padding-top: env(safe-area-inset-top); }
   .jarvis.page .jarvis-in { padding-bottom: max(10px, env(safe-area-inset-bottom)); }
+  /* Jarvis is a tab, not a takeover: the tab bar stays, except while the keyboard is up */
+  .app[data-jarvis] .tabs { display: flex; }
+  .app[data-jarvis] .jarvis.page .jarvis-in { padding-bottom: 10px; }
+  .app[data-jarvis] .jarvis-done { display: none; }
+  html.kb .app .tabs { display: none; }
+  html.kb .app[data-jarvis] .jarvis.page .jarvis-in { padding-bottom: 10px; }
   .settings .set-scroll { padding: 4px 16px 40px; }
 }
 

@@ -331,11 +331,11 @@ function App() {
   }
 
   const hasDetail = !!(agentFromRoute || (route.view === 'idea' && ideaItem) || conversation || route.view === 'settings' || route.view === 'jarvis')
-  const tab = ['ideas', 'idea', 'prioritized'].includes(route.view) ? 'ideas' : route.view === 'history' ? 'history' : ['more', 'settings'].includes(route.view) ? 'more' : 'agents'
+  const tab = route.view === 'jarvis' ? 'jarvis' : ['ideas', 'idea', 'prioritized'].includes(route.view) ? 'ideas' : route.view === 'history' ? 'history' : ['more', 'settings'].includes(route.view) ? 'more' : 'agents'
   const brainDump = allLists.find(l => l.name === 'Brain Dump')
 
   return (
-    <div className="app" data-view={hasDetail ? 'detail' : 'list'}>
+    <div className="app" data-view={hasDetail ? 'detail' : 'list'} data-jarvis={route.view === 'jarvis' || undefined}>
       <Sidebar route={sideRoute} needs={needs} paused={paused.data?.length ?? 0} folders={folderList} counts={counts} lists={allLists}
         usage={usage.data ?? []} newButton={newButton} push={push} onJarvis={() => setJarvisOpen(true)} onNewFolder={() => newFolder()} onFolderMenu={folderMenu}
         onNewList={() => setModal({ kind: 'name', title: 'New list', color: COLORS[6], action: 'Create', submit: (name, color) => { setModal(null); act(api.post('/api/lists', { name, color }), () => go(`#/ideas/${enc(name)}`)) } })}
@@ -495,6 +495,7 @@ function PushButton({ onError }: { onError: (e: Error) => void }) {
 if (window.visualViewport) {
   const fit = () => {
     document.documentElement.style.setProperty('--vvh', `${window.visualViewport!.height}px`)
+    document.documentElement.classList.toggle('kb', window.visualViewport!.height < innerHeight - 120) // keyboard up
     if (window.scrollY) window.scrollTo(0, 0)
   }
   window.visualViewport.addEventListener('resize', fit)
