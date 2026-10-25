@@ -154,13 +154,12 @@ function usageText(u: Awaited<ReturnType<typeof usage>>) {
   return u.map(p => `${p.tool}: ${p.windows.length ? p.windows.map(w => `${w.label} ${w.pct}% used`).join(', ') : 'unknown'}`).join('\n')
 }
 
-// What each agent has been saying plus its live screen, written where Jarvis can Read them, so "how's the scrape
-// going?" gets answered from the agent's own reports and the job output on its screen.
+// What each agent has been saying plus its live screen, written where Jarvis can Read them. Only the paths go in the
+// prompt; Jarvis opens one when you ask how that agent or its job is doing.
 const LOGS = join(FLEET_DIR, 'screens', 'agents')
-type AgentLog = { path: string; last: string }
 async function agentLogs() {
   mkdirSync(LOGS, { recursive: true, mode: 0o700 })
-  const out = new Map<string, AgentLog>()
+  const out = new Map<string, string>()
   await Promise.all(list().map(async a => {
     const t = a.session_id && hasTranscript(a.tool) ? await transcript(a.tool, a.session_id).catch(() => null) : null
     const msgs = t?.messages.slice(-30) ?? []
@@ -169,16 +168,16 @@ async function agentLogs() {
     const path = join(LOGS, `${a.name.replace(/[^\w.-]/g, '_')}.txt`)
     const convo = msgs.map(m => (m.role === 'tool' ? `  [tool] ${m.text}` : `${m.role === 'user' ? 'DEVELOPER' : 'AGENT'}: ${m.text.slice(0, 4000)}`)).join('\n\n')
     writeFileSync(path, `${a.name}: recent conversation, oldest first\n\n${convo || '(none)'}\n\n--- its screen right now ---\n${screen.join('\n')}\n`, { mode: 0o600 })
-    out.set(a.name, { path, last: msgs.findLast(m => m.role === 'assistant')?.text.replace(/\s+/g, ' ').slice(0, 300) ?? '' })
+    out.set(a.name, path)
   }))
-  const keep = new Set([...out.values()].map(l => l.path))
+  const keep = new Set(out.values())
   for (const f of readdirSync(LOGS)) if (!keep.has(join(LOGS, f))) unlinkSync(join(LOGS, f))
   return out
 }
 
-function jarvisContext(logs?: Map<string, AgentLog>) {
+function jarvisContext(logs?: Map<string, string>) {
   const agents = list().map(a => `- ${a.name} (${a.tool}, ${a.status === 'waiting' ? 'turn done, waiting on its own background job, not on you' : a.status.replace('_', ' ')})${a.message ? `: asking "${a.message}"` : a.task ? `: ${a.task.replace(/^\[[a-z]+\]\s*/, '')}` : ''}${a.quick_replies.length ? ` options: ${a.quick_replies.map(q => `${q.key}=${q.label}`).join(', ')}` : ''}${a.controllable ? '' : ' (read-only)'}${
-    logs?.get(a.name) ? `\n    last said: "${logs.get(a.name)!.last}"\n    recent conversation and live screen: ${logs.get(a.name)!.path}` : ''}`)
+    logs?.get(a.name) ? `; recent conversation and live screen: ${logs.get(a.name)}` : ''}`)
   const lists = ideas.lists().map(l => `${l.name} (${l.open} open)`).join(', ')
   return `Agents:\n${agents.join('\n') || '- none running'}\nIdea lists: ${lists}\nTime: ${new Date().toLocaleString()}`
 }
