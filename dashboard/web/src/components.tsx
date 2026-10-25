@@ -155,7 +155,14 @@ export function MenuHost() {
     if (e.target !== e.currentTarget && !ghost.current?.contains(e.target as Node)) return
     e.preventDefault() // the tap that closes the menu must not also land on the row or button under it
     // lifting the finger after a long press sends a tap that lands on the backdrop; don't let it close the menu
-    if (Date.now() - openedAt.current > 600) setStack([])
+    if (Date.now() - openedAt.current > 600) close()
+  }
+  // closing removes the backdrop, and iOS can still deliver that tap's click to whatever was under it: eat it
+  const close = () => {
+    setStack([])
+    const eat = (ev: Event) => { ev.preventDefault(); ev.stopPropagation() }
+    addEventListener('click', eat, { capture: true, once: true })
+    setTimeout(() => removeEventListener('click', eat, { capture: true }), 500)
   }
   const top = stack.at(-1)
   const open = !!top
