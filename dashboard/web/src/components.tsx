@@ -101,7 +101,8 @@ export function useHold(onHold: (x: number, y: number) => void) {
   const start = useRef({ x: 0, y: 0 })
   const release = () => {
     clearTimeout(timer.current)
-    setTimeout(() => { document.documentElement.classList.remove('holding'); if (fired.current) getSelection()?.removeAllRanges() }, 300)
+    // once the menu is up it keeps the page unselectable until it closes (MenuHost)
+    setTimeout(() => { if (!document.querySelector('.menu-overlay')) document.documentElement.classList.remove('holding') }, 300)
   }
   return {
     onContextMenu: (e: React.MouseEvent) => { e.preventDefault(); onHold(e.clientX, e.clientY) },
@@ -150,15 +151,26 @@ export function MenuHost() {
     showMenu = m => { openedAt.current = Date.now(); setStack(m ? [m] : []) }
     return () => { showMenu = () => {} }
   }, [])
-  // lifting the finger after a long press sends a tap that lands on the backdrop; don't let it close the menu
-  const dismiss = (e: React.SyntheticEvent) => { if (e.target === e.currentTarget && Date.now() - openedAt.current > 600) setStack([]) }
+  const dismiss = (e: React.SyntheticEvent) => {
+    if (e.target !== e.currentTarget && !ghost.current?.contains(e.target as Node)) return
+    e.preventDefault() // the tap that closes the menu must not also land on the row or button under it
+    // lifting the finger after a long press sends a tap that lands on the backdrop; don't let it close the menu
+    if (Date.now() - openedAt.current > 600) setStack([])
+  }
   const top = stack.at(-1)
+  const open = !!top
   useEffect(() => {
-    if (!top) return
+    if (!open) return
     const esc = (e: KeyboardEvent) => e.key === 'Escape' && setStack([])
+    // holding on past the menu opening is still a long press to iOS: nothing on the page may be selected meanwhile
+    const html = document.documentElement
+    const unselect = () => getSelection()?.removeAllRanges()
+    html.classList.add('holding')
+    unselect()
     addEventListener('keydown', esc)
-    return () => removeEventListener('keydown', esc)
-  }, [top])
+    document.addEventListener('selectionchange', unselect)
+    return () => { removeEventListener('keydown', esc); document.removeEventListener('selectionchange', unselect); html.classList.remove('holding') }
+  }, [open])
   const root = stack[0]
   const pop = root?.from && isPhone() ? anchored(root.from, Math.max(...stack.map(m => m!.items.length)) + 1) : null
   // a lifted copy of the held row sits above the dimmed page

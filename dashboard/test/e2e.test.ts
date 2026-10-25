@@ -84,7 +84,7 @@ describe('fake agent through the API', () => {
 
   it('takes a photo upload as a JPEG on the Mac and serves it back; refuses non-photos', async () => {
     const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg==', 'base64')
-    const up = (body: Buffer) => fetch(`http://127.0.0.1:${port}/api/uploads`, { method: 'POST', headers: { 'X-Fleet-Key': key }, body })
+    const up = (body: Buffer) => fetch(`http://127.0.0.1:${port}/api/uploads`, { method: 'POST', headers: { 'X-Fleet-Key': key }, body: new Uint8Array(body) })
     const r = await up(png)
     const { path } = await r.json()
     expect(path).toMatch(/\/uploads\/[\w-]+\.jpg$/)
