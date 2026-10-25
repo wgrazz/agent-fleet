@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { api, type Idea, type List } from './api.ts'
 import { Dialog, InboxIcon, isPhone, SparkIcon, STATUS_LABEL, useHold } from './components.tsx'
+import type { Step } from './steps.ts'
 
 export const PRIORITY = ['None', 'Low', 'Medium', 'High']
 
@@ -305,5 +306,49 @@ export function PriorityPane({ items, selected, onChange, onError, onMenu }: {
         {!items.length && <div className="empty">Nothing has a priority yet. Tap <b>Rank with Claude</b> to rank all your open ideas, ask Jarvis “what should I do next?”, or set one on any idea.</div>}
       </div>
     </section>
+  )
+}
+
+/** Steps from an agent's reply become a checklist. Untick any you don't want; a new list name makes that list. */
+export function AddTodos({ plan, agent, onClose }: { plan: { title: string; steps: Step[] }; agent?: string; onClose: () => void }) {
+  const [keep, setKeep] = useState(() => plan.steps.map(() => true))
+  const [list, setList] = useState(plan.title.slice(0, 60) || 'For you')
+  const [names, setNames] = useState<string[]>([])
+  const [state, setState] = useState<'idle' | 'busy' | 'done'>('idle')
+  const [error, setError] = useState('')
+  useEffect(() => { api.get<List[]>('/api/lists').then(ls => setNames(ls.map(l => l.name))).catch(() => {}) }, [])
+  const picked = plan.steps.filter((_, n) => keep[n])
+  const add = () => {
+    setState('busy')
+    api.post('/api/ideas/many', { list: list.trim(), agent, items: picked }).then(() => setState('done')).catch(e => { setError(e.message); setState('idle') })
+  }
+  return (
+    <Dialog title={state === 'done' ? 'Added' : 'Add to-dos'} onClose={onClose}>
+      {state === 'done' ? (
+        <>
+          <p className="dialog-text">{picked.length} to-do{picked.length > 1 ? 's' : ''} in {list.trim() || 'For you'}{agent ? `, each linked back to ${agent}` : ''}.</p>
+          <div className="form-actions">
+            <button className="btn" onClick={onClose}>Close</button>
+            <a className="btn primary" href={`#/ideas/${encodeURIComponent(list.trim() || 'For you')}`} onClick={onClose}>Open list</a>
+          </div>
+        </>
+      ) : (
+        <form className="form" onSubmit={e => { e.preventDefault(); add() }}>
+          <div className="todo-pick">
+            {plan.steps.map((s, n) => (
+              <label key={n}><input type="checkbox" checked={keep[n]} onChange={() => setKeep(k => k.map((v, j) => j === n ? !v : v))} />
+                <span>{s.text}{s.notes && <small> · with notes</small>}</span></label>
+            ))}
+          </div>
+          <label>List<input list="todo-lists" value={list} onChange={e => setList(e.target.value)} maxLength={60} placeholder="For you" /></label>
+          <datalist id="todo-lists">{names.map(n => <option key={n} value={n} />)}</datalist>
+          {error && <p className="hint">{error}</p>}
+          <div className="form-actions">
+            <button type="button" className="btn" onClick={onClose}>Cancel</button>
+            <button type="submit" className="btn primary" disabled={!picked.length || state === 'busy'}>Add {picked.length}</button>
+          </div>
+        </form>
+      )}
+    </Dialog>
   )
 }

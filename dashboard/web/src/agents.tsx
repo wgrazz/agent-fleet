@@ -1,6 +1,8 @@
 import { Fragment, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { api, remember, type Conversation, type LiveAgent, type Message, type Paused, type RepoChanges } from './api.ts'
 import { activity, age, ago, Avatar, isPhone, ORDER, PauseIcon, SendIcon, STATUS_LABEL, TermIcon, toolLabel, useHold } from './components.tsx'
+import { AddTodos } from './ideas.tsx'
+import { planSteps } from './steps.ts'
 import { ScreenView } from './terminal.tsx'
 
 // ---------- list ----------
@@ -164,7 +166,7 @@ export function AgentView({ agent, onBack, onTerminal, onPause, onMenu, onAdopt,
       {!agent.controllable ? (
         chat ? (
           <>
-            <ChatView tool={agent.tool} id={agent.session_id} live working={agent.status === 'working' ? agent.working_line || 'Working…' : agent.status === 'waiting' ? 'Waiting on a background job, it picks up again when that finishes' : ''} />
+            <ChatView tool={agent.tool} id={agent.session_id} agent={agent.name} live working={agent.status === 'working' ? agent.working_line || 'Working…' : agent.status === 'waiting' ? 'Waiting on a background job, it picks up again when that finishes' : ''} />
             <div className="ended">This one runs in a plain terminal window, so it's read-only here. <b>Add to Fleet</b> moves it into Fleet with the same conversation, so you can answer it from anywhere.</div>
           </>
         ) : (
@@ -174,7 +176,7 @@ export function AgentView({ agent, onBack, onTerminal, onPause, onMenu, onAdopt,
           </div>
         )
       ) : shown === 'chat' ? (
-        <ChatView tool={agent.tool} id={agent.session_id} live waiting={agent.status === 'needs_you' ? agent.message : ''}
+        <ChatView tool={agent.tool} id={agent.session_id} agent={agent.name} live waiting={agent.status === 'needs_you' ? agent.message : ''}
           working={agent.status === 'working' ? agent.working_line || 'Working…' : agent.status === 'waiting' ? 'Waiting on a background job, it picks up again when that finishes' : ''} pending={pending} onSeen={() => setPending('')} peek={agent.name} />
       ) : shown === 'changes' ? (
         <ChangesView name={agent.name} />
@@ -255,10 +257,11 @@ const QueueIcon = () => <svg width="16" height="16" viewBox="0 0 16 16" aria-hid
 // ---------- chat ----------
 
 /** A conversation as chat bubbles, read from the tool's own log. Live views poll and stick to the bottom. */
-export function ChatView({ tool, id, live, waiting, working, pending, onSeen, peek }: {
-  tool: string; id: string; live?: boolean; waiting?: string; working?: string; pending?: string; onSeen?: () => void; peek?: string
+export function ChatView({ tool, id, live, waiting, working, pending, onSeen, peek, agent }: {
+  tool: string; id: string; live?: boolean; waiting?: string; working?: string; pending?: string; onSeen?: () => void; peek?: string; agent?: string
 }) {
   const [messages, setMessages] = useState<Message[] | null>(null)
+  const [todos, setTodos] = useState<ReturnType<typeof planSteps> | null>(null)
   const [error, setError] = useState('')
   const box = useRef<HTMLDivElement>(null)
   const pinned = useRef(true)
@@ -295,14 +298,22 @@ export function ChatView({ tool, id, live, waiting, working, pending, onSeen, pe
   }
   return (
     <div className="chat" ref={box} onScroll={e => { const el = e.currentTarget; pinned.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80 }}>
-      {blocks.map((b, i) => Array.isArray(b) ? <ToolRun key={i} tools={b} /> : (
-        <div key={i} className={`bubble ${b.role}`}><Markdown text={b.text} /></div>
-      ))}
+      {blocks.map((b, i) => {
+        if (Array.isArray(b)) return <ToolRun key={i} tools={b} />
+        const plan = b.role === 'assistant' ? planSteps(b.text) : null
+        return (
+          <Fragment key={i}>
+            <div className={`bubble ${b.role}`}><Markdown text={b.text} /></div>
+            {plan && plan.steps.length > 1 && <button className="todo-add" onClick={() => setTodos(plan)}>＋ Add {plan.steps.length} to-dos</button>}
+          </Fragment>
+        )
+      })}
       {pending && !seen && <div className="bubble user sending">{pending}</div>}
       {working && <div className="bubble working"><span className="dots"><i /><i /><i /></span>{working}</div>}
       {working && peek && <LivePeek name={peek} />}
       {waiting && <div className="bubble waiting">Waiting for you: {waiting}</div>}
       {!messages.length && <div className="empty">No messages yet.</div>}
+      {todos && <AddTodos plan={todos} agent={agent} onClose={() => setTodos(null)} />}
     </div>
   )
 }

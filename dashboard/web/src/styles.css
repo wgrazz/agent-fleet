@@ -269,6 +269,11 @@ details.ai-note { display: block; }
 .bubble code { font: 12px var(--mono); background: rgba(127,127,127,.15); padding: 1px 4px; border-radius: 4px; }
 .bubble pre code { background: none; padding: 0; }
 .bubble a { color: inherit; text-decoration: underline; }
+.todo-add { align-self: flex-start; margin: -2px 0 2px 4px; background: none; border: 0; padding: 2px 4px; font-size: 12px; font-weight: 500; color: var(--accent); cursor: pointer; }
+.todo-pick { display: flex; flex-direction: column; gap: 2px; max-height: 50vh; overflow-y: auto; }
+.form .todo-pick label { flex-direction: row; align-items: flex-start; gap: 8px; font-size: 13.5px; font-weight: 400; color: var(--text); padding: 6px 2px; border-bottom: 1px solid var(--line); }
+.todo-pick input { margin-top: 3px; flex: 0 0 auto; }
+.todo-pick small { color: var(--faint); }
 .toolline { align-self: flex-start; font: 11.5px var(--mono); color: var(--faint); padding: 0 6px; max-width: 92%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .toolline .link { font: inherit; color: var(--faint); }
 .toolline.sub { padding-left: 16px; }

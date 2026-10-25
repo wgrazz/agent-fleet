@@ -531,6 +531,16 @@ const routes: [string, RegExp, Route][] = [
     if (!text) throw new HttpError(400, 'empty idea')
     return { id: ideas.addIdea(text, str(b.list, 60).trim() || 'Brain Dump') }
   }],
+  // steps picked out of an agent's reply ("Add to-dos" under a chat message)
+  ['POST', /^\/api\/ideas\/many$/, async req => {
+    const b = await body(req)
+    const list = str(b.list, 60).trim() || 'For you'
+    const agent = str(b.agent, 80) || undefined
+    const items = (Array.isArray(b.items) ? b.items.slice(0, 200) : []).map((i: any) => ({ text: str(i?.text, 10_000).trim(), notes: str(i?.notes, 50_000) })).filter((i: { text: string }) => i.text)
+    if (!items.length) throw new HttpError(400, 'no to-dos')
+    for (const i of items) ideas.addIdea(i.text, list, { notes: i.notes, agent })
+    return { list, added: items.length }
+  }],
   ['PATCH', /^\/api\/ideas\/(\d+)$/, async (req, [id]) => {
     ideaOr404(id)
     const b = await body(req)

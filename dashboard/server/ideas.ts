@@ -91,11 +91,11 @@ export function ideas(list?: string): Idea[] {
 
 export const idea = (id: number) => db.prepare('SELECT * FROM ideas WHERE id = ?').get(id) as Idea | undefined
 
-export function addIdea(text: string, list = 'Brain Dump', extra: { source?: string; done?: boolean; notes?: string } = {}) {
+export function addIdea(text: string, list = 'Brain Dump', extra: { source?: string; done?: boolean; notes?: string; agent?: string } = {}) {
   ensureList(list)
   const pos = (db.prepare('SELECT coalesce(max(position), max(id), 0) + 1 AS p FROM ideas WHERE list = ?').get(list) as { p: number }).p
-  const r = db.prepare('INSERT INTO ideas (list, text, created_at, position, source, done, done_at, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
-    .run(list, text, now(), pos, extra.source ?? null, extra.done ? 1 : 0, extra.done ? now() : null, extra.notes ?? '')
+  const r = db.prepare('INSERT INTO ideas (list, text, created_at, position, source, done, done_at, notes, agent) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
+    .run(list, text, now(), pos, extra.source ?? null, extra.done ? 1 : 0, extra.done ? now() : null, extra.notes ?? '', extra.agent ?? null)
   return Number(r.lastInsertRowid)
 }
 

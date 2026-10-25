@@ -2,6 +2,7 @@ import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
+import { planSteps } from '../web/src/steps.ts'
 
 process.env.FLEET_DIR = mkdtempSync(join(tmpdir(), 'fleet-ideas-'))
 const m = await import('../server/ideas.ts')
@@ -50,4 +51,27 @@ describe('ideas', () => {
     m.updateList(m.lists().find(l => l.name === 'Old')!.id, { name: 'New' })
     expect(m.idea(id)!.list).toBe('New')
   })
+})
+
+describe('planSteps', () => {
+  it('top-level items are steps; sub-bullets and code under them are notes', () => {
+    const r = planSteps([
+      '## Vercel setup', '', 'Do these in order:', '',
+      '1. **Add the env var** in Vercel', '   - name: `API_URL`', '   - all environments',
+      '2. Redeploy:', '```', 'vercel --prod', '```', '',
+      '3. Check the site', '', 'That should be it.',
+    ].join('\n'))
+    expect(r.title).toBe('Vercel setup')
+    expect(r.steps).toEqual([
+      { text: 'Add the env var in Vercel', notes: '- name: `API_URL`\n- all environments' },
+      { text: 'Redeploy:', notes: '```\nvercel --prod\n```' },
+      { text: 'Check the site', notes: '' },
+    ])
+  })
+  it('checkboxes and plain bullets; headings split phases without becoming steps', () => {
+    const r = planSteps('**Phase 1**\n- [ ] Buy the domain\n- [x] Point DNS\n\n**Phase 2**\n- Launch')
+    expect(r.title).toBe('Phase 1')
+    expect(r.steps.map(s => s.text)).toEqual(['Buy the domain', 'Point DNS', 'Launch'])
+  })
+  it('no list, no steps', () => expect(planSteps('All done, pushed as abc123.').steps).toEqual([]))
 })
