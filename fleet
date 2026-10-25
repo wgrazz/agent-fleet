@@ -13,6 +13,8 @@ SEE
   fleet                  the agents you started, their status, what they're doing, and any follow-up waiters
   fleet all              same, plus background helpers (desktop apps, Codex service, chrome bridge, claude-mem)
   fleet json             the same agents as JSON (what the dashboard reads)
+  fleet read chat NAME [N]   NAME's last N messages (default 40), from the tool's own log
+  fleet read /api/PATH [N]   anything the dashboard knows, read-only: agents, changes, history, ideas, paused, usage
 
 LATER
   fleet pause NAME [--until WHEN]   stop NAME's agent but keep its conversation; WHEN (18:30, +2h) brings it back
@@ -563,6 +565,34 @@ def unpause(target, detach=False):
     if detach:
         return print(f'Resumed {row["name"]}.')
     attach(row['name'])
+
+
+def read(args):
+    """Read-only look at what the dashboard knows (only ever GETs). Jarvis uses it to answer questions about agents."""
+    last = int(args.pop()) if len(args) > 1 and args[-1].isdigit() else 40
+    if args[:1] == ['chat'] and len(args) == 2:
+        agent = next((a for a in api('GET', '/api/agents') if a['name'] == args[1]), None)
+        if not agent:
+            sys.exit(f'No agent named {args[1]}.')
+        if not agent['session_id']:
+            sys.exit(f"{args[1]} has no readable conversation log; try fleet peek {args[1]}.")
+        path = f"/api/transcript?tool={agent['tool']}&id={urllib.parse.quote(agent['session_id'])}"
+    elif len(args) == 1 and args[0].startswith('/api/'):
+        path = args[0]
+    else:
+        sys.exit('fleet read chat NAME [N]  |  fleet read /api/PATH [N]')
+    try:
+        data = api('GET', path, timeout=15)
+    except urllib.error.HTTPError as e:
+        sys.exit(f'{e.code}: {e.read().decode()[:300]}')
+    except OSError:
+        sys.exit('The dashboard is not running (fleet dash install).')
+    if isinstance(data, dict) and isinstance(data.get('messages'), list):
+        for m in data['messages'][-last:]:
+            text = m['text'] if len(m['text']) < 3000 else m['text'][:3000] + ' …'
+            print(f"[tool] {text}" if m['role'] == 'tool' else f"{m['role'].upper()}: {text}\n")
+        return
+    print(json.dumps(data, indent=1)[:60_000])
 
 
 def idea(args):
@@ -1197,6 +1227,8 @@ def main(args):
         return unpause(rest[0], detach='--detach' in rest[1:])
     if cmd == 'idea':
         return idea(rest)
+    if cmd == 'read' and rest:
+        return read(rest)
     if cmd == 'import-notes':
         return import_notes(rest)
     if cmd == 'hook' and len(rest) == 1:

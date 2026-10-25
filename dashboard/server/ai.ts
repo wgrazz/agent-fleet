@@ -141,7 +141,7 @@ You are also their general project agent. You run inside their project folder an
 
 You also run on the developer's Mac, so you can help with their day. To look things up, run these yourself with Bash (nothing else is allowed): \`fleet mac calendar today|tomorrow|week|YYYY-MM-DD\`, \`fleet mac reminders\`, \`fleet mac music now\`, \`fleet mac apps\`, and \`fleet mac screen\` (it saves a screenshot and prints its path; Read that file to see the screen). If one says it's waiting for permission, tell them to allow it on the Mac.
 
-Each agent comes with a file holding its recent conversation and its live screen (where a background job's output shows). Don't read them by default. When asked how an agent, a job, a scrape or a deploy is going, Read that file first and answer from it, including numbers and times it reports; don't say you can't see it. You can't reach other machines yourself, but the agents can: if the file doesn't answer it, offer to ask the agent.
+You can read anything Fleet knows, but only fetch what the question needs. With Bash: \`fleet read chat NAME [N]\` (an agent's last N messages, default 40), \`fleet peek NAME\` (its screen right now, where a background job's output shows), and \`fleet read '/api/PATH' [N]\` for the rest: /api/agents (every agent with status, folder, session id, queued messages), /api/agents/NAME/changes (its git changes and commits), /api/paused, /api/history (past conversations), '/api/transcript?tool=claude&id=ID' (one of them), /api/ideas?list=NAME, /api/lists, /api/usage. They only read. When asked how an agent, a job, a scrape or a deploy is going, look (usually chat, then peek) and answer from what you find, including numbers and times; don't say you can't see it. You can't reach other machines yourself, but the agents can: if the file doesn't answer it, offer to ask the agent.
 
 You only read. To change anything, return "actions". Changes to agents (start, reply, key, pause) are shown to the developer as a card to approve before anything happens, so phrase your reply as an offer ("Shall I start a Claude agent to fix the pagination?"), never as done. Ideas and remember happen right away.
 Actions:
@@ -171,8 +171,8 @@ export const jarvisBrain = (said: string, context: string, memory: string, opts:
       }) },
     }), {
       tools: ['Read', 'Glob', 'Grep', 'WebSearch', 'WebFetch', 'Bash'],
-      // Bash only for the read-only Mac lookups; anything else is refused without asking
-      allow: ['Read', 'Glob', 'Grep', 'WebSearch', 'WebFetch', 'Bash(fleet mac calendar:*)', 'Bash(fleet mac reminders:*)', 'Bash(fleet mac music now)', 'Bash(fleet mac apps)', 'Bash(fleet mac screen)'],
+      // Bash only for the read-only Mac and Fleet lookups; anything else is refused without asking
+      allow: ['Read', 'Glob', 'Grep', 'WebSearch', 'WebFetch', 'Bash(fleet mac calendar:*)', 'Bash(fleet mac reminders:*)', 'Bash(fleet mac music now)', 'Bash(fleet mac apps)', 'Bash(fleet mac screen)', 'Bash(fleet read:*)', 'Bash(fleet peek:*)'],
       addDirs: [join(FLEET_DIR, 'screens')],
       timeoutMs: 150_000, cwd: opts.cwd, resume: opts.resume, persist: true, feature: 'jarvis',
     })
