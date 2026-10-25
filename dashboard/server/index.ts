@@ -1,13 +1,13 @@
 // Fleet dashboard server: binds to 127.0.0.1 only (`tailscale serve` publishes it to the tailnet over HTTPS)
 // and requires the access key from ~/.fleet/config.json on every API and WebSocket request.
 import { randomBytes, timingSafeEqual } from 'node:crypto'
-import { createReadStream, existsSync, mkdirSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
+import { createReadStream, existsSync, mkdirSync, readdirSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import { homedir } from 'node:os'
 import { extname, join, normalize } from 'node:path'
 import { improvePrompt, interviewPrompt, jarvisBrain, recommend, type JarvisAction } from './ai.ts'
 import { changes } from './git.ts'
-import { conversations, transcript } from './history.ts'
+import { conversations, hasTranscript, transcript } from './history.ts'
 import * as ideas from './ideas.ts'
 import { notify, publicKey, subscribe } from './push.ts'
 import { alerts, ingestHook, list, poll, startPolling } from './state.ts'
@@ -154,8 +154,31 @@ function usageText(u: Awaited<ReturnType<typeof usage>>) {
   return u.map(p => `${p.tool}: ${p.windows.length ? p.windows.map(w => `${w.label} ${w.pct}% used`).join(', ') : 'unknown'}`).join('\n')
 }
 
-function jarvisContext() {
-  const agents = list().map(a => `- ${a.name} (${a.tool}, ${a.status === 'waiting' ? 'turn done, waiting on its own background job, not on you' : a.status.replace('_', ' ')})${a.message ? `: asking "${a.message}"` : a.task ? `: ${a.task.replace(/^\[[a-z]+\]\s*/, '')}` : ''}${a.quick_replies.length ? ` options: ${a.quick_replies.map(q => `${q.key}=${q.label}`).join(', ')}` : ''}${a.controllable ? '' : ' (read-only)'}`)
+// What each agent has been saying plus its live screen, written where Jarvis can Read them, so "how's the scrape
+// going?" gets answered from the agent's own reports and the job output on its screen.
+const LOGS = join(FLEET_DIR, 'screens', 'agents')
+type AgentLog = { path: string; last: string }
+async function agentLogs() {
+  mkdirSync(LOGS, { recursive: true, mode: 0o700 })
+  const out = new Map<string, AgentLog>()
+  await Promise.all(list().map(async a => {
+    const t = a.session_id && hasTranscript(a.tool) ? await transcript(a.tool, a.session_id).catch(() => null) : null
+    const msgs = t?.messages.slice(-30) ?? []
+    const screen = a.controllable ? liveTail(await capture(a.name).catch(() => ''), 40) : []
+    if (!msgs.length && !screen.length) return
+    const path = join(LOGS, `${a.name.replace(/[^\w.-]/g, '_')}.txt`)
+    const convo = msgs.map(m => (m.role === 'tool' ? `  [tool] ${m.text}` : `${m.role === 'user' ? 'DEVELOPER' : 'AGENT'}: ${m.text.slice(0, 4000)}`)).join('\n\n')
+    writeFileSync(path, `${a.name}: recent conversation, oldest first\n\n${convo || '(none)'}\n\n--- its screen right now ---\n${screen.join('\n')}\n`, { mode: 0o600 })
+    out.set(a.name, { path, last: msgs.findLast(m => m.role === 'assistant')?.text.replace(/\s+/g, ' ').slice(0, 300) ?? '' })
+  }))
+  const keep = new Set([...out.values()].map(l => l.path))
+  for (const f of readdirSync(LOGS)) if (!keep.has(join(LOGS, f))) unlinkSync(join(LOGS, f))
+  return out
+}
+
+function jarvisContext(logs?: Map<string, AgentLog>) {
+  const agents = list().map(a => `- ${a.name} (${a.tool}, ${a.status === 'waiting' ? 'turn done, waiting on its own background job, not on you' : a.status.replace('_', ' ')})${a.message ? `: asking "${a.message}"` : a.task ? `: ${a.task.replace(/^\[[a-z]+\]\s*/, '')}` : ''}${a.quick_replies.length ? ` options: ${a.quick_replies.map(q => `${q.key}=${q.label}`).join(', ')}` : ''}${a.controllable ? '' : ' (read-only)'}${
+    logs?.get(a.name) ? `\n    last said: "${logs.get(a.name)!.last}"\n    recent conversation and live screen: ${logs.get(a.name)!.path}` : ''}`)
   const lists = ideas.lists().map(l => `${l.name} (${l.open} open)`).join(', ')
   return `Agents:\n${agents.join('\n') || '- none running'}\nIdea lists: ${lists}\nTime: ${new Date().toLocaleString()}`
 }
@@ -242,12 +265,13 @@ async function runJarvis(said: string, opts: JarvisOpts = {}) {
   if (b.jarvis_pct >= b.max_pct && !opts.override)
     return reply(`I've used about ${b.jarvis_pct.toFixed(1)} percent of your weekly Claude limit this week, past the ${b.max_pct} percent cap you set. Quick commands still work; tap Allow once to go past it.`, { blocked: said, mode: 'claude' })
   const project = config.cwd && existsSync(config.cwd) ? config.cwd : homedir()
+  const context = jarvisContext(await agentLogs().catch(e => { console.error('agent logs:', e); return undefined }))
   let answer
   try {
-    answer = await jarvisBrain(said, jarvisContext(), J.memory(), { cwd: project, resume: t.session_id ?? undefined })
+    answer = await jarvisBrain(said, context, J.memory(), { cwd: project, resume: t.session_id ?? undefined })
   } catch (e) {
     if (!t.session_id) throw e
-    answer = await jarvisBrain(said, jarvisContext(), J.memory(), { cwd: project }) // the old session is gone: carry on fresh
+    answer = await jarvisBrain(said, context, J.memory(), { cwd: project }) // the old session is gone: carry on fresh
   }
   if (answer.session_id) J.setThreadSession(t.id, answer.session_id)
 
