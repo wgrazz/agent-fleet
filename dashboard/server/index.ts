@@ -497,6 +497,11 @@ const routes: [string, RegExp, Route][] = [
     return { state: verb === 'approve' ? 'approved' : 'declined', result }
   }],
 
+  ['POST', /^\/api\/jarvis\/log$/, async req => {
+    console.log(`jarvis voice: ${str((await body(req)).event, 200)}`)
+    return { ok: true }
+  }],
+
   // ---------- ideas ----------
   ['GET', /^\/api\/lists$/, async () => ideas.lists()],
   ['POST', /^\/api\/lists$/, async req => {

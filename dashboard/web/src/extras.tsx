@@ -134,16 +134,16 @@ function speakOnDevice(text: string): Promise<void> {
   })
 }
 
-// Natural voices are made on the Mac and played here. iPhones only let a page play sound it started during a tap,
-// so the first tap in Jarvis "unlocks" this player with a silent clip; replies can then play on it.
-const player = typeof Audio !== 'undefined' ? new Audio() : null
-let unlocked = false
-const SILENT = 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQAAAAA='
+// Natural voices are made on the Mac and played here through Web Audio. Not an <audio> element: on iPhones that
+// keeps hold of the audio session after it plays, and the next listen then hears nothing (the second turn of a voice
+// conversation went dead). iPhones only let a page make sound after a tap, so the first tap in Jarvis unlocks it.
+const AC: typeof AudioContext | undefined = (window as any).AudioContext ?? (window as any).webkitAudioContext
+let ctx: AudioContext | null = null
+let source: AudioBufferSourceNode | null = null
 export function unlockAudio() {
-  if (!player || unlocked) return
-  unlocked = true
-  player.src = SILENT
-  player.play().catch(() => { unlocked = false })
+  if (!AC) return
+  ctx ??= new AC()
+  if (ctx.state !== 'running') ctx.resume().catch(() => {})
 }
 
 let voiceSettings: Settings | null = null
@@ -156,33 +156,42 @@ export async function speak(text: string, override?: { engine: string; voice: st
   if (!text) return
   const me = ++speaking
   const s = override ?? await loadVoiceSettings().then(v => v && { engine: v.voice_engine, voice: v.voice, speed: v.voice_speed })
-  if (!s || s.engine === 'device' || !player) return speakOnDevice(text)
+  if (!s || s.engine === 'device' || !AC) return speakOnDevice(text)
+  unlockAudio()
+  const ac = ctx!
   const make = (chunk: string) => fetch('/api/tts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: chunk, engine: s.engine, voice: s.voice, speed: s.speed }) })
-    .then(async res => { if (!res.ok) throw new Error(await res.text()); return URL.createObjectURL(await res.blob()) })
+    .then(async res => { if (!res.ok) throw new Error(await res.text()); return ac.decodeAudioData(await res.arrayBuffer()) })
   const chunks = speechChunks(text)
   try {
     window.speechSynthesis?.cancel()
     let next = make(chunks[0])
     for (let i = 0; i < chunks.length; i++) {
-      const url = await next
+      const buf = await next
       if (i + 1 < chunks.length) next = make(chunks[i + 1])
       if (me !== speaking) return
-      player.pause()
-      player.src = url
-      await new Promise<void>((resolve, reject) => {
-        player.onended = () => { URL.revokeObjectURL(url); resolve() }
-        player.onpause = () => resolve() // interrupted
-        player.onerror = () => reject(new Error('playback failed'))
-        player.play().catch(reject)
+      if (ac.state !== 'running') await ac.resume()
+      vlog(`play ${i + 1}/${chunks.length} ctx=${ac.state}`)
+      source?.stop()
+      await new Promise<void>(resolve => {
+        const src = ac.createBufferSource()
+        src.buffer = buf
+        src.connect(ac.destination)
+        src.onended = () => resolve() // finished, or stopSpeaking stopped it
+        source = src
+        src.start()
       })
-      if (me !== speaking || (player.paused && !player.ended)) return
+      if (me !== speaking) return
     }
-  } catch {
+  } catch (e) {
+    vlog(`play failed: ${(e as Error).message}`)
     if (me === speaking) return speakOnDevice(text) // the Mac voice isn't available right now: still answer out loud
   }
 }
 
-export const stopSpeaking = () => { speaking++; player?.pause(); window.speechSynthesis?.cancel() }
+export const stopSpeaking = () => { speaking++; try { source?.stop() } catch {} ; window.speechSynthesis?.cancel() }
+
+/** Voice-loop events go to the Mac's server log, so a conversation that dies on the phone can be traced afterwards. */
+export const vlog = (event: string) => { api.post('/api/jarvis/log', { event }).catch(() => {}) }
 
 
 export const spokenAlerts = { get: () => remember.get('jarvis.alerts') === '1', set: (on: boolean) => remember.set('jarvis.alerts', on ? '1' : '') }
@@ -305,7 +314,7 @@ export function Jarvis({ onClose, onChanged, asPage, autoTalk }: { onClose: () =
       if (voiceRef.current === 'listening') turn(said.trim())
     }
     const stopSoon = (ms: number) => { clearTimeout(pause); pause = window.setTimeout(() => { try { r.stop() } catch {} ; timers.push(window.setTimeout(() => finish(heard), 1200)) }, ms) }
-    r.onstart = () => { started = true }
+    r.onstart = () => { started = true; vlog('mic open') }
     r.onresult = (e: any) => {
       heard = joinResults(Array.from(e.results, (x: any) => x[0].transcript as string))
       setCaption(heard)
@@ -313,16 +322,17 @@ export function Jarvis({ onClose, onChanged, asPage, autoTalk }: { onClose: () =
     }
     r.onerror = (e: any) => {
       const err = e?.error ?? ''
+      vlog(`mic error ${err}`)
       if (err === 'no-speech' || err === 'aborted') return // onend follows
       if ((err === 'not-allowed' || err === 'service-not-allowed') && !talked.current)
         return (finished = true, endVoice("I can't use the microphone here. Allow it in Settings, or type instead."))
       finished = true
       needTap() // the mic is busy or iOS wants a tap before listening again
     }
-    r.onend = () => finish(heard)
+    r.onend = () => { vlog(`mic end, heard ${heard.length} chars`); finish(heard) }
     rec.current = r
-    try { r.start() } catch { return needTap() }
-    timers.push(window.setTimeout(() => { if (!started && !finished) { finished = true; try { r.abort() } catch {} ; needTap() } }, 2500))
+    try { r.start() } catch (e) { vlog(`mic start threw ${(e as Error).message}`); return needTap() }
+    timers.push(window.setTimeout(() => { if (!started && !finished) { vlog('mic never opened'); finished = true; try { r.abort() } catch {} ; needTap() } }, 2500))
     timers.push(window.setTimeout(() => { if (!heard) stopSoon(0) }, 9000)) // nothing said: count it as a silence
   }
   const turn = async (said: string) => {
@@ -349,7 +359,7 @@ export function Jarvis({ onClose, onChanged, asPage, autoTalk }: { onClose: () =
     setVoice('listening')
     setTimeout(listenOnce, 250) // let the speaker go quiet so the mic doesn't hear the end of the reply
   }
-  const needTap = () => { if (voiceRef.current !== 'off') { setCaption(''); setVoice('tap') } }
+  const needTap = () => { vlog('needs a tap'); if (voiceRef.current !== 'off') { setCaption(''); setVoice('tap') } }
   const startVoice = () => {
     if (!Recognition) return setLines(l => [...l, { who: 'bot', text: "Voice conversations aren't available in this browser. Type, or use the keyboard's mic key." }])
     unlockAudio()
