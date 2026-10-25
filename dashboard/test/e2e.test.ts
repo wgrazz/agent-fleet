@@ -82,6 +82,18 @@ describe('fake agent through the API', () => {
     expect((await agent()).queued).toEqual([])
   })
 
+  it('takes a photo upload as a JPEG on the Mac and serves it back; refuses non-photos', async () => {
+    const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg==', 'base64')
+    const up = (body: Buffer) => fetch(`http://127.0.0.1:${port}/api/uploads`, { method: 'POST', headers: { 'X-Fleet-Key': key }, body })
+    const r = await up(png)
+    const { path } = await r.json()
+    expect(path).toMatch(/\/uploads\/[\w-]+\.jpg$/)
+    const got = await fetch(`http://127.0.0.1:${port}/api/uploads/${path.split('/').pop()}`, { headers: { 'X-Fleet-Key': key } })
+    expect(got.headers.get('content-type')).toBe('image/jpeg')
+    expect((await up(Buffer.from('not a photo'))).status).toBe(400)
+    expect((await fetch(`http://127.0.0.1:${port}/api/uploads/x.jpg`)).status).toBe(401)
+  })
+
   it('reports a crash with its exit code', async () => {
     await api('POST', `/api/agents/${name}/send`, { text: 'crash' })
     const a = await until(agent, a => a?.status === 'crashed')

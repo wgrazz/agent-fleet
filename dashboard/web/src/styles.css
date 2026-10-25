@@ -151,6 +151,17 @@ kbd { font: 600 10.5px var(--mono); opacity: .6; margin-right: 5px; }
 .comp .row { display: flex; align-items: flex-end; gap: 8px; padding: 2px 4px; }
 .comp textarea { flex: 1; border: 0; outline: 0; background: none; resize: none; max-height: 160px; field-sizing: content; padding: 4px 0; }
 .comp textarea::placeholder { color: var(--faint); }
+.attach { width: 28px; height: 28px; display: grid; place-items: center; flex-shrink: 0; color: var(--dim); border-radius: 8px; }
+.attach:hover { background: var(--chip); }
+.photos { display: flex; gap: 8px; padding: 4px 4px 8px; overflow-x: auto; }
+.photo { position: relative; flex: 0 0 auto; }
+.photo img { width: 64px; height: 64px; object-fit: cover; border-radius: 9px; display: block; }
+.photo.busy img { opacity: .45; }
+.photo.failed img { opacity: .3; outline: 2px solid var(--bad, #ff3b30); }
+.photo .x { position: absolute; top: -6px; right: -6px; width: 20px; height: 20px; border-radius: 50%; background: rgba(0,0,0,.65); color: #fff; font-size: 13px; line-height: 20px; text-align: center; }
+.bubble-photo { display: block; max-width: 220px; max-height: 260px; border-radius: 10px; margin-top: 6px; }
+.bubble.only-photos { background: none; padding: 0; }
+.bubble.only-photos .bubble-photo { margin-top: 0; }
 .send { width: 28px; height: 28px; border-radius: 8px; background: var(--accent); color: #fff; display: grid; place-items: center; flex-shrink: 0; }
 
 /* ---------- overlays ---------- */

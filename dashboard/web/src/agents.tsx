@@ -198,9 +198,27 @@ function Composer({ agent, send }: { agent: LiveAgent; send: (body: { text?: str
   const busy = agent.status === 'working'
   const [queuing, setQueuing] = useState<string[]>([]) // shown until the next poll lists them
   useEffect(() => setQueuing([]), [agent.queued.length])
+  // photos upload as soon as you pick them; the agent gets their paths on the Mac
+  const [photos, setPhotos] = useState<{ preview: string; path?: string; failed?: boolean }[]>([])
+  const picker = useRef<HTMLInputElement>(null)
+  const addPhotos = (files: FileList | null) => {
+    for (const f of Array.from(files ?? [])) {
+      const preview = URL.createObjectURL(f)
+      const set = (patch: object) => setPhotos(p => p.map(x => (x.preview === preview ? { ...x, ...patch } : x)))
+      setPhotos(p => [...p, { preview }])
+      fetch('/api/uploads', { method: 'POST', body: f })
+        .then(async r => { if (!r.ok) throw new Error(); set({ path: (await r.json()).path }) })
+        .catch(() => set({ failed: true }))
+    }
+  }
+  const dropPhoto = (preview: string) => { URL.revokeObjectURL(preview); setPhotos(p => p.filter(x => x.preview !== preview)) }
+  const uploading = photos.some(p => !p.path && !p.failed)
+  const ready = photos.filter(p => p.path)
   const submit = () => {
-    if (!text.trim()) return
-    const t = text
+    if ((!text.trim() && !ready.length) || uploading) return
+    const t = [text.trim(), ...ready.map(p => `[Photo: ${p.path}]`)].filter(Boolean).join('\n\n')
+    photos.forEach(p => URL.revokeObjectURL(p.preview))
+    setPhotos([])
     keep('')
     if (busy || agent.queued.length) {
       setQueuing(q => [...q, t])
@@ -236,7 +254,19 @@ function Composer({ agent, send }: { agent: LiveAgent; send: (body: { text?: str
           <button className="q mode" onClick={() => send({ key: 'BTab' })} title="Shift+Tab: cycle the agent's mode"><kbd>⇧⇥</kbd>{agent.mode || 'Mode'}</button>
         )}
       </div>
+      {photos.length > 0 && (
+        <div className="photos">
+          {photos.map(p => (
+            <span key={p.preview} className={`photo ${p.path ? '' : p.failed ? 'failed' : 'busy'}`} title={p.failed ? "Couldn't upload this one" : undefined}>
+              <img src={p.preview} alt="" />
+              <button className="x" onClick={() => dropPhoto(p.preview)} aria-label="Remove photo">×</button>
+            </span>
+          ))}
+        </div>
+      )}
       <div className="row">
+        <button className="attach" onClick={() => picker.current?.click()} aria-label="Add a photo" title="Take a photo or pick one"><PhotoIcon /></button>
+        <input ref={picker} type="file" accept="image/*" multiple hidden onChange={e => { addPhotos(e.target.files); e.target.value = '' }} />
         <textarea id="composer" rows={1} value={text} placeholder={busy ? `Queue a message for when ${agent.name} finishes…` : `Reply to ${agent.name}…`} enterKeyHint={busy ? 'done' : 'send'}
           onChange={e => keep(e.target.value)}
           onKeyDown={e => {
@@ -246,11 +276,15 @@ function Composer({ agent, send }: { agent: LiveAgent; send: (body: { text?: str
             }
             if (e.key === 'Escape') e.currentTarget.blur()
           }} />
-        <button className={`send ${busy ? 'queue' : ''}`} onClick={submit} aria-label={busy ? 'Queue' : 'Send'} title={busy ? 'Queue: sends when it finishes' : 'Send'} disabled={!text.trim()}>{busy ? <QueueIcon /> : <SendIcon />}</button>
+        <button className={`send ${busy ? 'queue' : ''}`} onClick={submit} aria-label={busy ? 'Queue' : 'Send'} title={busy ? 'Queue: sends when it finishes' : 'Send'} disabled={(!text.trim() && !ready.length) || uploading}>{busy ? <QueueIcon /> : <SendIcon />}</button>
       </div>
     </div>
   )
 }
+
+const PhotoIcon = () => <svg width="18" height="18" viewBox="0 0 16 16" aria-hidden><rect x="1.8" y="3.8" width="12.4" height="9.4" rx="2" stroke="currentColor" strokeWidth="1.5" fill="none" /><circle cx="8" cy="8.5" r="2.4" stroke="currentColor" strokeWidth="1.5" fill="none" /><path d="M5.5 3.8 6.5 2.3h3l1 1.5" stroke="currentColor" strokeWidth="1.5" fill="none" strokeLinejoin="round" /></svg>
+// a photo sent from the composer, as it appears in the agent's log
+const PHOTO = /\[Photo: [^\]]*\/\.fleet\/uploads\/([\w-]+\.jpg)\]/g
 
 const QueueIcon = () => <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden><circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="1.6" fill="none" /><path d="M8 4.8V8l2.2 1.5" stroke="currentColor" strokeWidth="1.6" fill="none" strokeLinecap="round" /></svg>
 
@@ -303,7 +337,7 @@ export function ChatView({ tool, id, live, waiting, working, pending, onSeen, pe
         const plan = b.role === 'assistant' ? planSteps(b.text) : null
         return (
           <Fragment key={i}>
-            <div className={`bubble ${b.role}`}><Markdown text={b.text} /></div>
+            <Bubble m={b} />
             {plan && plan.steps.length > 1 && <button className="todo-add" onClick={() => setTodos(plan)}>＋ Add {plan.steps.length} to-dos</button>}
           </Fragment>
         )
@@ -314,6 +348,17 @@ export function ChatView({ tool, id, live, waiting, working, pending, onSeen, pe
       {waiting && <div className="bubble waiting">Waiting for you: {waiting}</div>}
       {!messages.length && <div className="empty">No messages yet.</div>}
       {todos && <AddTodos plan={todos} agent={agent} onClose={() => setTodos(null)} />}
+    </div>
+  )
+}
+
+function Bubble({ m }: { m: Message }) {
+  const photos = m.role === 'user' ? [...m.text.matchAll(PHOTO)].map(x => x[1]) : []
+  const text = photos.length ? m.text.replace(PHOTO, '').trim() : m.text
+  return (
+    <div className={`bubble ${m.role} ${photos.length && !text ? 'only-photos' : ''}`}>
+      {text && <Markdown text={text} />}
+      {photos.map(p => <a key={p} href={`/api/uploads/${p}`} target="_blank" rel="noreferrer"><img className="bubble-photo" src={`/api/uploads/${p}`} alt="Photo you sent" /></a>)}
     </div>
   )
 }

@@ -1,7 +1,7 @@
 // Fleet dashboard server: binds to 127.0.0.1 only (`tailscale serve` publishes it to the tailnet over HTTPS)
 // and requires the access key from ~/.fleet/config.json on every API and WebSocket request.
 import { randomBytes, timingSafeEqual } from 'node:crypto'
-import { createReadStream, existsSync, statSync } from 'node:fs'
+import { createReadStream, existsSync, mkdirSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import { homedir } from 'node:os'
 import { extname, join, normalize } from 'node:path'
@@ -11,7 +11,7 @@ import { conversations, transcript } from './history.ts'
 import * as ideas from './ideas.ts'
 import { notify, publicKey, subscribe } from './push.ts'
 import { alerts, ingestHook, list, poll, startPolling } from './state.ts'
-import { config, db, FLEET_BIN, saveConfig } from './store.ts'
+import { config, db, FLEET_BIN, FLEET_DIR, saveConfig } from './store.ts'
 import { capture, run, sendKey, sendText } from './tmux.ts'
 import { liveTail } from './detect.ts'
 import { aiBudget, usage } from './usage.ts'
@@ -656,6 +656,32 @@ function serveStatic(req: IncomingMessage, res: ServerResponse, path: string) {
   createReadStream(file).pipe(res)
 }
 
+// Photos from the phone, kept on the Mac. sips (built into macOS) turns HEIC and huge camera shots into a JPEG at
+// most 2000 px wide, which every agent's image reader takes; the agent gets the file's path.
+const UPLOADS = join(FLEET_DIR, 'uploads')
+async function upload(req: IncomingMessage) {
+  const chunks: Buffer[] = []
+  let size = 0
+  for await (const c of req) {
+    size += c.length
+    if (size > 50 << 20) throw new HttpError(413, 'photo too large')
+    chunks.push(c)
+  }
+  if (!size) throw new HttpError(400, 'no photo')
+  mkdirSync(UPLOADS, { recursive: true, mode: 0o700 })
+  const name = `${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}-${randomBytes(3).toString('hex')}`
+  const raw = join(UPLOADS, `${name}.in`)
+  writeFileSync(raw, Buffer.concat(chunks), { mode: 0o600 })
+  try {
+    await run('sips', ['-Z', '2000', '-s', 'format', 'jpeg', raw, '--out', join(UPLOADS, `${name}.jpg`)])
+  } catch {
+    throw new HttpError(400, "that file isn't a photo")
+  } finally {
+    unlinkSync(raw)
+  }
+  return join(UPLOADS, `${name}.jpg`)
+}
+
 export const server = createServer(async (req, res) => {
   const url = new URL(req.url ?? '/', 'http://localhost')
   try {
@@ -685,6 +711,14 @@ export const server = createServer(async (req, res) => {
       const file = await speech(text, engine, str(b.voice, 60) || config.voice || (engine === 'kokoro' ? 'bm_george' : ''), Number(b.speed) || config.voice_speed || 1)
       res.writeHead(200, { 'Content-Type': 'audio/mp4', 'Cache-Control': 'private, max-age=3600' })
       return res.end(readFile(file))
+    }
+    if (url.pathname === '/api/uploads' && req.method === 'POST') return send(res, 200, { path: await upload(req) })
+    const photo = url.pathname.match(/^\/api\/uploads\/([\w-]+\.jpg)$/)
+    if (photo && req.method === 'GET') {
+      const file = join(UPLOADS, photo[1])
+      if (!existsSync(file)) throw new HttpError(404, 'no such photo')
+      res.writeHead(200, { 'Content-Type': 'image/jpeg', 'Cache-Control': 'private, max-age=86400' })
+      return createReadStream(file).pipe(res)
     }
     for (const [method, pattern, handler] of routes) {
       const m = url.pathname.match(pattern)
