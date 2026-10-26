@@ -992,7 +992,8 @@ def mac(args):
     if a.cmd == 'music':
         v = ' '.join(a.value)
         if a.action == 'now':
-            return print(osa('tell application "Spotify" to if player state is stopped then return "Nothing is playing." else return (player state as string) & ": " & (name of current track) & " by " & (artist of current track) & " (" & (album of current track) & ")"'))
+            # one-line `tell … to if … then … else` is an AppleScript syntax error
+            return print(osa('tell application "Spotify"\nif player state is stopped then return "Nothing is playing."\nreturn (player state as string) & ": " & (name of current track) & " by " & (artist of current track) & " (" & (album of current track) & ")"\nend tell'))
         if a.action == 'search':
             subprocess.run(['open', f'spotify:search:{urllib.parse.quote(v)}'])
             return print(f'Opened Spotify search for {v}.')
