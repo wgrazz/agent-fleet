@@ -1,7 +1,7 @@
 import { FitAddon } from '@xterm/addon-fit'
 import { Terminal, type ITheme } from '@xterm/xterm'
 import '@xterm/xterm/css/xterm.css'
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 // The screen panel stays dark in both themes: agents pick their colors for a dark terminal.
 const THEME: ITheme = {
@@ -62,9 +62,17 @@ export function ScreenView({ name }: { name: string }) {
   return <div className="screen" ref={box} />
 }
 
+const ARROWS = { Up: 'A', Down: 'B', Right: 'C', Left: 'D' }
+// keys the phone keyboard doesn't have
+const KEYBAR: [string, string][] = [['esc', '\x1b'], ['⇥', '\t'], ['⇧⇥', '\x1b[Z'], ['^C', '\x03'], ['←', 'Left'], ['↑', 'Up'], ['↓', 'Down'], ['→', 'Right'], ['⏎', '\r']]
+
 /** A real, typeable terminal attached to the agent's tmux session. Closing it detaches; the agent keeps running. */
 export function FullTerminal({ name, onClose }: { name: string; onClose: () => void }) {
   const box = useRef<HTMLDivElement>(null)
+  const keys = useRef<(k: string) => void>(() => {})
+  const [ctrl, setCtrl] = useState(false)
+  const ctrlOn = useRef(false)
+  ctrlOn.current = ctrl
 
   useEffect(() => {
     const term = new Terminal({ fontFamily: FONT, fontSize: 13, lineHeight: 1.2, theme: THEME, cursorBlink: true })
@@ -75,7 +83,17 @@ export function FullTerminal({ name, onClose }: { name: string; onClose: () => v
     const ws = new WebSocket(wsUrl(`/ws/pty?name=${encodeURIComponent(name)}&cols=${term.cols}&rows=${term.rows}`))
     ws.onmessage = ev => term.write(typeof ev.data === 'string' ? ev.data : new Uint8Array(ev.data))
     ws.onclose = () => term.write('\r\n\x1b[2m[disconnected — the agent keeps running]\x1b[0m\r\n')
-    const input = term.onData(d => ws.readyState === ws.OPEN && ws.send(d))
+    const out = (d: string) => ws.readyState === ws.OPEN && ws.send(d)
+    // the phone keyboard has no Ctrl: the Ctrl key in the bar turns the next letter typed into its control code
+    const input = term.onData(d => {
+      if (ctrlOn.current && /^[a-z]$/i.test(d)) { setCtrl(false); return out(String.fromCharCode(d.toUpperCase().charCodeAt(0) & 31)) }
+      out(d)
+    })
+    keys.current = k => {
+      const arrow = ARROWS[k as keyof typeof ARROWS]
+      out(arrow ? (term.modes.applicationCursorKeysMode ? '\x1bO' : '\x1b[') + arrow : k)
+      term.focus()
+    }
     const resize = term.onResize(({ cols, rows }) => ws.readyState === ws.OPEN && ws.send(JSON.stringify({ resize: [cols, rows] })))
     const ro = new ResizeObserver(() => fit.fit())
     ro.observe(box.current!)
@@ -100,6 +118,12 @@ export function FullTerminal({ name, onClose }: { name: string; onClose: () => v
         <button className="btn" onClick={onClose}>Close</button>
       </div>
       <div className="term-full" ref={box} />
+      <div className="term-keys">
+        {KEYBAR.map(([label, k]) => (
+          <button key={label} onMouseDown={e => e.preventDefault()} onClick={() => keys.current(k)}>{label}</button>
+        ))}
+        <button className={ctrl ? 'on' : ''} onMouseDown={e => e.preventDefault()} onClick={() => setCtrl(c => !c)} title="Then type a letter, e.g. Ctrl then c">Ctrl</button>
+      </div>
     </div>
   )
 }
