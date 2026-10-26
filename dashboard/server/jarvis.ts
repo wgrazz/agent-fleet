@@ -121,6 +121,10 @@ export const proposal = (id: number) => db.prepare('SELECT * FROM jarvis_proposa
 export const settleProposal = (id: number, state: 'approved' | 'declined', result = '') =>
   db.prepare('UPDATE jarvis_proposals SET state = ?, result = ? WHERE id = ?').run(state, result, id)
 
+/** "Bye", "that's all", "go away": the conversation is over, no need to ask Claude. */
+export const isGoodbye = (said: string) =>
+  /^(ok(ay)?,? )?(stop|bye|goodbye|good ?night|see ya|later|that'?s (all|it)|that is all|go away|never ?mind|no thanks|nothing( else)?|i'?m (done|good)|we'?re done|end( conversation)?|thanks?( you)?( jarvis)?( that'?s (all|it))?)[.!]*$/i.test(said.trim())
+
 /** Spoken or typed yes/no when something is waiting for approval. */
 export function approvalWord(said: string): 'yes' | 'no' | null {
   const t = said.trim().toLowerCase().replace(/[.!,]+$/, '')

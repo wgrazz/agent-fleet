@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
 process.env.FLEET_DIR = mkdtempSync(join(tmpdir(), 'fleet-jarvis-'))
-const { instant, findAgent, summary, remember, memory, approvalWord, threadFor, newThread, addMessage, threads, messages, propose, pendingProposals, settleProposal, summarize, wantsRanking, needsApproval, macArgv, instantMac } = await import('../server/jarvis.ts')
+const { isGoodbye, instant, findAgent, summary, remember, memory, approvalWord, threadFor, newThread, addMessage, threads, messages, propose, pendingProposals, settleProposal, summarize, wantsRanking, needsApproval, macArgv, instantMac } = await import('../server/jarvis.ts')
 
 const agent = (name: string, extra: object = {}) => ({
   name, controllable: true, tool: 'claude', pid: 1, cwd: '', task: '', age_s: 1, session_id: '', status: 'working', status_since: 0,
@@ -78,6 +78,13 @@ describe('ranking requests', () => {
   it('recognises asking what to do next', () => {
     for (const q of ['what should I do next?', 'rank my notes', 'prioritize my ideas', 'sort my notes by what is important', "what's most important"]) expect(wantsRanking(q)).toBe(true)
     for (const q of ['what needs me?', 'idea: rank the retailers', 'tell walmart yes']) expect(wantsRanking(q)).toBe(false)
+  })
+})
+
+describe('ending a conversation', () => {
+  it('hears goodbyes, not questions', () => {
+    for (const q of ['Bye.', "that's all", 'Go away', 'thanks Jarvis', "thank you that's all", 'okay stop', "I'm done", 'never mind']) expect(isGoodbye(q)).toBe(true)
+    for (const q of ['stop the walmart agent', 'thanks, now pause target', 'what needs me?', "that's all for walmart?"]) expect(isGoodbye(q)).toBe(false)
   })
 })
 

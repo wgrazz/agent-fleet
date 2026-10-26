@@ -225,6 +225,7 @@ export function Jarvis({ onClose, onChanged, asPage, autoTalk }: { onClose: () =
   const rec = useRef<any>(null)
   const box = useRef<HTMLDivElement>(null)
   const quiet = useRef(0)
+  const ended = useRef(false) // the last reply closed the conversation
   const setVoice = (v: VoiceState) => { voiceRef.current = v; setVoiceState(v) }
   const voiceNow = (): VoiceState => voiceRef.current // read fresh: it changes while we await
 
@@ -262,13 +263,14 @@ export function Jarvis({ onClose, onChanged, asPage, autoTalk }: { onClose: () =
     if (!override) setLines(l => [...l, { who: 'you', text }])
     setThinking(true)
     try {
-      const r = await api.post<{ thread_id: number; say: string; done: string[]; mode: string; blocked?: string; warning?: string; proposals?: Proposal[]; undo?: number }>(
+      const r = await api.post<{ thread_id: number; say: string; done: string[]; mode: string; blocked?: string; warning?: string; proposals?: Proposal[]; undo?: number; end?: boolean }>(
         '/api/jarvis', { text, override, thread_id: threadRef.current ?? undefined })
       if (r.thread_id !== threadRef.current) { setThreadId(r.thread_id); remember.set('jarvis.thread', String(r.thread_id)); if (!title) setTitle(text.slice(0, 70)) }
       setLines(l => [...l, { who: 'bot', text: r.say, meta: { done: r.done, mode: r.mode, warning: r.warning, blocked: r.blocked, proposals: r.proposals, undo: r.undo } }])
       if (r.proposals?.length) setProposals(p => ({ ...p, ...Object.fromEntries(r.proposals!.map(x => [x.id, x])) }))
       if (r.done.length) onChanged()
       if (r.mode !== 'instant') loadBudget()
+      ended.current = !!r.end
       setThinking(false)
       return r.say
     } catch (e) {
@@ -348,7 +350,6 @@ export function Jarvis({ onClose, onChanged, asPage, autoTalk }: { onClose: () =
     }
     quiet.current = 0
     talked.current = true
-    if (/^(stop|that'?s all|that is all|goodbye|bye|thanks jarvis|end( conversation)?)[.!]*$/i.test(said)) return endVoice()
     setVoice('thinking')
     // a lookup can take a while: say so, like a person would, instead of going quiet
     const hold = mutedRef.current ? 0 : window.setTimeout(() => { if (voiceNow() === 'thinking') speak(HOLD_LINES[Math.floor(Math.random() * HOLD_LINES.length)]) }, 2500)
@@ -359,6 +360,7 @@ export function Jarvis({ onClose, onChanged, asPage, autoTalk }: { onClose: () =
       setVoice('speaking')
       await speak(reply)
     }
+    if (ended.current) return endVoice() // you said goodbye (or Jarvis heard you were done)
     const now = voiceNow()
     if (now !== 'speaking' && now !== 'thinking') return // ended, or you tapped to interrupt (that already started listening)
     setVoice('listening')

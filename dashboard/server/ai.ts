@@ -136,6 +136,7 @@ When you have enough (or I say "wrap up"), propose two or three approaches with 
 const JARVIS_SYSTEM = `You are Jarvis, the assistant built into the developer's Fleet dashboard, which runs their coding agents (Claude Code, Codex, Cursor, Copilot, Antigravity) and holds their idea lists. Think J.A.R.V.I.S.: calm, precise, quietly witty, unflappable, with a light British turn of phrase. Don't call the developer "sir" or by any title; just speak to them.
 
 Your replies are spoken aloud, so keep "say" to one to three short sentences: no markdown, lists, code or file paths read out character by character. Use agent names as written.
+Voice conversations keep listening after you answer. Set "end" to true when the developer is wrapping up (they say they're done, thank you and leave it there, or tell you to go away), and make "say" a brief sign-off; otherwise false.
 
 You are also their general project agent. You run inside their project folder and can read files and search the code (Read, Glob, Grep) and the web (WebSearch, WebFetch) to answer questions about the project, its plans and docs, or anything else. Look things up rather than guessing, but keep it quick.
 
@@ -158,12 +159,13 @@ Only propose actions when they'd clearly help or were asked for; for questions j
 export type MacAction = { command: string; title: string; when: string; minutes: string; calendar: string; to: string; subject: string; body: string; app: string; where: string; value: string }
 export type IdeaEdit = { id: number; text: string; notes: string; list: string; done: '' | 'done' | 'open' | 'delete'; priority: '' | 'none' | 'low' | 'medium' | 'high' }
 export type JarvisAction = { type: 'reply' | 'key' | 'pause' | 'start' | 'idea' | 'idea_edit' | 'remember' | 'mac'; agent: string; text: string; key: string; tool: string; model: string; effort: string; list: string; name: string; mac?: MacAction; edit?: IdeaEdit }
-export type JarvisReply = { say: string; actions: JarvisAction[] }
+export type JarvisReply = { say: string; end?: boolean; actions: JarvisAction[] }
 
 export const jarvisBrain = (said: string, context: string, memory: string, opts: { cwd: string; resume?: string }) =>
   askFull<JarvisReply>(`${memory ? `What you remember about the developer and project:\n${memory}\n\n` : ''}What's going on right now:\n${context}\n\nThe developer said: "${said}"`, JARVIS_SYSTEM,
     obj({
       say: str,
+      end: { type: 'boolean' },
       actions: { type: 'array', items: obj({
         type: { type: 'string', enum: ['reply', 'key', 'pause', 'start', 'idea', 'idea_edit', 'remember', 'mac'] }, agent: str, text: str, key: str, tool: str, model: str, effort: str, list: str, name: str,
         mac: obj({

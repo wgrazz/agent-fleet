@@ -213,6 +213,8 @@ async function runJarvis(said: string, opts: JarvisOpts = {}) {
     return { thread_id: t.id, say, ...m }
   }
 
+  if (J.isGoodbye(said)) return reply(['Talk soon.', 'Very good.', "I'll be here."][Math.floor(Math.random() * 3)], { mode: 'instant', end: true })
+
   if (/^(undo( that| it)?|take (that|it) back|put (that|it) back)[.!]*$/i.test(said.trim())) {
     const n = ideas.undoTurn()
     return reply(n ? `Undone. Your ideas are back to how they were before my last change${n === 1 ? '' : `s (${n})`}.` : "There's nothing of mine to undo.", { mode: 'instant' })
@@ -280,7 +282,7 @@ async function runJarvis(said: string, opts: JarvisOpts = {}) {
   }
   const after = await budget()
   return reply(answer.value.say, {
-    mode: 'claude', proposals: proposed,
+    mode: 'claude', proposals: proposed, end: answer.value.end,
     warning: after.jarvis_pct >= after.warn_pct ? `Jarvis has used ${after.jarvis_pct.toFixed(1)}% of your weekly Claude limit this week.` : undefined,
   })
 }
@@ -735,12 +737,14 @@ export const server = createServer(async (req, res) => {
       res.writeHead(200, { 'Content-Type': 'audio/mp4', 'Cache-Control': 'private, max-age=3600' })
       return res.end(readFile(file))
     }
-    // Siri's shortcut: plain text in, plain text out, so Shortcuts can speak the reply with nothing in between.
+    const END = '\u2063'
+// Siri's shortcut: plain text in, plain text out, so Shortcuts can speak the reply with nothing in between.
     // Always 200: whatever comes back is what Siri says.
     if (url.pathname === '/api/jarvis/say' && req.method === 'POST') {
       const said = str((await body(req)).text, 2000).trim()
       const say = !said ? "I didn't catch that." : await runJarvis(said)
-        .then(r => r.say + ((r as { proposals?: unknown[] }).proposals?.length ? ' That needs your OK in Fleet.' : ''))
+        // a trailing invisible separator (U+2063) tells the shortcut the conversation is over; Siri doesn't read it out
+        .then(r => r.say + ((r as { proposals?: unknown[] }).proposals?.length ? ' That needs your OK in Fleet.' : '') + ((r as { end?: boolean }).end ? END : ''))
         .catch(e => `Sorry, that didn't work: ${(e as Error).message}`)
       res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' })
       return res.end(say)
