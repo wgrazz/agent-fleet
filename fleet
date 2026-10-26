@@ -1103,21 +1103,21 @@ def siri_shortcut(path, host=''):
     host = host or ts_host()
     if not host:
         sys.exit('Siri needs the dashboard on your tailnet: install Tailscale, then fleet dash install.')
-    said, loop = str(uuid.uuid4()).upper(), str(uuid.uuid4()).upper()
+    said, answer, loop = (str(uuid.uuid4()).upper() for _ in range(3))
     text = lambda s: {'Value': {'string': s}, 'WFSerializationType': 'WFTextTokenString'}
     fields = lambda *kv: {'Value': {'WFDictionaryFieldValueItems': [{'WFItemType': 0, 'WFKey': text(k), 'WFValue': v} for k, v in kv]},
                           'WFSerializationType': 'WFDictionaryFieldValue'}
-    dictated = {'Value': {'string': '\ufffc', 'attachmentsByRange': {'{0, 1}': {'Type': 'ActionOutput', 'OutputUUID': said, 'OutputName': 'Dictated Text'}}},
-                'WFSerializationType': 'WFTextTokenString'}
+    output = lambda uid, name: {'Value': {'string': '\ufffc', 'attachmentsByRange': {'{0, 1}': {'Type': 'ActionOutput', 'OutputUUID': uid, 'OutputName': name}}},
+                                'WFSerializationType': 'WFTextTokenString'}
     step = lambda ident, **p: {'WFWorkflowActionIdentifier': f'is.workflow.actions.{ident}', 'WFWorkflowActionParameters': p}
     workflow = {
         'WFWorkflowActions': [
             step('repeat.count', GroupingIdentifier=loop, WFControlFlowMode=0, WFRepeatCount=10),
             step('dictatetext', UUID=said, WFDictateTextStopListening='After Pause'),
-            step('downloadurl', WFURL=f'https://{host}/api/jarvis', WFHTTPMethod='POST', ShowHeaders=True,
-                 WFHTTPHeaders=fields(('X-Fleet-Key', text(config()['key']))), WFHTTPBodyType='JSON', WFJSONValues=fields(('text', dictated))),
-            step('getvalueforkey', WFDictionaryKey='say'),
-            step('speaktext'),
+            # /api/jarvis/say answers in plain text, so the reply goes straight to Speak Text (every link named, none implied)
+            step('downloadurl', UUID=answer, WFURL=f'https://{host}/api/jarvis/say', WFHTTPMethod='POST', ShowHeaders=True,
+                 WFHTTPHeaders=fields(('X-Fleet-Key', text(config()['key']))), WFHTTPBodyType='JSON', WFJSONValues=fields(('text', output(said, 'Dictated Text')))),
+            step('speaktext', WFText=output(answer, 'Contents of URL')),
             step('repeat.count', GroupingIdentifier=loop, WFControlFlowMode=2),
         ],
         'WFWorkflowClientVersion': '2302.0.4', 'WFWorkflowMinimumClientVersion': 900, 'WFWorkflowMinimumClientVersionString': '900',

@@ -735,6 +735,16 @@ export const server = createServer(async (req, res) => {
       res.writeHead(200, { 'Content-Type': 'audio/mp4', 'Cache-Control': 'private, max-age=3600' })
       return res.end(readFile(file))
     }
+    // Siri's shortcut: plain text in, plain text out, so Shortcuts can speak the reply with nothing in between.
+    // Always 200: whatever comes back is what Siri says.
+    if (url.pathname === '/api/jarvis/say' && req.method === 'POST') {
+      const said = str((await body(req)).text, 2000).trim()
+      const say = !said ? "I didn't catch that." : await runJarvis(said)
+        .then(r => r.say + ((r as { proposals?: unknown[] }).proposals?.length ? ' That needs your OK in Fleet.' : ''))
+        .catch(e => `Sorry, that didn't work: ${(e as Error).message}`)
+      res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' })
+      return res.end(say)
+    }
     // the "Hey Siri, Jarvis" shortcut, signed by macOS, with this dashboard's address and key inside
     if (url.pathname === '/api/siri/shortcut' && req.method === 'GET') {
       const file = join(FLEET_DIR, 'Jarvis.shortcut')
