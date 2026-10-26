@@ -5,6 +5,7 @@
 import { execFile } from 'node:child_process'
 import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
+import { AREAS } from '../web/src/areas.ts'
 import { config, db, FLEET_DIR } from './store.ts'
 
 const AI_DIR = join(FLEET_DIR, 'ai')
@@ -94,20 +95,20 @@ export const recommend = (task: string, usage: string) =>
 
 // ---------- Brain Dump sorter ----------
 
-const SORT_SYSTEM = `You help a developer sort quick notes from their "Brain Dump" inbox into their own lists. For each note pick the list it most likely belongs in, using the list names and the examples already in each list. If there is a "Priority" list, use it only for things that are clearly urgent. If no list fits, answer "Brain Dump". Confidence is 0 to 1.`
+const SORT_SYSTEM = `You help a developer sort quick notes from their "Brain Dump" inbox into their own lists. For each note pick the list it most likely belongs in, using the list names and the examples already in each list. If there is a "Priority" list, use it only for things that are clearly urgent. If no list fits, answer "Brain Dump". Confidence is 0 to 1. Also tag each note with the one area it belongs to, or "" if none fits.`
 
-export type Suggestion = { id: number; list: string; confidence: number }
+export type Suggestion = { id: number; list: string; confidence: number; area: string }
 
 export const sortIdeas = (items: { id: number; text: string }[], lists: { name: string; examples: string[] }[]) =>
   ask<{ suggestions: Suggestion[] }>(
-    `Lists:\n${lists.map(l => `- ${l.name}${l.examples.length ? `: e.g. ${l.examples.map(e => `"${e.slice(0, 80)}"`).join('; ')}` : ''}`).join('\n')}\n\nNotes to sort:\n${items.map(i => `${i.id}: ${i.text.slice(0, 400)}`).join('\n')}`,
+    `Areas: ${AREAS.map(a => a.name).join(', ')}\n\nLists:\n${lists.map(l => `- ${l.name}${l.examples.length ? `: e.g. ${l.examples.map(e => `"${e.slice(0, 80)}"`).join('; ')}` : ''}`).join('\n')}\n\nNotes to sort:\n${items.map(i => `${i.id}: ${i.text.slice(0, 400)}`).join('\n')}`,
     SORT_SYSTEM,
-    obj({ suggestions: { type: 'array', items: obj({ id: { type: 'integer' }, list: { type: 'string', enum: [...lists.map(l => l.name), 'Brain Dump'] }, confidence: { type: 'number' } }) } }),
+    obj({ suggestions: { type: 'array', items: obj({ id: { type: 'integer' }, list: { type: 'string', enum: [...lists.map(l => l.name), 'Brain Dump'] }, confidence: { type: 'number' }, area: { type: 'string', enum: [...AREAS.map(a => a.name), ''] } }) } }),
     { timeoutMs: 180_000, feature: 'sort' })
 
 // ---------- priorities ----------
 
-const RANK_SYSTEM = `You help a solo founder decide what matters. Given their open notes and ideas (from lists like Brain Dump, General Code, Research, Errands) and what their coding agents are doing now, give each note a priority: 3 = high (do soon: blocks other work, time-sensitive, or clearly moves the business), 2 = medium (worth doing this week or two), 1 = low (someday), 0 = no priority (reference, done-ish, vague). Be decisive: usually under a fifth of notes are high. Give each a reason of at most 12 words. Then pick up to 5 note ids to do next, best first, and write a two-sentence spoken summary of what to focus on.`
+const RANK_SYSTEM = `You help a solo founder decide what matters. Given their open notes and ideas (from lists like Brain Dump, Build, Figure Out, Do, Follow Up) and what their coding agents are doing now, give each note a priority: 3 = high (do soon: blocks other work, time-sensitive, or clearly moves the business), 2 = medium (worth doing this week or two), 1 = low (someday), 0 = no priority (reference, done-ish, vague). Be decisive: usually under a fifth of notes are high. Give each a reason of at most 12 words. Then pick up to 5 note ids to do next, best first, and write a two-sentence spoken summary of what to focus on.`
 
 export type Ranked = { ranked: { id: number; priority: number; reason: string }[]; next: number[]; summary: string }
 

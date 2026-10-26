@@ -37,6 +37,12 @@ describe('ideas', () => {
     expect(done.done).toBe(1)
     expect(done.next_due).toBeGreaterThan(Date.now() / 1000)
   })
+  it('an area is one of AREAS or nothing', () => {
+    const id = m.addIdea('Fix duplicate results', 'Build')
+    expect(m.updateIdea(id, { area: 'Shopping · Search' })!.area).toBe('Shopping · Search')
+    expect(m.updateIdea(id, { area: null })!.area).toBeNull()
+    expect(() => m.updateIdea(id, { area: 'Gardening' })).toThrow(/area/)
+  })
   it('deleting a list moves its open ideas to Brain Dump', () => {
     m.createList('Temp')
     const id = m.addIdea('keep me', 'Temp')

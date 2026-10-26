@@ -1,4 +1,5 @@
 // Ideas: checklist lists (Priority, Brain Dump, then yours), recurring items, and Brain Dump sorting suggestions.
+import { AREAS } from '../web/src/areas.ts'
 import { rankIdeas, sortIdeas } from './ai.ts'
 import { db } from './store.ts'
 
@@ -6,7 +7,7 @@ export type List = { id: number; name: string; color: string; position: number; 
 export type Idea = {
   id: number; list: string; text: string; notes: string; done: number; done_at: number | null; created_at: number
   position: number | null; repeat: string | null; next_due: number | null; agent: string | null; source: string | null
-  suggestion: string | null; suggestion_conf: number | null; priority: number; why: string | null
+  suggestion: string | null; suggestion_conf: number | null; priority: number; why: string | null; area: string | null
 }
 
 const now = () => Math.floor(Date.now() / 1000)
@@ -100,9 +101,13 @@ export function addIdea(text: string, list = 'Brain Dump', extra: { source?: str
   return Number(r.lastInsertRowid)
 }
 
-export function updateIdea(id: number, p: Partial<Pick<Idea, 'text' | 'notes' | 'list' | 'repeat' | 'position' | 'agent' | 'priority'>> & { done?: boolean; clearSuggestion?: boolean }) {
+export function updateIdea(id: number, p: Partial<Pick<Idea, 'text' | 'notes' | 'list' | 'repeat' | 'position' | 'agent' | 'priority' | 'area'>> & { done?: boolean; clearSuggestion?: boolean }) {
   const cur = idea(id)
   if (!cur) throw new Error('no such idea')
+  if (p.area !== undefined) {
+    if (p.area !== null && !AREAS.some(a => a.name === p.area)) throw new Error(`area: one of ${AREAS.map(a => a.name).join(', ')}`)
+    db.prepare('UPDATE ideas SET area = ? WHERE id = ?').run(p.area, id)
+  }
   if (p.text !== undefined) db.prepare('UPDATE ideas SET text = ? WHERE id = ?').run(p.text, id)
   if (p.notes !== undefined) db.prepare('UPDATE ideas SET notes = ? WHERE id = ?').run(p.notes, id)
   if (p.list !== undefined && p.list !== cur.list) {
@@ -154,7 +159,8 @@ export function undoTurn(turn?: number) {
 
 // ---------- sorting ----------
 
-/** Ask Claude where each unsorted Brain Dump note belongs; suggestions are stored on the items, never applied. */
+/** Ask Claude where each unsorted Brain Dump note belongs; list suggestions are stored on the items, never applied.
+ *  The area is just a tag you can change, so it's filled in when the note has none. */
 export async function suggestSorting(limit = 40) {
   const pending = db.prepare("SELECT id, text FROM ideas WHERE list = 'Brain Dump' AND done = 0 AND suggestion IS NULL ORDER BY id LIMIT ?").all(limit) as { id: number; text: string }[]
   if (!pending.length) return 0
@@ -163,8 +169,8 @@ export async function suggestSorting(limit = 40) {
     examples: (db.prepare('SELECT text FROM ideas WHERE list = ? ORDER BY done, id DESC LIMIT 3').all(l.name) as { text: string }[]).map(r => r.text),
   }))
   const { suggestions } = await sortIdeas(pending, targets)
-  const set = db.prepare("UPDATE ideas SET suggestion = ?, suggestion_conf = ? WHERE id = ? AND list = 'Brain Dump'")
-  for (const s of suggestions) if (pending.some(p => p.id === s.id)) set.run(s.list, Math.max(0, Math.min(1, s.confidence)), s.id)
+  const set = db.prepare("UPDATE ideas SET suggestion = ?, suggestion_conf = ?, area = coalesce(area, ?) WHERE id = ? AND list = 'Brain Dump'")
+  for (const s of suggestions) if (pending.some(p => p.id === s.id)) set.run(s.list, Math.max(0, Math.min(1, s.confidence)), AREAS.some(a => a.name === s.area) ? s.area : null, s.id)
   return suggestions.length
 }
 

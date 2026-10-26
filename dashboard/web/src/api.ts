@@ -26,7 +26,7 @@ export type List = { id: number; name: string; color: string; position: number; 
 export type Idea = {
   id: number; list: string; text: string; notes: string; done: number; done_at: number | null; created_at: number
   position: number | null; repeat: string | null; next_due: number | null; agent: string | null; agent_status: Status | 'gone' | null
-  source: string | null; suggestion: string | null; suggestion_conf: number | null; priority: number; why: string | null
+  source: string | null; suggestion: string | null; suggestion_conf: number | null; priority: number; why: string | null; area: string | null
 }
 export type Conversation = Placed & { tool: 'claude' | 'codex'; id: string; title: string; prompt: string; cwd: string; updated: number; running: string | null }
 export type Message = { role: 'user' | 'assistant' | 'tool'; text: string }

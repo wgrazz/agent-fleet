@@ -581,6 +581,7 @@ const routes: [string, RegExp, Route][] = [
         list: str(b.list, 60).trim() || undefined, done: typeof b.done === 'boolean' ? b.done : undefined,
         repeat: b.repeat === null ? null : str(b.repeat, 20) || undefined, position: typeof b.position === 'number' ? b.position : undefined,
         priority: typeof b.priority === 'number' ? b.priority : undefined,
+        area: b.area === null ? null : str(b.area, 40) || undefined,
         agent: b.agent === null ? null : undefined, clearSuggestion: b.clearSuggestion === true,
       })
     } catch (e) { throw new HttpError(400, (e as Error).message) }

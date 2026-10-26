@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { api, type Idea, type List } from './api.ts'
+import { AREAS, areaColor } from './areas.ts'
 import { Dialog, InboxIcon, isPhone, SparkIcon, STATUS_LABEL, useHold } from './components.tsx'
 import type { Step } from './steps.ts'
 
@@ -25,8 +26,10 @@ export function IdeasPane({ list, items, selected, onChange, onError, onSort, on
   const [draft, setDraft] = useState('')
   const [showDone, setShowDone] = useState(false)
   const [dragging, setDragging] = useState<number | null>(null)
-  const open = items.filter(i => !i.done)
-  const done = items.filter(i => i.done)
+  const [area, setArea] = useState('')
+  const shown = area ? items.filter(i => i.area === area) : items
+  const open = shown.filter(i => !i.done)
+  const done = shown.filter(i => i.done)
   const add = async () => {
     const text = draft.trim()
     if (!text) return
@@ -48,6 +51,10 @@ export function IdeasPane({ list, items, selected, onChange, onError, onSort, on
       <div className="lh">
         <h4><span className="sq round" style={{ background: list.color }} />{list.name}</h4>
         {list.name === 'Brain Dump' && open.length > 0 && <button className="btn small primary" onClick={onSort}>Sort {open.length}</button>}
+        <select className="area-filter" aria-label="Filter by area" value={area} onChange={e => setArea(e.target.value)}>
+          <option value="">All areas</option>
+          {AREAS.map(a => <option key={a.name} value={a.name}>{a.name}</option>)}
+        </select>
         <button className="btn small" aria-label="List options" onClick={e => { const r = e.currentTarget.getBoundingClientRect(); onHeaderMenu(r.right - 220, r.bottom + 4) }}>⋯</button>
       </div>
       <form className="add" onSubmit={e => { e.preventDefault(); add() }}>
@@ -61,7 +68,7 @@ export function IdeasPane({ list, items, selected, onChange, onError, onSort, on
               onDragOver: (e: React.DragEvent) => dragging !== null && e.preventDefault(), onDrop: () => dropOn(i),
             }} />
         ))}
-        {!open.length && <div className="empty">{list.name === 'Brain Dump' ? 'Inbox zero. Jot anything here, or say "Jarvis, idea: …".' : 'Nothing open here.'}</div>}
+        {!open.length && <div className="empty">{area ? `Nothing open in ${area} here.` : list.name === 'Brain Dump' ? 'Inbox zero. Jot anything here, or say "Jarvis, idea: …".' : 'Nothing open here.'}</div>}
         {done.length > 0 && (
           <>
             <button className="grp done-toggle" onClick={() => setShowDone(!showDone)}>{showDone ? '▾' : '▸'} Done ({done.length})</button>
@@ -81,6 +88,7 @@ function IdeaRow({ i, on, onToggle, onMenu, dragProps, showList }: { i: Idea; on
       <a href={`#/idea/${i.id}`} className="idea-body" {...hold}>
         <span className="idea-text">{i.priority > 0 && !i.done && <span className={`prio p${i.priority}`} title={i.why ?? PRIORITY[i.priority]}>{'!'.repeat(i.priority)}</span>}{i.text}</span>
         <span className="idea-meta">
+          {i.area && <span className="idea-area"><span className="sq round" style={{ background: areaColor(i.area) }} />{i.area}</span>}
           {showList && <span className="idea-list">{i.list}</span>}
           {showList && i.why && <span className="why">{i.why}</span>}
           {i.repeat && <span title={repeatLabel(i.repeat)}>↻ {repeatLabel(i.repeat)}</span>}
@@ -119,6 +127,10 @@ export function IdeaDetail({ idea, lists, onBack, onChange, onError, onStart, on
         <div className="form-row">
           <label>List<select value={idea.list} onChange={e => save({ list: e.target.value })}>
             {lists.map(l => <option key={l.id} value={l.name}>{l.name}</option>)}
+          </select></label>
+          <label>Area<select value={idea.area ?? ''} onChange={e => save({ area: e.target.value || null })}>
+            <option value="">None</option>
+            {AREAS.map(a => <option key={a.name} value={a.name}>{a.name}</option>)}
           </select></label>
           <label>Priority<select value={idea.priority} onChange={e => save({ priority: Number(e.target.value) })}>
             {PRIORITY.map((p, n) => <option key={n} value={n}>{p}</option>)}
