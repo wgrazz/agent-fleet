@@ -83,9 +83,9 @@ export function IdeasPane({ list, items, selected, onChange, onError, onSort, on
 function IdeaRow({ i, on, onToggle, onMenu, dragProps, showList }: { i: Idea; on: boolean; onToggle: () => void; onMenu: (x: number, y: number) => void; dragProps?: object; showList?: boolean }) {
   const hold = useHold(onMenu)
   return (
-    <div className={`idea ${on ? 'on' : ''} ${i.done ? 'is-done' : ''}`} {...dragProps}>
+    <div className={`idea ${on ? 'on' : ''} ${i.done ? 'is-done' : ''}`} {...dragProps} {...hold}>
       <button className={`check ${i.done ? 'checked' : ''}`} role="checkbox" aria-checked={!!i.done} aria-label="Done" onClick={onToggle} />
-      <a href={`#/idea/${i.id}`} className="idea-body" {...hold}>
+      <a href={`#/idea/${i.id}`} className="idea-body">
         <span className="idea-text">{i.priority > 0 && !i.done && <span className={`prio p${i.priority}`} title={i.why ?? PRIORITY[i.priority]}>{'!'.repeat(i.priority)}</span>}{i.text}</span>
         <span className="idea-meta">
           {i.area && <span className="idea-area"><span className="sq round" style={{ background: areaColor(i.area) }} />{i.area}</span>}

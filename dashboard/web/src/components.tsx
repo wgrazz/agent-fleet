@@ -185,7 +185,7 @@ export function MenuHost() {
     const box = ghost.current
     if (!box || !root?.from) return
     const copy = root.from.cloneNode(true) as HTMLElement
-    copy.removeAttribute('href')
+    for (const a of [copy, ...copy.querySelectorAll('[href]')]) a.removeAttribute('href')
     box.replaceChildren(copy)
   }, [root, pop])
   if (!top) return null
