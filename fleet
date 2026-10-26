@@ -1095,7 +1095,8 @@ def ts_host():
 
 
 def siri_shortcut(path, host=''):
-    """A signed "Jarvis" shortcut for the iPhone: dictate, ask Jarvis, speak the answer, listen again. It ends when Jarvis
+    """A signed "Jarvis" shortcut for the iPhone: pause music, dictate, ask Jarvis, play the answer in Jarvis's voice, listen
+    again. It ends when Jarvis
     signs off (you said bye, that's all, go away…), when you stop talking, or after 100 turns as a backstop.
     It holds your access key, so it's made on demand and never saved in the repo."""
     import plistlib
@@ -1104,21 +1105,29 @@ def siri_shortcut(path, host=''):
     host = host or ts_host()
     if not host:
         sys.exit('Siri needs the dashboard on your tailnet: install Tailscale, then fleet dash install.')
-    said, answer, loop, done = (str(uuid.uuid4()).upper() for _ in range(4))
+    said, answer, voice, loop, done = (str(uuid.uuid4()).upper() for _ in range(5))
     text = lambda s: {'Value': {'string': s}, 'WFSerializationType': 'WFTextTokenString'}
     fields = lambda *kv: {'Value': {'WFDictionaryFieldValueItems': [{'WFItemType': 0, 'WFKey': text(k), 'WFValue': v} for k, v in kv]},
                           'WFSerializationType': 'WFDictionaryFieldValue'}
     output = lambda uid, name: {'Value': {'string': '\ufffc', 'attachmentsByRange': {'{0, 1}': {'Type': 'ActionOutput', 'OutputUUID': uid, 'OutputName': name}}},
                                 'WFSerializationType': 'WFTextTokenString'}
+    key = fields(('X-Fleet-Key', text(config()['key'])))
     step = lambda ident, **p: {'WFWorkflowActionIdentifier': f'is.workflow.actions.{ident}', 'WFWorkflowActionParameters': p}
     workflow = {
         'WFWorkflowActions': [
+            step('pausemusic', WFPlayPauseBehavior='Pause'),  # so the mic can hear you
             step('repeat.count', GroupingIdentifier=loop, WFControlFlowMode=0, WFRepeatCount=100),
             step('dictatetext', UUID=said, WFDictateTextStopListening='After Pause'),
-            # /api/jarvis/say answers in plain text, so the reply goes straight to Speak Text (every link named, none implied)
+            # /api/jarvis/say answers in plain text, so nothing has to pick the reply apart (every link named, none implied)
             step('downloadurl', UUID=answer, WFURL=f'https://{host}/api/jarvis/say', WFHTTPMethod='POST', ShowHeaders=True,
-                 WFHTTPHeaders=fields(('X-Fleet-Key', text(config()['key']))), WFHTTPBodyType='JSON', WFJSONValues=fields(('text', output(said, 'Dictated Text')))),
-            step('speaktext', WFText=output(answer, 'Contents of URL')),
+                 WFHTTPHeaders=key, WFHTTPBodyType='JSON', WFJSONValues=fields(('text', output(said, 'Dictated Text')))),
+            # in Jarvis's own voice (made on the Mac, like in the app), or Siri's if you chose the device voice
+            *([step('speaktext', WFText=output(answer, 'Contents of URL'))] if config().get('voice_engine') == 'device' else [
+                step('downloadurl', UUID=voice, WFURL=f'https://{host}/api/tts', WFHTTPMethod='POST', ShowHeaders=True,
+                     WFHTTPHeaders=key, WFHTTPBodyType='JSON', WFJSONValues=fields(('text', output(answer, 'Contents of URL')))),
+                step('playsound', WFInput={'Value': {'Type': 'ActionOutput', 'OutputUUID': voice, 'OutputName': 'Contents of URL'},
+                                           'WFSerializationType': 'WFTextTokenAttachment'}),
+            ]),
             # Jarvis ends a goodbye with U+2063 (unspoken): stop listening
             step('conditional', GroupingIdentifier=done, WFControlFlowMode=0, WFCondition=99, WFConditionalActionString='\u2063',
                  WFInput={'Type': 'Variable', 'Variable': {'Value': {'Type': 'ActionOutput', 'OutputUUID': answer, 'OutputName': 'Contents of URL'},

@@ -729,7 +729,7 @@ export const server = createServer(async (req, res) => {
     if (!authorized(req)) return send(res, 401, { error: 'open the dashboard link with ?key= first' })
     if (url.pathname === '/api/tts' && req.method === 'POST') {
       const b = await body(req)
-      const text = str(b.text, 2000).trim()
+      const text = str(b.text, 2000).replace(/\u2063/g, '').trim() // (the Siri shortcut's end-of-conversation mark)
       if (!text) throw new HttpError(400, 'nothing to say')
       const engine = ['kokoro', 'mac'].includes(b.engine) ? b.engine : config.voice_engine === 'mac' ? 'mac' : 'kokoro'
       if (engine === 'kokoro' && !kokoroInstalled()) throw new HttpError(409, 'natural voice not installed: run fleet tts install')
