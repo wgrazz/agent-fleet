@@ -7,6 +7,7 @@ export const AREAS = [
   { name: 'Growth', color: '#30d158' },
   { name: 'Brand & Design', color: '#ff375f' },
   { name: 'Company', color: '#ff9f0a' },
+  { name: 'Fleet', color: '#ffd60a' },
   { name: 'Setup', color: '#8e8e93' },
   { name: 'Personal', color: '#bf5af2' },
   { name: 'Other ventures', color: '#ac8e68' },
