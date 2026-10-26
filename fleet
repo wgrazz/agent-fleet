@@ -1052,7 +1052,7 @@ def mac(args):
         os.makedirs(os.path.dirname(path), exist_ok=True)
         r = subprocess.run(['screencapture', '-x', '-t', 'jpg', path], capture_output=True, text=True)
         if r.returncode or not os.path.exists(path):
-            sys.exit('Could not capture the screen: allow Screen Recording for Fleet in System Settings → Privacy & Security.')
+            sys.exit('Could not capture the screen: allow Screen Recording in System Settings → Privacy & Security for the app running Fleet (the dashboard runs as node, from your terminal it is the terminal app).')
         subprocess.run(['sips', '-Z', '1600', path], capture_output=True)
         return print(f'Screenshot saved: {path} (read it to see the screen)')
 
