@@ -225,7 +225,7 @@ export function MenuHost() {
 export function PullToRefresh() {
   const [pull, setPull] = useState(0)
   useEffect(() => {
-    let startY = -1
+    let startY = -1, startX = 0
     let dist = 0
     // only when everything under the finger is scrolled to the top, and not in the terminal, a menu or a text box
     const atTop = (el: Element | null) => {
@@ -235,12 +235,14 @@ export function PullToRefresh() {
       }
       return true
     }
-    const down = (e: TouchEvent) => { startY = e.touches.length === 1 && atTop(e.target as Element) ? e.touches[0].clientY : -1; dist = 0 }
+    const down = (e: TouchEvent) => { startY = e.touches.length === 1 && atTop(e.target as Element) ? e.touches[0].clientY : -1; startX = e.touches[0]?.clientX ?? 0; dist = 0 }
     let frame = 0
     const move = (e: TouchEvent) => {
       if (startY < 0) return
       const d = e.touches[0].clientY - startY
-      if (d < 0 && !dist) { startY = -1; return } // scrolling the list up: not a pull
+      const dx = Math.abs(e.touches[0].clientX - startX)
+      if (!dist && dx < 8 && Math.abs(d) < 8) return // too small to tell which way the finger is going
+      if (!dist && (d < 0 || dx > d)) { startY = -1; return } // scrolling up, or a sideways swipe: not a pull
       // a pull: keep iOS from also rubber-banding the page underneath, which is what jittered
       if (e.cancelable) e.preventDefault()
       dist = Math.max(0, d)

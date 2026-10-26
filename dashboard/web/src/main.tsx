@@ -413,15 +413,24 @@ function FolderChip({ f, on, onMenu }: { f: Folder; on: boolean; onMenu: (x: num
 
 function IdeasListPicker({ lists, current, onNew }: { lists: List[]; current: string; onNew: () => void }) {
   useEffect(() => { if (current && current !== '★') remember.set('lastList', current) }, [current])
+  const cur = lists.find(l => l.name === current)
+  const pick = (e: React.MouseEvent) => openMenu(e.clientX, e.clientY, [
+    { label: 'Prioritized', checked: current === '★', onClick: () => { location.hash = '#/prioritized' } },
+    'sep',
+    ...lists.map(l => ({
+      label: l.name + (l.name === 'Brain Dump' && l.unsorted > 0 ? ` · ${l.unsorted} to sort` : ''), swatch: l.color, checked: l.name === current,
+      onClick: () => { location.hash = `#/ideas/${enc(l.name)}` },
+    })),
+    'sep',
+    { label: '+ New list', onClick: onNew },
+  ], 'Lists')
   return (
-    <div className="chips ideas-chips">
-      <a className={`chip-f ${current === '★' ? 'on' : ''}`} href="#/prioritized"><span className="prio p3">!</span>Prioritized</a>
-      {lists.map(l => (
-        <a key={l.id} className={`chip-f ${l.name === current ? 'on' : ''}`} href={`#/ideas/${enc(l.name)}`}>
-          <span className="sq round" style={{ background: l.color }} />{l.name}{l.name === 'Brain Dump' && l.unsorted > 0 ? ` ${l.unsorted}` : ''}
-        </a>
-      ))}
-      <button className="chip-f add" onClick={onNew} aria-label="New list">+ List</button>
+    <div className="ideas-chips">
+      <button className="list-pick" onClick={pick}>
+        {current === '★' ? <span className="prio p3">!</span> : <span className="sq round" style={{ background: cur?.color }} />}
+        <span className="list-pick-name">{current === '★' ? 'Prioritized' : current}</span>
+        <span className="chev">▾</span>
+      </button>
     </div>
   )
 }

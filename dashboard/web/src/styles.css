@@ -231,7 +231,8 @@ html.kb .term-keys { padding-bottom: 6px; }
 .chev { margin-left: auto; color: var(--faint); }
 .check-mark { margin-left: auto; color: var(--accent); font-weight: 700; }
 .menu-cancel { display: none; }
-.menu.sheet { left: 8px !important; right: 8px; bottom: max(8px, env(safe-area-inset-bottom)); top: auto !important; min-width: 0; border-radius: 14px; padding: 6px; }
+.menu.sheet { left: 8px !important; right: 8px; bottom: max(8px, env(safe-area-inset-bottom)); top: auto !important; min-width: 0; border-radius: 14px; padding: 6px;
+  max-height: calc(var(--vvh, 100vh) - var(--top) - 16px); overflow-y: auto; overscroll-behavior: contain; }
 .menu.sheet button[role=menuitem] { padding: 12px 12px; font-size: 16px; }
 .menu.sheet .menu-cancel { display: block; width: 100%; margin-top: 6px; padding: 12px; border-radius: 10px; background: var(--chip); font-weight: 600; font-size: 16px; }
 
@@ -418,7 +419,10 @@ details.ai-note { display: block; }
   .app[data-view=detail] .tabs { display: none; }
   .fab-jarvis { display: none; }
   .jarvis { left: 8px; right: 8px; width: auto; bottom: max(8px, env(safe-area-inset-bottom)); height: 60vh; }
-  .ideas-chips { display: flex; grid-row: 1; padding-top: var(--top); background: var(--panel); }
+  .ideas-chips { display: flex; grid-row: 1; padding: var(--top) 12px 8px; background: var(--panel); }
+  .list-pick { display: inline-flex; gap: 8px; align-items: center; max-width: 100%; padding: 7px 14px; border-radius: 99px; background: var(--chip); font-weight: 600; font-size: 15px; }
+  .list-pick-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .list-pick .chev { color: var(--faint); font-size: 12px; }
   .app[data-view=detail] .ideas-chips { display: none; }
   .ideas-chips + * {}
   .list.ideas { padding-top: 0; }
