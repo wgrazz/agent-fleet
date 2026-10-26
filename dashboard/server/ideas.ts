@@ -10,7 +10,8 @@ export type Idea = {
 }
 
 const now = () => Math.floor(Date.now() / 1000)
-export const PINNED = ['Priority', 'Brain Dump']
+// Brain Dump is the inbox everything else falls back to, so it can't be renamed or deleted
+export const PINNED = ['Brain Dump']
 
 // ---------- recurring ----------
 
@@ -125,6 +126,31 @@ export function updateIdea(id: number, p: Partial<Pick<Idea, 'text' | 'notes' | 
 }
 
 export const deleteIdea = (id: number) => db.prepare('DELETE FROM ideas WHERE id = ?').run(id)
+
+// ---------- undo: Jarvis's changes ----------
+
+/** Record an idea as it was just before Jarvis changes it (null when Jarvis just added it). */
+export function logChange(turn: number, ideaId: number, before: Idea | null) {
+  db.prepare('INSERT INTO idea_history (turn, idea_id, before, at) VALUES (?, ?, ?, ?)').run(turn, ideaId, before ? JSON.stringify(before) : null, now())
+}
+
+export const changedIn = (turn: number) => !!db.prepare('SELECT 1 FROM idea_history WHERE turn = ? AND undone = 0').get(turn)
+
+/** Put back everything one Jarvis turn changed (the latest one by default). Returns how many ideas it touched. */
+export function undoTurn(turn?: number) {
+  const t = turn ?? (db.prepare('SELECT max(turn) AS t FROM idea_history WHERE undone = 0').get() as { t: number | null }).t
+  if (!t) return 0
+  const rows = db.prepare('SELECT * FROM idea_history WHERE turn = ? AND undone = 0 ORDER BY id DESC').all(t) as { idea_id: number; before: string | null }[]
+  for (const r of rows) {
+    if (!r.before) { deleteIdea(r.idea_id); continue }
+    const was = JSON.parse(r.before) as Record<string, string | number | null>
+    ensureList(String(was.list))
+    const cols = Object.keys(was)
+    db.prepare(`INSERT OR REPLACE INTO ideas (${cols.join(', ')}) VALUES (${cols.map(() => '?').join(', ')})`).run(...cols.map(c => was[c]))
+  }
+  db.prepare('UPDATE idea_history SET undone = 1 WHERE turn = ?').run(t)
+  return rows.length
+}
 
 // ---------- sorting ----------
 

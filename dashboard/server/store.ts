@@ -1,6 +1,6 @@
 // ~/.fleet: config (port + access key, shared with the fleet CLI) and the SQLite database.
 import { randomBytes } from 'node:crypto'
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
@@ -48,5 +48,15 @@ const IDEA_COLUMNS: Record<string, string> = {
 const have = new Set((db.prepare('PRAGMA table_info(ideas)').all() as { name: string }[]).map(c => c.name))
 for (const [col, type] of Object.entries(IDEA_COLUMNS)) if (!have.has(col)) db.exec(`ALTER TABLE ideas ADD COLUMN ${col} ${type}`)
 if (!(db.prepare('PRAGMA table_info(paused)').all() as { name: string }[]).some(c => c.name === 'resume_at')) db.exec('ALTER TABLE paused ADD COLUMN resume_at INTEGER')
+/** A copy of the whole database once a day, last 30 kept, in ~/.fleet/backups. `fleet restore` brings ideas back from one. */
+export function dailyBackup() {
+  const dir = join(FLEET_DIR, 'backups')
+  mkdirSync(dir, { recursive: true, mode: 0o700 })
+  const file = join(dir, `fleet-${new Date().toLocaleDateString('sv')}.db`) // sv: YYYY-MM-DD in local time
+  if (existsSync(file)) return
+  db.exec(`VACUUM INTO '${file.replaceAll("'", "''")}'`)
+  for (const old of readdirSync(dir).filter(f => /^fleet-\d{4}-\d\d-\d\d\.db$/.test(f)).sort().slice(0, -30)) unlinkSync(join(dir, old))
+}
+
 // ideas jotted into a list that doesn't exist yet (fleet idea -l NewList) get that list
 db.exec("INSERT OR IGNORE INTO lists (name, position) SELECT DISTINCT list, 100 FROM ideas")

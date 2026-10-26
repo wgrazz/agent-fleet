@@ -11,7 +11,7 @@ import { conversations, transcript } from './history.ts'
 import * as ideas from './ideas.ts'
 import { notify, publicKey, subscribe } from './push.ts'
 import { alerts, ingestHook, list, poll, startPolling } from './state.ts'
-import { config, db, FLEET_BIN, FLEET_DIR, saveConfig } from './store.ts'
+import { config, dailyBackup, db, FLEET_BIN, FLEET_DIR, saveConfig } from './store.ts'
 import { capture, run, sendKey, sendText } from './tmux.ts'
 import { liveTail } from './detect.ts'
 import { aiBudget, usage } from './usage.ts'
@@ -165,18 +165,19 @@ const budget = () => aiBudget(config.jarvis_warn_pct ?? 5, config.jarvis_max_pct
 type JarvisOpts = { threadId?: number; override?: boolean }
 
 /** Carry out one action. Anything Claude wants to do to an agent only gets here after you approve it. */
-async function doAction(a: JarvisAction): Promise<string> {
+async function doAction(a: JarvisAction, turn = Date.now()): Promise<string> {
   const target = a.agent ? list().find(x => x.name === a.agent && x.controllable) : undefined
   if ((a.type === 'reply' || a.type === 'key' || a.type === 'pause') && !target) throw new Error(`no agent named ${a.agent}`)
   if (a.type === 'reply') await sendText(target!.name, a.text)
   if (a.type === 'key') await sendKey(target!.name, a.key)
   if (a.type === 'pause') await fleet(['pause', target!.name, ...(a.text ? ['--until', a.text] : [])])
   if (a.type === 'start') return `started ${(await startAgent({ tool: a.tool || undefined, model: a.model, effort: a.effort, prompt: a.text, name: a.name })).name}`
-  if (a.type === 'idea') ideas.addIdea(a.text, a.list || 'Brain Dump')
+  if (a.type === 'idea') ideas.logChange(turn, ideas.addIdea(a.text, a.list || 'Brain Dump'), null)
   if (a.type === 'idea_edit') {
     const e = a.edit
     const cur = e && ideas.idea(e.id)
     if (!e || !cur) throw new Error(`no idea #${e?.id}`)
+    ideas.logChange(turn, e.id, cur)
     if (e.done === 'delete') { ideas.deleteIdea(e.id); return `deleted “${cur.text.slice(0, 60)}”` }
     ideas.updateIdea(e.id, {
       text: e.text.trim() || undefined, notes: e.notes || undefined, list: e.list.trim() || undefined,
@@ -189,10 +190,10 @@ async function doAction(a: JarvisAction): Promise<string> {
   return `${a.type === 'remember' ? 'remembered' : a.type}${a.agent ? ` ${a.agent}` : ''}${a.key ? ` ${a.key}` : ''}`
 }
 
-async function settle(p: J.Proposal, approve: boolean) {
+async function settle(p: J.Proposal, approve: boolean, turn = Date.now()) {
   if (!approve) { J.settleProposal(p.id, 'declined'); return `declined: ${p.summary}` }
   try {
-    const result = await doAction(JSON.parse(p.action))
+    const result = await doAction(JSON.parse(p.action), turn)
     J.settleProposal(p.id, 'approved', result)
     return result
   } catch (e) {
@@ -205,16 +206,23 @@ async function runJarvis(said: string, opts: JarvisOpts = {}) {
   const t = J.threadFor(opts.threadId)
   J.addMessage(t, 'you', said)
   const done: string[] = []
+  const turn = Date.now() // ties this turn's idea changes together for Undo
   const reply = (say: string, meta: object = {}) => {
-    J.addMessage(t, 'bot', say, { done, ...meta })
-    return { thread_id: t.id, say, done, ...meta }
+    const m = { done, ...(ideas.changedIn(turn) ? { undo: turn } : {}), ...meta }
+    J.addMessage(t, 'bot', say, m)
+    return { thread_id: t.id, say, ...m }
+  }
+
+  if (/^(undo( that| it)?|take (that|it) back|put (that|it) back)[.!]*$/i.test(said.trim())) {
+    const n = ideas.undoTurn()
+    return reply(n ? `Undone. Your ideas are back to how they were before my last change${n === 1 ? '' : `s (${n})`}.` : "There's nothing of mine to undo.", { mode: 'instant' })
   }
 
   // "yes" / "no" answers whatever is waiting for approval in this conversation
   const pending = J.pendingProposals(t.id)
   const word = pending.length ? J.approvalWord(said) : null
   if (word) {
-    for (const p of pending) done.push(await settle(p, word === 'yes'))
+    for (const p of pending) done.push(await settle(p, word === 'yes', turn))
     await poll()
     return reply(word === 'yes' ? (pending.length === 1 ? 'Done.' : `Done, all ${pending.length}.`) : 'Cancelled.', { mode: 'instant' })
   }
@@ -224,6 +232,7 @@ async function runJarvis(said: string, opts: JarvisOpts = {}) {
     const b0 = await budget()
     if (b0.jarvis_pct >= b0.max_pct && !opts.override)
       return reply(`That needs Claude, and I'm past the ${b0.max_pct} percent weekly cap. Tap Allow once to go ahead.`, { blocked: said, mode: 'claude' })
+    for (const i of ideas.ideas().filter(i => !i.done)) ideas.logChange(turn, i.id, i) // ranking rewrites priorities: keep them for Undo
     const r = await ideas.rankAll(jarvisContext())
     done.push(`ranked: ${r.counts[0]} high, ${r.counts[1]} medium, ${r.counts[2]} low`)
     const top = r.next.slice(0, 3).map((i, n) => `${n + 1}, ${i.text.replace(/\s+/g, ' ').slice(0, 80)}`).join('; ')
@@ -244,7 +253,7 @@ async function runJarvis(said: string, opts: JarvisOpts = {}) {
   // things you said directly ("tell walmart yes") happen right away
   const quick = J.instant(said, list())
   if (quick) {
-    for (const a of quick.actions) done.push(await doAction(a).catch(e => `couldn't ${a.type}: ${(e as Error).message}`))
+    for (const a of quick.actions) done.push(await doAction(a, turn).catch(e => `couldn't ${a.type}: ${(e as Error).message}`))
     if (quick.actions.length) await poll()
     return reply(quick.say, { mode: 'instant' })
   }
@@ -266,7 +275,7 @@ async function runJarvis(said: string, opts: JarvisOpts = {}) {
   // Jarvis only reads; anything that changes an agent becomes a proposal you approve
   const proposed = []
   for (const a of answer.value.actions) {
-    if (!J.needsApproval(a)) done.push(await doAction(a).catch(e => `couldn't ${a.type}: ${(e as Error).message}`))
+    if (!J.needsApproval(a)) done.push(await doAction(a, turn).catch(e => `couldn't ${a.type}: ${(e as Error).message}`))
     else proposed.push(J.propose(t.id, a))
   }
   const after = await budget()
@@ -502,13 +511,15 @@ const routes: [string, RegExp, Route][] = [
     const p = J.proposal(int(id))
     if (!p) throw new HttpError(404, 'no such proposal')
     if (p.state !== 'pending') return { state: p.state, result: p.result }
-    const result = await settle(p, verb === 'approve')
+    const turn = Date.now()
+    const result = await settle(p, verb === 'approve', turn)
     const t = J.thread(p.thread_id)
-    if (t) J.addMessage(t, 'bot', verb === 'approve' ? `Done: ${result}` : 'Cancelled.', { done: [result], mode: 'instant' })
+    if (t) J.addMessage(t, 'bot', verb === 'approve' ? `Done: ${result}` : 'Cancelled.', { done: [result], mode: 'instant', ...(ideas.changedIn(turn) ? { undo: turn } : {}) })
     await poll()
     return { state: verb === 'approve' ? 'approved' : 'declined', result }
   }],
 
+  ['POST', /^\/api\/jarvis\/undo$/, async req => ({ undone: ideas.undoTurn(Number((await body(req)).turn) || undefined) })],
   ['POST', /^\/api\/jarvis\/log$/, async req => {
     console.log(`jarvis voice: ${str((await body(req)).event, 200)}`)
     return { ok: true }
@@ -764,5 +775,7 @@ if (import.meta.main) {
   startPolling()
   setInterval(() => resumeDue().catch(e => console.error('resume check failed:', e)), 30_000)
   setInterval(() => sendQueued().catch(e => console.error('queue check failed:', e)), 2000)
+  dailyBackup()
+  setInterval(dailyBackup, 3600_000)
   server.listen(config.port, '127.0.0.1', () => console.log(`fleet dashboard on http://127.0.0.1:${config.port}`))
 }

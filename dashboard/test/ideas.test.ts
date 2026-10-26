@@ -43,13 +43,32 @@ describe('ideas', () => {
     const list = m.lists().find(l => l.name === 'Temp')!
     m.deleteList(list.id)
     expect(m.idea(id)!.list).toBe('Brain Dump')
-    expect(() => m.deleteList(m.lists().find(l => l.name === 'Priority')!.id)).toThrow()
+    expect(() => m.deleteList(m.lists().find(l => l.name === 'Brain Dump')!.id)).toThrow()
   })
   it('renaming a list carries its ideas', () => {
     m.createList('Old')
     const id = m.addIdea('x', 'Old')
     m.updateList(m.lists().find(l => l.name === 'Old')!.id, { name: 'New' })
     expect(m.idea(id)!.list).toBe('New')
+  })
+})
+
+describe('undo', () => {
+  it("puts back one Jarvis turn's changes: edits reverted, additions removed, deletions restored", () => {
+    const keep = m.addIdea('buy milk', 'Brain Dump')
+    const gone = m.addIdea('call mom', 'Brain Dump')
+    const turn = Date.now()
+    m.logChange(turn, keep, m.idea(keep)!)
+    m.updateIdea(keep, { text: 'buy oat milk', list: 'Groceries', done: true })
+    m.logChange(turn, gone, m.idea(gone)!)
+    m.deleteIdea(gone)
+    m.logChange(turn, m.addIdea('stray', 'Brain Dump'), null)
+    expect(m.changedIn(turn)).toBe(true)
+    expect(m.undoTurn()).toBe(3)
+    expect(m.idea(keep)).toMatchObject({ text: 'buy milk', list: 'Brain Dump', done: 0 })
+    expect(m.idea(gone)?.text).toBe('call mom')
+    expect(m.ideas().some(i => i.text === 'stray')).toBe(false) // (its id may be the deleted one's again: SQLite reuses the top id)
+    expect(m.undoTurn()).toBe(0) // nothing left to undo
   })
 })
 

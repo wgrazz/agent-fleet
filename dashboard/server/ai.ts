@@ -94,7 +94,7 @@ export const recommend = (task: string, usage: string) =>
 
 // ---------- Brain Dump sorter ----------
 
-const SORT_SYSTEM = `You help a developer sort quick notes from their "Brain Dump" inbox into their own lists. For each note pick the list it most likely belongs in, using the list names and the examples already in each list. Use "Priority" only for things that are clearly urgent. If no list fits, answer "Brain Dump". Confidence is 0 to 1.`
+const SORT_SYSTEM = `You help a developer sort quick notes from their "Brain Dump" inbox into their own lists. For each note pick the list it most likely belongs in, using the list names and the examples already in each list. If there is a "Priority" list, use it only for things that are clearly urgent. If no list fits, answer "Brain Dump". Confidence is 0 to 1.`
 
 export type Suggestion = { id: number; list: string; confidence: number }
 

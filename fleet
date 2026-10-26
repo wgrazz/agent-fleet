@@ -22,6 +22,7 @@ LATER
   fleet paused           list paused agents
   fleet unpause ID|NAME  bring a paused agent back in a new session with its conversation
   fleet idea [-l LIST] TEXT   jot an idea (lands in Brain Dump unless you name a list)
+  fleet restore [DATE]   list the daily backups of your ideas, or put ideas and lists back as they were on DATE
   fleet import-notes [--dry-run]   copy your numbered Apple Notes checklists into Ideas (needs Full Disk Access)
 
 DASHBOARD
@@ -596,6 +597,34 @@ def read(args):
     print(json.dumps(data, indent=1)[:60_000])
 
 
+def restore(args):
+    """Put your ideas and lists back as they were in a daily backup (~/.fleet/backups). Nothing else changes."""
+    d = f'{FLEET_DIR}/backups'
+    names = sorted((f for f in os.listdir(d) if re.fullmatch(r'fleet-\d{4}-\d\d-\d\d\.db', f)), reverse=True) if os.path.isdir(d) else []
+    if not args:
+        if not names:
+            return print('No backups yet. The dashboard saves one a day in ~/.fleet/backups.')
+        for n in names:
+            b = sqlite3.connect(f'file:{d}/{n}?mode=ro', uri=True)
+            print(f'  {n[6:16]}  {b.execute("SELECT count(*) FROM ideas WHERE done = 0").fetchone()[0]} open ideas')
+        return print('fleet restore YYYY-MM-DD puts your ideas and lists back as they were that day (a copy of now is saved first).')
+    name = f'fleet-{args[0]}.db'
+    if name not in names:
+        sys.exit(f'No backup from {args[0]}. fleet restore lists them.')
+    con = db()
+    keep = f'{d}/before-restore-{time.strftime("%Y-%m-%d-%H%M%S")}.db'
+    con.execute('VACUUM INTO ?', (keep,))
+    con.execute('ATTACH ? AS b', (f'{d}/{name}',))
+    with con:
+        for table in ('lists', 'ideas'):
+            here = {r[1] for r in con.execute(f'PRAGMA main.table_info({table})')}
+            cols = ', '.join(r[1] for r in con.execute(f'PRAGMA b.table_info({table})') if r[1] in here)
+            con.execute(f'DELETE FROM main.{table}')
+            con.execute(f'INSERT INTO main.{table} ({cols}) SELECT {cols} FROM b.{table}')
+        con.execute('INSERT OR IGNORE INTO main.lists (name, position) SELECT DISTINCT list, 100 FROM main.ideas')
+    print(f'Ideas and lists are back as they were on {args[0]}. What you had a moment ago is saved as {keep}.')
+
+
 def idea(args):
     lst = 'Brain Dump'
     if args[:1] == ['-l'] and len(args) > 1:
@@ -726,7 +755,7 @@ def import_notes(args):
         if dry:
             continue
         with con:
-            if name not in ('Priority', 'Brain Dump'):
+            if name != 'Brain Dump':
                 con.execute('INSERT OR IGNORE INTO lists (name, position) VALUES (?, ?)', (name, pos))
             for i, (text, _, done) in enumerate(items):
                 source = f'notes:{ident}:{i}:{text[:40]}'
@@ -1276,6 +1305,8 @@ def main(args):
         return unpause(rest[0], detach='--detach' in rest[1:])
     if cmd == 'idea':
         return idea(rest)
+    if cmd == 'restore' and len(rest) <= 1:
+        return restore(rest)
     if cmd == 'read' and rest:
         return read(rest)
     if cmd == 'import-notes':

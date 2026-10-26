@@ -187,7 +187,7 @@ function App() {
       yes: () => act(api.del(`/api/folders/${f.id}`), () => route.view === 'folder' && Number(route.a) === f.id && go('#/')) }) },
   ], f.name)
 
-  const pinned = (l: List) => l.name === 'Priority' || l.name === 'Brain Dump'
+  const pinned = (l: List) => l.name === 'Brain Dump'
   const listMenu = (l: List, x: number, y: number) => openMenu(x, y, [
     ...(!pinned(l) ? [{ label: 'Rename…', onClick: () => setModal({ kind: 'name', title: 'Rename list', initial: l.name, color: l.color, submit: (name: string, color: string) => {
       setModal(null)

@@ -47,7 +47,7 @@ CREATE TABLE IF NOT EXISTS lists (
   position INTEGER NOT NULL DEFAULT 0,
   archived INTEGER NOT NULL DEFAULT 0
 );
-INSERT OR IGNORE INTO lists (name, color, position) VALUES ('Priority', '#ff3b30', -2), ('Brain Dump', '#8e8e93', -1);
+INSERT OR IGNORE INTO lists (name, color, position) VALUES ('Brain Dump', '#8e8e93', -1);
 -- every smart-feature call (Jarvis, Improve, Suggest, Sort): API-equivalent cost as Claude Code reports it
 CREATE TABLE IF NOT EXISTS ai_usage (
   id INTEGER PRIMARY KEY,
@@ -84,6 +84,16 @@ CREATE TABLE IF NOT EXISTS jarvis_proposals (
   state TEXT NOT NULL DEFAULT 'pending', -- pending | approved | declined
   result TEXT,
   created_at INTEGER NOT NULL
+);
+
+-- Every change Jarvis makes to an idea, with the idea as it was before (NULL: Jarvis added it), so a turn can be undone.
+CREATE TABLE IF NOT EXISTS idea_history (
+  id INTEGER PRIMARY KEY,
+  turn INTEGER NOT NULL,
+  idea_id INTEGER NOT NULL,
+  before TEXT,
+  at INTEGER NOT NULL,
+  undone INTEGER NOT NULL DEFAULT 0
 );
 
 -- Messages typed while an agent was busy: sent one at a time, each after the agent finishes its turn.

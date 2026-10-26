@@ -198,7 +198,7 @@ export const spokenAlerts = { get: () => remember.get('jarvis.alerts') === '1', 
 export const spokenReplies = { get: () => remember.get('jarvis.quiet') !== '1', set: (on: boolean) => remember.set('jarvis.quiet', on ? '' : '1') }
 
 type Proposal = { id: number; summary: string; state: 'pending' | 'approved' | 'declined'; result?: string | null }
-type Line = { who: 'you' | 'bot'; text: string; meta?: { done?: string[]; mode?: string; warning?: string; blocked?: string; proposals?: Proposal[] } }
+type Line = { who: 'you' | 'bot'; text: string; meta?: { done?: string[]; mode?: string; warning?: string; blocked?: string; proposals?: Proposal[]; undo?: number; undone?: boolean } }
 type Thread = { id: number; title: string; updated_at: number; count?: number }
 
 const IDLE_MS = 2 * 3600 * 1000
@@ -262,10 +262,10 @@ export function Jarvis({ onClose, onChanged, asPage, autoTalk }: { onClose: () =
     if (!override) setLines(l => [...l, { who: 'you', text }])
     setThinking(true)
     try {
-      const r = await api.post<{ thread_id: number; say: string; done: string[]; mode: string; blocked?: string; warning?: string; proposals?: Proposal[] }>(
+      const r = await api.post<{ thread_id: number; say: string; done: string[]; mode: string; blocked?: string; warning?: string; proposals?: Proposal[]; undo?: number }>(
         '/api/jarvis', { text, override, thread_id: threadRef.current ?? undefined })
       if (r.thread_id !== threadRef.current) { setThreadId(r.thread_id); remember.set('jarvis.thread', String(r.thread_id)); if (!title) setTitle(text.slice(0, 70)) }
-      setLines(l => [...l, { who: 'bot', text: r.say, meta: { done: r.done, mode: r.mode, warning: r.warning, blocked: r.blocked, proposals: r.proposals } }])
+      setLines(l => [...l, { who: 'bot', text: r.say, meta: { done: r.done, mode: r.mode, warning: r.warning, blocked: r.blocked, proposals: r.proposals, undo: r.undo } }])
       if (r.proposals?.length) setProposals(p => ({ ...p, ...Object.fromEntries(r.proposals!.map(x => [x.id, x])) }))
       if (r.done.length) onChanged()
       if (r.mode !== 'instant') loadBudget()
@@ -278,6 +278,11 @@ export function Jarvis({ onClose, onChanged, asPage, autoTalk }: { onClose: () =
       return msg
     }
   }
+
+  // put back the ideas a turn changed; the line remembers it was undone until the conversation reloads
+  const undo = (i: number, turn: number) => api.post('/api/jarvis/undo', { turn })
+    .then(() => { setLines(l => l.map((x, j) => (j === i ? { ...x, meta: { ...x.meta, undone: true } } : x))); onChanged() })
+    .catch(e => setLines(l => [...l, { who: 'bot', text: `Couldn't undo: ${(e as Error).message}` }]))
 
   const decide = (p: Proposal, approve: boolean) => {
     setProposals(x => ({ ...x, [p.id]: { ...p, state: approve ? 'approved' : 'declined' } }))
@@ -423,6 +428,8 @@ export function Jarvis({ onClose, onChanged, asPage, autoTalk }: { onClose: () =
               {m.text}
               {(m.meta?.done?.length || m.meta?.mode === 'instant') ? <div className="said-done">{[m.meta?.mode === 'instant' && 'instant', ...(m.meta?.done ?? [])].filter(Boolean).join(' · ')}</div> : null}
               {m.meta?.warning && <div className="said-warn">{m.meta.warning}</div>}
+              {m.meta?.undo && (m.meta.undone ? <div className="said-done">undone</div>
+                : <button className="btn small" onClick={() => undo(i, m.meta!.undo!)}>Undo</button>)}
               {m.meta?.blocked && <button className="btn small" onClick={() => ask(m.meta!.blocked!, true)}>Allow once</button>}
               {m.meta?.proposals?.map(x => {
                 const p = proposals[x.id] ?? x
