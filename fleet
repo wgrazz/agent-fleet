@@ -29,6 +29,7 @@ DASHBOARD
   fleet dash app         open it in Safari to add to your Dock as a Mac app
   fleet mac …            what Jarvis can do on this Mac: music, calendar, reminders, draft, apps, open, window, screen
   fleet ask TEXT         ask Jarvis (the dashboard's assistant) from any terminal or script
+  fleet dash siri [FILE] make the "Hey Siri, Jarvis" shortcut for your iPhone (default ~/Desktop/Jarvis.shortcut)
   fleet dash install     run the dashboard at login and put it on your tailnet for your phone (--local: Mac only)
   fleet dash update      after changing the dashboard's code: rebuild the page and restart the server
   fleet dash uninstall   stop it and remove it from login items
@@ -870,8 +871,7 @@ def dash_update():
 def dash_app():
     """Open the dashboard in Safari so it can be added to the Dock as its own app (File → Add to Dock)."""
     cfg = config()
-    ts = tailscale()
-    host = json.loads(out(ts, 'status', '--json') or '{}').get('Self', {}).get('DNSName', '').rstrip('.') if ts else ''
+    host = ts_host()
     url = f'https://{host}/?key={cfg["key"]}' if host else f'http://127.0.0.1:{cfg["port"]}/?key={cfg["key"]}'
     if shutil.which('open'):
         subprocess.run(['open', '-a', 'Safari', url])
@@ -1047,14 +1047,63 @@ def mac_hotkey(action):
     if r.returncode:
         sys.exit(f'Could not build the hotkey helper: {r.stderr.strip()[:300]}')
     cfg = config()
-    ts = tailscale()
-    host = json.loads(out(ts, 'status', '--json') or '{}').get('Self', {}).get('DNSName', '').rstrip('.') if ts else ''
+    host = ts_host()
     url = f'https://{host}/#/jarvis/talk' if host else f'http://127.0.0.1:{cfg["port"]}/#/jarvis/talk'
     with open(plist, 'wb') as f:
         plistlib.dump({'Label': HOTKEY_LABEL, 'ProgramArguments': [binary, url], 'RunAtLoad': True, 'KeepAlive': True,
                        'StandardErrorPath': f'{FLEET_DIR}/hotkey.log'}, f)
     subprocess.run(['launchctl', 'bootstrap', domain, plist], check=True)
     print('⌃⌥Space now opens Jarvis anywhere on this Mac (starts at login). Add Fleet to your Dock first (fleet dash app) so it opens as its own app.')
+
+
+def ts_host():
+    """This Mac's name on your tailnet (what the phone uses), or '' without Tailscale."""
+    ts = tailscale()
+    try:
+        return json.loads(out(ts, 'status', '--json')).get('Self', {}).get('DNSName', '').rstrip('.') if ts else ''
+    except ValueError:  # the app's CLI can't reach its GUI (e.g. from launchd)
+        return ''
+
+
+def siri_shortcut(path, host=''):
+    """A signed "Jarvis" shortcut for the iPhone: dictate, ask Jarvis, speak the answer, listen again (up to 10 turns;
+    it ends when you stop talking). It holds your access key, so it's made on demand and never saved in the repo."""
+    import plistlib
+    import tempfile
+    import uuid
+    host = host or ts_host()
+    if not host:
+        sys.exit('Siri needs the dashboard on your tailnet: install Tailscale, then fleet dash install.')
+    said, loop = str(uuid.uuid4()).upper(), str(uuid.uuid4()).upper()
+    text = lambda s: {'Value': {'string': s}, 'WFSerializationType': 'WFTextTokenString'}
+    fields = lambda *kv: {'Value': {'WFDictionaryFieldValueItems': [{'WFItemType': 0, 'WFKey': text(k), 'WFValue': v} for k, v in kv]},
+                          'WFSerializationType': 'WFDictionaryFieldValue'}
+    dictated = {'Value': {'string': '\ufffc', 'attachmentsByRange': {'{0, 1}': {'Type': 'ActionOutput', 'OutputUUID': said, 'OutputName': 'Dictated Text'}}},
+                'WFSerializationType': 'WFTextTokenString'}
+    step = lambda ident, **p: {'WFWorkflowActionIdentifier': f'is.workflow.actions.{ident}', 'WFWorkflowActionParameters': p}
+    workflow = {
+        'WFWorkflowActions': [
+            step('repeat.count', GroupingIdentifier=loop, WFControlFlowMode=0, WFRepeatCount=10),
+            step('dictatetext', UUID=said, WFDictateTextStopListening='After Pause'),
+            step('downloadurl', WFURL=f'https://{host}/api/jarvis', WFHTTPMethod='POST', ShowHeaders=True,
+                 WFHTTPHeaders=fields(('X-Fleet-Key', text(config()['key']))), WFHTTPBodyType='JSON', WFJSONValues=fields(('text', dictated))),
+            step('getvalueforkey', WFDictionaryKey='say'),
+            step('speaktext'),
+            step('repeat.count', GroupingIdentifier=loop, WFControlFlowMode=2),
+        ],
+        'WFWorkflowClientVersion': '2302.0.4', 'WFWorkflowMinimumClientVersion': 900, 'WFWorkflowMinimumClientVersionString': '900',
+        'WFWorkflowIcon': {'WFWorkflowIconStartColor': 463140863, 'WFWorkflowIconGlyphNumber': 59511},
+        'WFWorkflowImportQuestions': [], 'WFWorkflowTypes': [], 'WFWorkflowInputContentItemClasses': ['WFStringContentItem'],
+        'WFWorkflowOutputContentItemClasses': [], 'WFQuickActionSurfaces': [], 'WFWorkflowHasShortcutInputVariables': False,
+    }
+    with tempfile.NamedTemporaryFile(suffix='.shortcut') as raw:
+        plistlib.dump(workflow, raw, fmt=plistlib.FMT_BINARY)
+        raw.flush()
+        r = subprocess.run(['shortcuts', 'sign', '--mode', 'anyone', '--input', raw.name, '--output', path], capture_output=True, text=True)
+    if r.returncode:
+        sys.exit(f'Could not sign the shortcut: {(r.stderr or r.stdout).strip()[:300]}')
+    os.chmod(path, 0o600)
+    print(path)
 
 
 def mac_setup(quiet=False):
@@ -1245,6 +1294,8 @@ def main(args):
         return dash_app()
     if cmd == 'dash' and rest == ['update']:
         return dash_update()
+    if cmd == 'dash' and rest[:1] == ['siri'] and len(rest) <= 3:  # siri [FILE] [HOST]
+        return siri_shortcut(rest[1] if len(rest) > 1 else os.path.expanduser('~/Desktop/Jarvis.shortcut'), rest[2] if len(rest) > 2 else '')
     if cmd == 'tts' and rest == ['install']:
         return tts_install()
     if cmd == 'dash' and rest == ['uninstall']:

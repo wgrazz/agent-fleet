@@ -112,6 +112,12 @@ export function SettingsPage({ usage, push, onBack, onError }: { usage: Usage[];
           </div>
         </Section>
 
+        <Section title="Hey Siri" hint="A shortcut called Jarvis: say “Hey Siri, Jarvis”, then talk. Siri reads the answer and listens again until you stop talking. It holds your access key, so keep it to yourself. Tailscale must be on.">
+          <div className="set-row">
+            <a className="btn primary" href="/api/siri/shortcut" download="Jarvis.shortcut">Add the Jarvis shortcut</a>
+          </div>
+        </Section>
+
         <MacAccess />
 
         <Section title="Jarvis's budget" hint="Jarvis's share of your weekly Claude limit, worked out from what all your Claude sessions cost this week.">

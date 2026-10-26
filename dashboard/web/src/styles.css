@@ -385,13 +385,13 @@ details.ai-note { display: block; }
   .app > .list, .app > .det { grid-row: 2; }
   .nav { display: none; }
   .app[data-view=list] .det, .app[data-view=detail] .list { display: none; }
-  .list { border-right: 0; padding-top: env(safe-area-inset-top); }
+  .list { border-right: 0; padding-top: var(--top); }
   .lh { padding: 14px 16px 8px; }
   .lh h4 { font-size: 24px; }
   .lh-mobile { display: block; }
   .lh-mobile .menu { left: auto; right: 0; }
   .lh-mobile .new-main { padding: 6px 9px; }
-  .det { padding-top: env(safe-area-inset-top); }
+  .det { padding-top: var(--top); }
   .back { display: block; }
   .dh { padding: 10px 12px; gap: 10px; }
   .acts .btn { padding: 6px 9px; }
@@ -413,7 +413,7 @@ details.ai-note { display: block; }
   .app[data-view=detail] .tabs { display: none; }
   .fab-jarvis { display: none; }
   .jarvis { left: 8px; right: 8px; width: auto; bottom: max(8px, env(safe-area-inset-bottom)); height: 60vh; }
-  .ideas-chips { display: flex; grid-row: 1; padding-top: max(8px, env(safe-area-inset-top)); background: var(--panel); }
+  .ideas-chips { display: flex; grid-row: 1; padding-top: var(--top); background: var(--panel); }
   .app[data-view=detail] .ideas-chips { display: none; }
   .ideas-chips + * {}
   .list.ideas { padding-top: 0; }
@@ -421,6 +421,9 @@ details.ai-note { display: block; }
   .form-row { flex-wrap: wrap; }
   .palette-overlay { padding-top: max(16px, env(safe-area-inset-top)); }
 }
+
+/* iOS draws a frosted strip under the clock and battery that runs a little past the safe area: start content below it */
+:root { --top: calc(env(safe-area-inset-top) + 14px); }
 
 /* Holding a row opens Fleet's own menu: stop iOS from also showing its link preview and selecting text */
 html.holding, html.holding *, .it, .it *, .idea-body, .idea-body *, .chip-f, .ni, .hit, .q, .tabs a {
@@ -497,7 +500,7 @@ html.holding, html.holding *, .it, .it *, .idea-body, .idea-body *, .chip-f, .ni
 .jarvis.page { position: static; width: auto; height: 100%; border-radius: 0; box-shadow: none; flex: 1; min-height: 0; }
 @media (max-width: 700px) {
   .app { height: var(--vvh, 100%); }
-  .jarvis.page { height: 100%; padding-top: env(safe-area-inset-top); }
+  .jarvis.page { height: 100%; padding-top: var(--top); }
   .jarvis.page .jarvis-in { padding-bottom: max(10px, env(safe-area-inset-bottom)); }
   /* Jarvis is a tab, not a takeover: the tab bar stays, except while the keyboard is up */
   .app[data-jarvis] .tabs { display: flex; }
