@@ -422,8 +422,10 @@ details.ai-note { display: block; }
   .palette-overlay { padding-top: max(16px, env(safe-area-inset-top)); }
 }
 
-/* iOS draws a frosted strip under the clock and battery that runs a little past the safe area: start content below it */
+/* As a home-screen app, iOS blurs a band under the clock and battery that reaches about 40pt past the safe area
+   (measured from a screenshot): keep content below it, the way a native app's nav bar would */
 :root { --top: calc(env(safe-area-inset-top) + 14px); }
+@media (display-mode: standalone) { :root { --top: calc(env(safe-area-inset-top) + 46px); } }
 
 /* Holding a row opens Fleet's own menu: stop iOS from also showing its link preview and selecting text */
 html.holding, html.holding *, .it, .it *, .idea-body, .idea-body *, .chip-f, .ni, .hit, .q, .tabs a {
