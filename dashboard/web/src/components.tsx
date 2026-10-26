@@ -3,6 +3,14 @@ import { api, listGroups, remember, type Agent, type Folder, type Improved, type
 
 export const TOOLS = ['claude', 'codex', 'cursor', 'copilot', 'agy'] as const
 const TOOL_LABEL: Record<string, string> = { claude: 'Claude', codex: 'Codex', cursor: 'Cursor', copilot: 'Copilot', agy: 'Antigravity' }
+// ponytail: hand-kept copy of the CATALOG in server/ai.ts; "Other…" covers anything missing.
+const MODELS: Record<string, [id: string, label: string][]> = {
+  claude: [['fable', 'Fable 5.1'], ['opus', 'Opus 5.5'], ['sonnet', 'Sonnet 5.5'], ['haiku', 'Haiku 5.5']],
+  codex: [['gpt-6-astra', 'GPT-6 Astra']],
+  cursor: ['auto', 'composer-2.5', 'gpt-5.3-codex', 'gpt-5.3-codex-high', 'claude-opus-5-thinking-high', 'claude-sonnet-5-thinking-high',
+    'gpt-5.6-sol-high', 'gemini-3.7-flash-high', 'grok-4.7-medium'].map(m => [m, m]),
+  copilot: [['auto', 'auto'], ['gpt-5.6-luna', 'gpt-5.6-luna'], ['mai-code-1.1-flash', 'mai-code-1.1-flash']],
+}
 const GLYPH: Record<string, string> = { claude: '✳', codex: '❯', cursor: '◢', copilot: '◉', agy: 'A' }
 export const STATUS_LABEL: Record<Status, string> = {
   needs_you: 'Needs you', working: 'Working', waiting: 'Waiting on a job', ready: 'Ready', done: 'Done', crashed: 'Crashed', unknown: 'Outside tmux',
@@ -423,6 +431,9 @@ export function CustomForm({ title = 'New agent', initial, folders, onClose, onS
     name: '', tool: 'claude', model: '', effort: '', cwd: remember.get('cwd'), prompt: '', folder_id: null, profile: '', isDefault: false, ...initial,
   })
   const [busy, setBusy] = useState<'' | 'start' | 'suggest' | 'improve'>('')
+  const [other, setOther] = useState(false)
+  const models = MODELS[f.tool] ?? []
+  const typing = other || (!!f.model && !models.some(([id]) => id === f.model))
   const [route, setRoute] = useState<Route | null>(null)
   const [improved, setImproved] = useState<(Improved & { before: string }) | null>(null)
   const set = (k: keyof typeof f) => (e: { target: { value: string; checked?: boolean; type?: string } }) =>
@@ -490,8 +501,18 @@ export function CustomForm({ title = 'New agent', initial, folders, onClose, onS
           </div>
         )}
         <div className="form-row">
-          <label>Tool<select value={f.tool} onChange={set('tool')}>{TOOLS.map(t => <option key={t} value={t}>{toolLabel(t)}</option>)}</select></label>
-          <label>Model<input value={f.model} onChange={set('model')} placeholder="tool default" /></label>
+          <label>Tool<select value={f.tool} onChange={e => { setF({ ...f, tool: e.target.value, model: '' }); setOther(false) }}>
+            {TOOLS.map(t => <option key={t} value={t}>{toolLabel(t)}</option>)}
+          </select></label>
+          <label>Model{typing
+            ? <input value={f.model} onChange={set('model')} placeholder="exact model id" autoFocus={other}
+                onBlur={() => !f.model && setOther(false)} />
+            : <select value={f.model} onChange={e => e.target.value === '__other' ? setOther(true) : setF({ ...f, model: e.target.value })}>
+                <option value="">tool default</option>
+                {models.map(([id, label]) => <option key={id} value={id}>{label}</option>)}
+                <option value={'__other'}>Other…</option>
+              </select>}
+          </label>
           <label>Effort<select value={f.effort} onChange={set('effort')}>
             {['', 'low', 'medium', 'high', 'xhigh', 'max'].map(v => <option key={v} value={v}>{v || 'default'}</option>)}
           </select></label>
