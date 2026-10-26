@@ -10,7 +10,7 @@ import { changes } from './git.ts'
 import { conversations, transcript } from './history.ts'
 import * as ideas from './ideas.ts'
 import { notify, publicKey, subscribe } from './push.ts'
-import { alerts, ingestHook, list, poll, startPolling } from './state.ts'
+import { alerts, answerAsk, ingestHook, list, openAsk, poll, pollAsk, startPolling } from './state.ts'
 import { config, dailyBackup, db, FLEET_BIN, FLEET_DIR, saveConfig } from './store.ts'
 import { capture, run, sendKey, sendText } from './tmux.ts'
 import { liveTail } from './detect.ts'
@@ -657,6 +657,16 @@ const routes: [string, RegExp, Route][] = [
     } catch (e) {
       throw new HttpError(400, (e as Error).message)
     }
+    return { ok: true }
+  }],
+
+  // Claude's questions and plans as a form: `fleet hook ask` opens one and polls it, the chat answers it
+  ['POST', /^\/api\/ask$/, async req => openAsk(await body(req))],
+  ['GET', /^\/api\/ask\/([\w-]+)$/, async (_req, [id]) => pollAsk(id)],
+  ['POST', /^\/api\/ask\/([\w-]+)\/answer$/, async (req, [id]) => {
+    const err = answerAsk(id, await body(req))
+    if (err) throw new HttpError(409, err)
+    await poll()
     return { ok: true }
   }],
 

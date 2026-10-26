@@ -18,7 +18,10 @@ export type Agent = {
   exit: string
   mode: string
   working_line: string
+  ask: Ask | null
 }
+export type Question = { question: string; header?: string; multiSelect?: boolean; options: { label: string; description?: string }[] }
+export type Ask = { id: string; kind: 'question' | 'plan'; questions: Question[]; plan: string }
 export type Placed = { key: string; folder_id: number | null }
 export type LiveAgent = Agent & Placed & { queued: { id: number; text: string }[] }
 export type Folder = { id: number; name: string; color: string; position: number }

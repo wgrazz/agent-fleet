@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
-import { api, remember, type Conversation, type LiveAgent, type Message, type Paused, type RepoChanges } from './api.ts'
+import { api, remember, type Ask, type Conversation, type LiveAgent, type Message, type Paused, type RepoChanges } from './api.ts'
 import { activity, age, ago, Avatar, isPhone, ORDER, PauseIcon, SendIcon, STATUS_LABEL, TermIcon, toolLabel, useHold } from './components.tsx'
 import { AddTodos } from './ideas.tsx'
 import { planSteps } from './steps.ts'
@@ -176,16 +176,76 @@ export function AgentView({ agent, onBack, onTerminal, onPause, onMenu, onAdopt,
           </div>
         )
       ) : shown === 'chat' ? (
-        <ChatView tool={agent.tool} id={agent.session_id} agent={agent.name} live waiting={agent.status === 'needs_you' ? agent.message : ''}
+        <ChatView tool={agent.tool} id={agent.session_id} agent={agent.name} live waiting={agent.status === 'needs_you' && !agent.ask ? agent.message : ''}
           working={agent.status === 'working' ? agent.working_line || 'Working…' : agent.status === 'waiting' ? 'Waiting on a background job, it picks up again when that finishes' : ''} pending={pending} onSeen={() => setPending('')} peek={agent.name} />
       ) : shown === 'changes' ? (
         <ChangesView name={agent.name} />
       ) : (
         <ScreenView name={agent.name} />
       )}
-      {agent.controllable && agent.pid !== null && <Composer agent={agent} send={sendTracked} />}
+      {agent.ask && <AskForm key={agent.ask.id} ask={agent.ask} />}
+      {!agent.ask && agent.controllable && agent.pid !== null && <Composer agent={agent} send={sendTracked} />}
       {agent.controllable && agent.pid === null && <div className="ended">This agent exited ({agent.exit}). Its last screen is kept under Screen.</div>}
     </main>
+  )
+}
+
+/** Claude's question or plan as a form. What you submit goes straight to Claude; answering in the terminal works too. */
+function AskForm({ ask }: { ask: Ask }) {
+  const [picks, setPicks] = useState<string[][]>(() => ask.questions.map(() => []))
+  const [own, setOwn] = useState<string[]>(() => ask.questions.map(() => ''))
+  const [feedback, setFeedback] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const submit = (body: object) => {
+    setBusy(true)
+    setError('')
+    api.post(`/api/ask/${ask.id}/answer`, body).catch(e => { setError(e.message); setBusy(false) })
+  }
+  const set = <T,>(xs: T[], i: number, v: T) => xs.map((x, j) => (j === i ? v : x))
+  if (ask.kind === 'plan') return (
+    <div className="comp ask">
+      <div className="ask-h">Plan for your approval</div>
+      {ask.plan && <div className="ask-plan"><Markdown text={ask.plan} /></div>}
+      <textarea className="ask-own" placeholder="What should change? (for Keep planning)" value={feedback} onChange={e => setFeedback(e.target.value)} />
+      {error && <div className="ask-err">{error}</div>}
+      <div className="form-actions">
+        <button className="btn" disabled={busy} onClick={() => submit({ feedback })}>Keep planning</button>
+        <button className="btn" disabled={busy} onClick={() => submit({ approve: 'default' })}>Approve · ask before edits</button>
+        <button className="btn primary" disabled={busy} onClick={() => submit({ approve: 'auto' })}>Approve · auto mode</button>
+      </div>
+    </div>
+  )
+  // a single pick and your own text replace each other; with pick-any, your text is one more answer
+  const answer = (i: number) => [...picks[i], own[i].trim()].filter(Boolean).join(', ')
+  const pick = (i: number, label: string, multi?: boolean) => {
+    setPicks(set(picks, i, multi ? (picks[i].includes(label) ? picks[i].filter(x => x !== label) : [...picks[i], label]) : [label]))
+    if (!multi) setOwn(set(own, i, ''))
+  }
+  const ready = ask.questions.every((_, i) => answer(i))
+  return (
+    <div className="comp ask">
+      {ask.questions.map((q, i) => (
+        <fieldset key={i} className="ask-q">
+          <legend>{q.question}{q.multiSelect && <span className="ask-hint"> · pick any</span>}</legend>
+          {q.options.map(o => (
+            <label key={o.label} className={`ask-opt ${picks[i].includes(o.label) ? 'on' : ''}`}>
+              <input type={q.multiSelect ? 'checkbox' : 'radio'} name={`${ask.id}-${i}`} checked={picks[i].includes(o.label)} onChange={() => pick(i, o.label, q.multiSelect)} />
+              <span><b>{o.label}</b>{o.description && <span className="ask-desc">{o.description}</span>}</span>
+            </label>
+          ))}
+          <input className="ask-own" placeholder="Or type your own answer" value={own[i]}
+            onChange={e => { setOwn(set(own, i, e.target.value)); if (!q.multiSelect && e.target.value) setPicks(set(picks, i, [])) }} />
+        </fieldset>
+      ))}
+      {error && <div className="ask-err">{error}</div>}
+      <div className="form-actions">
+        <button className="btn primary" disabled={busy || !ready}
+          onClick={() => submit({ answers: Object.fromEntries(ask.questions.map((q, i) => [q.question, answer(i)])) })}>
+          {busy ? 'Sending…' : ask.questions.length > 1 ? 'Submit answers' : 'Submit'}
+        </button>
+      </div>
+    </div>
   )
 }
 

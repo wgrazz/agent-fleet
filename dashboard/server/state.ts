@@ -1,5 +1,6 @@
 // The agent list and each agent's status. `fleet json` is the source of truth for which agents exist; tmux panes
 // add the screen and the exit code; Claude Code hooks (via `fleet hook`) give exact status for Claude.
+import { randomUUID } from 'node:crypto'
 import { EventEmitter } from 'node:events'
 import { busy, detect, mode, question, quickReplies, workingLine, type QuickReply, type Status } from './detect.ts'
 import { FLEET_BIN, REPO } from './store.ts'
@@ -22,7 +23,11 @@ export type Agent = {
   exit: string            // "exit 1" / "killed by kill" for a dead pane
   mode: string            // footer mode, e.g. "auto mode" (Shift+Tab cycles it)
   working_line: string    // spinner line while busy, e.g. "Catapulting… (4s · ↓ 24 tokens)"
+  ask: Ask | null         // a question or plan Claude is waiting on, answerable as a form (see openAsk)
 }
+
+export type Question = { question: string; header?: string; multiSelect?: boolean; options: { label: string; description?: string }[] }
+export type Ask = { id: string; kind: 'question' | 'plan'; questions: Question[]; plan: string }
 
 type FleetRow = { pid: number; tool: string; age_s: number; cwd: string; session: string | null; task: string; session_id: string }
 type Hook = { status: Status; at: number; message: string }
@@ -44,6 +49,60 @@ export const list = () => agents
 
 const NOTIFY_NEEDS = new Set(['permission_prompt', 'elicitation_dialog', 'agent_needs_input'])
 
+// Claude's questions and plans, held while `fleet hook ask` (a PermissionRequest hook) waits for the dashboard's
+// answer. The terminal shows its own prompt meanwhile; once Claude moves on (any later hook from that session)
+// the ask is dropped and the waiting hook exits.
+type OpenAsk = Ask & { sid: string; pane: string; input: Record<string, unknown>; decision?: Record<string, unknown> }
+const asks = new Map<string, OpenAsk>()
+const ASK_TOOLS = new Set(['AskUserQuestion', 'ExitPlanMode'])
+
+const dropAsks = (sid: string, pane: string) => {
+  for (const [id, a] of asks) if ((sid && a.sid === sid) || (pane && a.pane === pane)) asks.delete(id)
+}
+
+export function openAsk(body: Record<string, unknown>) {
+  const sid = String(body.session_id ?? ''), pane = typeof body.tmux_pane === 'string' ? body.tmux_pane : ''
+  const input = (body.tool_input ?? {}) as Record<string, any>
+  dropAsks(sid, pane)
+  const id = randomUUID()
+  const plan = body.tool_name === 'ExitPlanMode'
+  asks.set(id, { id, kind: plan ? 'plan' : 'question', questions: plan ? [] : (input.questions ?? []), plan: plan ? String(input.plan ?? '') : '', sid, pane, input })
+  poll().catch(() => {}) // show the form now, not on the next tick
+  return { id }
+}
+
+/** The waiting hook asks every second: a decision once, then gone. */
+export function pollAsk(id: string) {
+  const a = asks.get(id)
+  if (!a) return { gone: true }
+  if (!a.decision) return {}
+  asks.delete(id)
+  return { decision: a.decision }
+}
+
+/** The form's answer: answers maps each question to a label (several joined with ", ") or your own text; a plan is
+ * approved into auto or default (ask before edits) mode, like the terminal's two Yes options, or sent back with feedback. */
+export function answerAsk(id: string, b: { answers?: unknown; approve?: unknown; feedback?: unknown }): string {
+  const a = asks.get(id)
+  if (!a || a.decision) return 'already answered'
+  if (a.kind === 'plan') {
+    const feedback = typeof b.feedback === 'string' ? b.feedback.trim() : ''
+    a.decision = b.approve === 'auto' || b.approve === 'default'
+      ? { behavior: 'allow', updatedInput: a.input, updatedPermissions: [{ type: 'setMode', mode: b.approve, destination: 'session' }] }
+      : { behavior: 'deny', message: feedback || 'Not approved yet. Keep planning and ask me what to change.' }
+    return ''
+  }
+  const given = (b.answers ?? {}) as Record<string, unknown>
+  const answers: Record<string, string> = {}
+  for (const q of a.questions) {
+    const v = given[q.question]
+    if (typeof v !== 'string' || !v.trim()) return `answer "${q.question}"`
+    answers[q.question] = v.trim()
+  }
+  a.decision = { behavior: 'allow', updatedInput: { ...a.input, answers } }
+  return ''
+}
+
 // What a `fleet hook` event means for the agent's status; null = no change, 'end' = forget this session.
 export function hookStatus(body: Record<string, unknown>): Status | 'end' | null {
   const event = String(body.event ?? '')
@@ -63,6 +122,8 @@ export function ingestHook(body: Record<string, unknown>) {
   const sid = String(body.session_id ?? '')
   const pane = typeof body.tmux_pane === 'string' ? body.tmux_pane : ''
   const status = hookStatus(body)
+  // anything else this session does means its question was answered or dismissed, here or in the terminal
+  if (status && status !== 'needs_you' && !ASK_TOOLS.has(String(body.tool_name ?? ''))) dropAsks(sid, pane)
   if (status === 'end') {
     hooksBySession.delete(sid)
     if (pane) hooksByPane.delete(pane)
@@ -72,6 +133,11 @@ export function ingestHook(body: Record<string, unknown>) {
   const hook = { status, at: Date.now(), message: status === 'needs_you' ? String(body.message ?? '') : '' }
   if (sid) hooksBySession.set(sid, hook)
   if (pane) hooksByPane.set(pane, hook)
+}
+
+function shownAsk(sid: string, pane: string): Ask | null {
+  const a = [...asks.values()].find(x => !x.decision && ((sid && x.sid === sid) || (pane && x.pane === pane)))
+  return a ? { id: a.id, kind: a.kind, questions: a.questions, plan: a.plan } : null
 }
 
 const lastLine = (screen: string) => screen.split('\n').map(l => l.trim()).filter(Boolean).at(-1) ?? ''
@@ -116,11 +182,15 @@ async function refresh() {
     const worked = (hook?.status === 'working' && status === 'working') || (r.session ? busy(r.tool, screen) : /^\[busy\]/.test(r.task))
     if (worked) fresh.delete(name) // answering a startup question (trust this folder?) isn't work
     if (status === 'done' && fresh.has(name)) status = 'ready'
+    const ask = shownAsk(r.session_id, pane?.paneId ?? '')
+    if (ask) status = 'needs_you' // the plan prompt has no menu hint the screen check knows
     next.push({
       name, controllable: !!r.session, tool: r.tool, pid: r.pid, cwd: r.cwd, task: r.task, age_s: r.age_s,
       session_id: r.session_id, status, status_since: now, quick_replies: status === 'needs_you' ? quickReplies(screen) : [],
-      last_line: lastLine(screen), message: status === 'needs_you' ? (hook?.message || question(screen)) : '', exit: '',
+      last_line: lastLine(screen), exit: '',
+      message: ask ? (ask.kind === 'plan' ? 'Plan ready for your approval' : ask.questions[0]?.question ?? '') : status === 'needs_you' ? (hook?.message || question(screen)) : '',
       mode: mode(screen), working_line: status === 'working' ? workingLine(r.tool, screen) : '',
+      ask,
     })
   }
 
@@ -132,7 +202,7 @@ async function refresh() {
       name: p.session, controllable: true, tool: tools.get(p.session) ?? prev.get(p.session)?.tool ?? 'unknown', pid: null,
       cwd: prev.get(p.session)?.cwd ?? '', task: prev.get(p.session)?.task ?? '', age_s: 0, session_id: '',
       status: crashed ? 'crashed' : 'done', status_since: now, quick_replies: [], last_line: lastLine(screen),
-      message: '', exit: p.signal ? `killed by ${p.signal}` : `exit ${p.exitStatus ?? 0}`, mode: '', working_line: '',
+      message: '', exit: p.signal ? `killed by ${p.signal}` : `exit ${p.exitStatus ?? 0}`, mode: '', working_line: '', ask: null,
     })
   }
 

@@ -35,7 +35,7 @@ DASHBOARD
   fleet dash install     run the dashboard at login and put it on your tailnet for your phone (--local: Mac only)
   fleet dash update      after changing the dashboard's code: rebuild the page and restart the server
   fleet dash uninstall   stop it and remove it from login items
-  fleet hooks install    let Claude Code report its status to the dashboard instantly (uninstall to undo)
+  fleet hooks install    let Claude Code report its status instantly and take answers to its questions and plans from the dashboard (uninstall to undo)
   fleet tts install      a natural voice for Jarvis (Kokoro, runs on this Mac, ~350 MB)
 
 STOP
@@ -676,10 +676,28 @@ def hook(event):
     try:
         body = json.loads(sys.stdin.read() or '{}')
         body.update(event=event, tmux_pane=os.environ.get('TMUX_PANE'))
-        api('POST', '/api/hook', body)
+        if event == 'ask':
+            answer_from_dashboard(body)
+        else:
+            api('POST', '/api/hook', body)
     except BaseException:
         pass
+    sys.stdout.flush()
     os._exit(0)
+
+
+def answer_from_dashboard(body):
+    """PermissionRequest hook for Claude's questions and plans: the dashboard shows them as a form, and what you submit
+    there answers Claude. The terminal keeps its own prompt meanwhile; whichever you answer first wins, and Claude
+    ignores this hook's reply once the terminal answered. Prints nothing (so the terminal decides) on any failure."""
+    ask_id = api('POST', '/api/ask', body)['id']
+    for _ in range(3600):  # ponytail: an hour, matching the hook's timeout in settings
+        time.sleep(1)
+        r = api('GET', f'/api/ask/{ask_id}')
+        if r.get('decision'):
+            print(json.dumps({'hookSpecificOutput': {'hookEventName': 'PermissionRequest', 'decision': r['decision']}}))
+        if r.get('decision') or r.get('gone'):
+            return
 
 
 IDEA_COLUMNS = {'notes': "TEXT NOT NULL DEFAULT ''", 'position': 'REAL', 'done_at': 'INTEGER', 'repeat': 'TEXT',
@@ -804,7 +822,7 @@ def import_notes(args):
 
 
 HOOK_EVENTS = {'UserPromptSubmit': 'working', 'PreToolUse': 'working', 'Notification': 'notify',
-               'Stop': 'done', 'SessionEnd': 'end'}
+               'Stop': 'done', 'SessionEnd': 'end', 'PermissionRequest': 'ask'}
 
 
 def is_fleet_hook(h):
@@ -824,8 +842,10 @@ def hooks(action, path=None):
         lst = groups.setdefault(ev, [])
         mine = [g for g in lst if any(is_fleet_hook(h) for h in g.get('hooks', []))]
         if action == 'install' and not mine:
-            lst.append({'hooks': [{'type': 'command', 'command': f'{shlex.quote(FLEET)} hook {arg}',
-                                   'timeout': 5, 'async': True}]})
+            h = {'type': 'command', 'command': f'{shlex.quote(FLEET)} hook {arg}', 'timeout': 5, 'async': True}
+            if arg == 'ask':  # waits for your answer in the dashboard, so Claude has to wait for it
+                h['timeout'], h['async'] = 3600, False
+            lst.append({'matcher': 'AskUserQuestion|ExitPlanMode', 'hooks': [h]} if arg == 'ask' else {'hooks': [h]})
             changed += 1
         if action == 'uninstall' and mine:
             for g in mine:
@@ -1287,7 +1307,9 @@ def selftest():
             hooks('uninstall', path)
         finally:
             sys.stdout = real
-        assert s['model'] == 'opus' and len(s['hooks']) == 5, s
+        assert s['model'] == 'opus' and len(s['hooks']) == 6, s
+        assert s['hooks']['PermissionRequest'][0]['matcher'] == 'AskUserQuestion|ExitPlanMode'
+        assert s['hooks']['PermissionRequest'][0]['hooks'][0]['async'] is False
         assert len(s['hooks']['Stop']) == 2 and s['hooks']['Stop'][0]['hooks'][0]['command'] == 'say done'
         assert s['hooks']['PreToolUse'][0]['hooks'][0]['async'] is True
         with open(path) as f:
