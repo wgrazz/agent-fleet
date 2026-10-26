@@ -173,6 +173,17 @@ async function doAction(a: JarvisAction): Promise<string> {
   if (a.type === 'pause') await fleet(['pause', target!.name, ...(a.text ? ['--until', a.text] : [])])
   if (a.type === 'start') return `started ${(await startAgent({ tool: a.tool || undefined, model: a.model, effort: a.effort, prompt: a.text, name: a.name })).name}`
   if (a.type === 'idea') ideas.addIdea(a.text, a.list || 'Brain Dump')
+  if (a.type === 'idea_edit') {
+    const e = a.edit
+    const cur = e && ideas.idea(e.id)
+    if (!e || !cur) throw new Error(`no idea #${e?.id}`)
+    if (e.done === 'delete') { ideas.deleteIdea(e.id); return `deleted “${cur.text.slice(0, 60)}”` }
+    ideas.updateIdea(e.id, {
+      text: e.text.trim() || undefined, notes: e.notes || undefined, list: e.list.trim() || undefined,
+      done: e.done ? e.done === 'done' : undefined, priority: e.priority ? ['none', 'low', 'medium', 'high'].indexOf(e.priority) : undefined,
+    })
+    return `${e.done === 'done' ? 'checked off' : 'updated'} “${(e.text.trim() || cur.text).slice(0, 60)}”${e.list.trim() && e.list.trim() !== cur.list ? ` → ${e.list.trim()}` : ''}`
+  }
   if (a.type === 'remember') J.remember(a.text)
   if (a.type === 'mac' && a.mac) return (await fleet(['mac', ...J.macArgv(a.mac)])).trim()
   return `${a.type === 'remember' ? 'remembered' : a.type}${a.agent ? ` ${a.agent}` : ''}${a.key ? ` ${a.key}` : ''}`

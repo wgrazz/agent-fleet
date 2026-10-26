@@ -143,19 +143,21 @@ You also run on the developer's Mac, so you can help with their day. To look thi
 
 You can read anything Fleet knows, but only fetch what the question needs. With Bash: \`fleet read chat NAME [N]\` (an agent's last N messages, default 40), \`fleet peek NAME\` (its screen right now, where a background job's output shows), and \`fleet read '/api/PATH' [N]\` for the rest: /api/agents (every agent with status, folder, session id, queued messages), /api/agents/NAME/changes (its git changes and commits), /api/paused, /api/history (past conversations), '/api/transcript?tool=claude&id=ID' (one of them), /api/ideas?list=NAME, /api/lists, /api/usage. They only read. When asked how an agent, a job, a scrape or a deploy is going, look (usually chat, then peek) and answer from what you find, including numbers and times; don't say you can't see it. You can't reach other machines yourself, but the agents can: if the file doesn't answer it, offer to ask the agent.
 
-You only read. To change anything, return "actions". Changes to agents (start, reply, key, pause) are shown to the developer as a card to approve before anything happens, so phrase your reply as an offer ("Shall I start a Claude agent to fix the pagination?"), never as done. Ideas and remember happen right away.
+You only read. To change anything, return "actions". Changes to agents (start, reply, key, pause) are shown to the developer as a card to approve before anything happens, so phrase your reply as an offer ("Shall I start a Claude agent to fix the pagination?"), never as done. The idea lists are the developer's own notes: add, check off, reword, move and prioritize them right away when asked, no offer needed. Deleting one is the exception: return the idea_edit action with done = "delete" at once (don't ask first in words); it shows as a card to approve, so say it's waiting for their OK, never that it's deleted. Remember happens right away too.
 Actions:
 - reply: send text to an agent (agent, text)
 - key: press one key in an agent's menu, e.g. "1", "2", "Enter", "Escape", "BTab" for shift+tab (agent, key)
 - pause: pause an agent, keeping its conversation (agent; optional text = when to resume, like "18:30" or "+2h")
 - start: start a new agent (text = its task; optional tool, model, effort, name)
 - idea: add an idea (text; optional list, default "Brain Dump")
+- idea_edit: change one idea (edit.id from fleet read '/api/ideas?list=NAME'; fill only what changes, leave the rest empty: text = new wording, notes, list = move it there, done = "done" / "open" / "delete", priority)
 - remember: save a lasting note about the developer or project for future conversations (text)
 - mac: do something on the Mac (fill "mac"): music_play, music_pause, music_next, music_previous, music_volume (value 0-100), music_search (value), open_app (app), window (app, where = left|right|full|center), and, which the developer approves first: event (title, when "YYYY-MM-DD HH:MM", minutes, calendar), remind (title, when optional, calendar = list name), draft (to, subject, body: an email draft saved in Mail, never sent). Write emails in the developer's voice: short, plain, friendly.
 Only propose actions when they'd clearly help or were asked for; for questions just answer. Never kill agents (they can do that from the dashboard). If an agent name is ambiguous or missing, ask instead of guessing.`
 
 export type MacAction = { command: string; title: string; when: string; minutes: string; calendar: string; to: string; subject: string; body: string; app: string; where: string; value: string }
-export type JarvisAction = { type: 'reply' | 'key' | 'pause' | 'start' | 'idea' | 'remember' | 'mac'; agent: string; text: string; key: string; tool: string; model: string; effort: string; list: string; name: string; mac?: MacAction }
+export type IdeaEdit = { id: number; text: string; notes: string; list: string; done: '' | 'done' | 'open' | 'delete'; priority: '' | 'none' | 'low' | 'medium' | 'high' }
+export type JarvisAction = { type: 'reply' | 'key' | 'pause' | 'start' | 'idea' | 'idea_edit' | 'remember' | 'mac'; agent: string; text: string; key: string; tool: string; model: string; effort: string; list: string; name: string; mac?: MacAction; edit?: IdeaEdit }
 export type JarvisReply = { say: string; actions: JarvisAction[] }
 
 export const jarvisBrain = (said: string, context: string, memory: string, opts: { cwd: string; resume?: string }) =>
@@ -163,12 +165,16 @@ export const jarvisBrain = (said: string, context: string, memory: string, opts:
     obj({
       say: str,
       actions: { type: 'array', items: obj({
-        type: { type: 'string', enum: ['reply', 'key', 'pause', 'start', 'idea', 'remember', 'mac'] }, agent: str, text: str, key: str, tool: str, model: str, effort: str, list: str, name: str,
+        type: { type: 'string', enum: ['reply', 'key', 'pause', 'start', 'idea', 'idea_edit', 'remember', 'mac'] }, agent: str, text: str, key: str, tool: str, model: str, effort: str, list: str, name: str,
         mac: obj({
           command: { type: 'string', enum: ['', 'music_play', 'music_pause', 'music_next', 'music_previous', 'music_volume', 'music_search', 'open_app', 'window', 'event', 'remind', 'draft'] },
           title: str, when: str, minutes: str, calendar: str, to: str, subject: str, body: str, app: str, where: str, value: str,
         }),
-      }) },
+        edit: obj({
+          id: { type: 'integer' }, text: str, notes: str, list: str,
+          done: { type: 'string', enum: ['', 'done', 'open', 'delete'] }, priority: { type: 'string', enum: ['', 'none', 'low', 'medium', 'high'] },
+        }),
+      }, ['type', 'agent', 'text', 'key', 'tool', 'model', 'effort', 'list', 'name', 'mac']) },
     }), {
       tools: ['Read', 'Glob', 'Grep', 'WebSearch', 'WebFetch', 'Bash'],
       // Bash only for the read-only Mac and Fleet lookups; anything else is refused without asking

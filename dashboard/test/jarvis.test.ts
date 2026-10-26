@@ -92,6 +92,9 @@ describe('Mac abilities', () => {
     expect(needsApproval(mac({ command: 'window' }))).toBe(false)
     expect(needsApproval({ type: 'start' } as any)).toBe(true)
     expect(needsApproval({ type: 'idea' } as any)).toBe(false)
+    expect(needsApproval({ type: 'idea_edit', edit: { done: 'done' } } as any)).toBe(false)
+    expect(needsApproval({ type: 'idea_edit', edit: { done: '' } } as any)).toBe(false)
+    expect(needsApproval({ type: 'idea_edit', edit: { done: 'delete' } } as any)).toBe(true)
   })
   it('turns actions into fleet mac argv', () => {
     expect(macArgv(mac({ command: 'event', title: 'Dentist', when: '2026-10-30 15:00', minutes: '45' }).mac)).toEqual(['event', 'Dentist', '--at', '2026-10-30 15:00', '--minutes', '45'])

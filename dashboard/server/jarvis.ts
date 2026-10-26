@@ -69,7 +69,8 @@ export type Proposal = { id: number; thread_id: number; action: string; summary:
 
 const MAC_NEEDS_OK = new Set(['event', 'remind', 'draft'])
 /** Mac actions that write something (calendar, reminders, an email draft) wait for your OK; music and windows don't. */
-export const needsApproval = (a: JarvisAction) => a.type === 'mac' ? MAC_NEEDS_OK.has(a.mac?.command ?? '') : !['idea', 'remember'].includes(a.type)
+export const needsApproval = (a: JarvisAction) =>
+  a.type === 'mac' ? MAC_NEEDS_OK.has(a.mac?.command ?? '') : a.type === 'idea_edit' ? a.edit?.done === 'delete' : !['idea', 'remember'].includes(a.type)
 
 /** `fleet mac …` argv for a Mac action. Only known commands; values go in as separate arguments. */
 export function macArgv(m: MacAction): string[] {
@@ -90,6 +91,8 @@ export function macArgv(m: MacAction): string[] {
   }
 }
 
+const ideaText = (id?: number) => (db.prepare('SELECT text FROM ideas WHERE id = ?').get(id ?? -1) as { text: string } | undefined)?.text.slice(0, 80) ?? `#${id}`
+
 export function summarize(a: JarvisAction): string {
   if (a.type === 'mac' && a.mac) {
     const m = a.mac
@@ -102,6 +105,7 @@ export function summarize(a: JarvisAction): string {
   if (a.type === 'reply') return `Send to ${a.agent}: “${a.text.slice(0, 160)}”`
   if (a.type === 'key') return `Press ${a.key} in ${a.agent}`
   if (a.type === 'pause') return `Pause ${a.agent}${a.text ? ` until ${a.text}` : ''}`
+  if (a.type === 'idea_edit') return `Delete the idea “${ideaText(a.edit?.id)}”`
   return `${a.type} ${a.text}`
 }
 
