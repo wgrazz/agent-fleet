@@ -8,16 +8,16 @@ import {
 } from './components.tsx'
 import { ConversationView, HistoryPane, Jarvis, Palette, speak, spokenAlerts } from './extras.tsx'
 import { AREAS } from './areas.ts'
-import { IdeaDetail, IdeasPane, ImportNotes, PRIORITY, PriorityPane, QuickCapture, SortMode } from './ideas.tsx'
+import { AllNotesPane, IdeaDetail, IdeasPane, ImportNotes, PRIORITY, PriorityPane, QuickCapture, SortMode } from './ideas.tsx'
 import { SettingsPage } from './settings.tsx'
 import { FullTerminal } from './terminal.tsx'
 import './styles.css'
 
 // #/ · #/folder/ID · #/agent/NAME (what pushes open) · #/paused · #/ideas/LIST · #/idea/ID · #/history[/TOOL/ID] · #/more
-type View = 'all' | 'folder' | 'agent' | 'paused' | 'ideas' | 'idea' | 'history' | 'more' | 'jarvis' | 'settings' | 'prioritized'
+type View = 'all' | 'folder' | 'agent' | 'paused' | 'ideas' | 'idea' | 'history' | 'more' | 'jarvis' | 'settings' | 'prioritized' | 'everything'
 const parseRoute = () => {
   const [, view = '', a = '', b = ''] = location.hash.split('/')
-  const views: View[] = ['folder', 'agent', 'paused', 'ideas', 'idea', 'history', 'more', 'jarvis', 'settings', 'prioritized']
+  const views: View[] = ['folder', 'agent', 'paused', 'ideas', 'idea', 'history', 'more', 'jarvis', 'settings', 'prioritized', 'everything']
   return { view: (views.includes(view as View) ? view : 'all') as View, a: decodeURIComponent(a), b: decodeURIComponent(b) }
 }
 const go = (hash: string) => (location.hash = hash)
@@ -62,8 +62,12 @@ function App() {
   // which Ideas list is on screen: the route's, or the open idea's
   const [ideaItem, setIdeaItem] = useState<Idea | null>(null)
   const currentListName = route.view === 'ideas' ? route.a : route.view === 'idea' ? ideaItem?.list ?? '' : ''
-  const fromPriority = route.view === 'prioritized' || (route.view === 'idea' && remember.get('ideaFrom') === 'prioritized')
-  const ideas = usePoll<Idea[]>(fromPriority ? '/api/ideas?priority=1' : `/api/ideas?list=${enc(currentListName || '-')}`, currentListName || fromPriority ? 4000 : 3_600_000, fail)
+  // an idea opened from Prioritized or All notes keeps that view beside it
+  const from = (v: string) => route.view === v || (route.view === 'idea' && remember.get('ideaFrom') === v)
+  const fromPriority = from('prioritized')
+  const fromEverything = from('everything')
+  const ideas = usePoll<Idea[]>(fromPriority ? '/api/ideas?priority=1' : fromEverything ? '/api/ideas?all=1' : `/api/ideas?list=${enc(currentListName || '-')}`,
+    currentListName || fromPriority || fromEverything ? 4000 : 3_600_000, fail)
   useEffect(() => {
     if (route.view !== 'idea') return setIdeaItem(null)
     const found = ideas.data?.find(i => i.id === Number(route.a))
@@ -75,8 +79,8 @@ function App() {
     const on = () => {
       const r = parseRoute()
       setRoute(r)
-      if (['all', 'folder', 'paused', 'history', 'ideas', 'prioritized'].includes(r.view)) lastListRoute.current = location.hash || '#/'
-      if (r.view === 'ideas' || r.view === 'prioritized') remember.set('ideaFrom', r.view)
+      if (['all', 'folder', 'paused', 'history', 'ideas', 'prioritized', 'everything'].includes(r.view)) lastListRoute.current = location.hash || '#/'
+      if (r.view === 'ideas' || r.view === 'prioritized' || r.view === 'everything') remember.set('ideaFrom', r.view)
     }
     addEventListener('hashchange', on)
     loadProfiles()
@@ -282,7 +286,7 @@ function App() {
 
   const agentFromRoute = route.view === 'agent' ? all.find(a => a.name === route.a) ?? null : null
   const conversation = route.view === 'history' && route.b ? history?.find(c => c.id === route.b) ?? null : null
-  const sideRoute = route.view === 'folder' ? `folder/${route.a}` : route.view === 'ideas' ? `ideas/${route.a}` : route.view === 'idea' ? (fromPriority ? 'prioritized' : `ideas/${currentListName}`) : route.view
+  const sideRoute = route.view === 'folder' ? `folder/${route.a}` : route.view === 'ideas' ? `ideas/${route.a}` : route.view === 'idea' ? (fromPriority ? 'prioritized' : fromEverything ? 'everything' : `ideas/${currentListName}`) : route.view
   const listShown = allLists.find(l => l.name === currentListName)
 
   // middle pane: when an agent is open it keeps showing the list it was opened from
@@ -293,6 +297,9 @@ function App() {
       onResume={p => act(api.post(`/api/paused/${p.id}/resume`), () => openAgent(p.name))} onForget={p => act(api.del(`/api/paused/${p.id}`))} />
   } else if (middleView.view === 'history') {
     middle = <HistoryPane items={history} q={historyQ} setQ={setHistoryQ} selected={route.b} onMenu={conversationMenu} />
+  } else if (fromEverything) {
+    middle = <AllNotesPane items={ideas.data ?? []} lists={allLists} selected={route.view === 'idea' ? Number(route.a) : null}
+      onChange={() => { ideas.refresh(); lists.refresh() }} onError={fail} onMenu={ideaMenu} />
   } else if (route.view === 'prioritized' || (route.view === 'idea' && fromPriority)) {
     middle = <PriorityPane items={ideas.data ?? []} selected={route.view === 'idea' ? Number(route.a) : null}
       onChange={() => { ideas.refresh(); lists.refresh() }} onError={fail} onMenu={ideaMenu} />
@@ -338,7 +345,7 @@ function App() {
   }
 
   const hasDetail = !!(agentFromRoute || (route.view === 'idea' && ideaItem) || conversation || route.view === 'settings' || route.view === 'jarvis')
-  const tab = route.view === 'jarvis' ? 'jarvis' : ['ideas', 'idea', 'prioritized'].includes(route.view) ? 'ideas' : route.view === 'history' ? 'history' : ['more', 'settings'].includes(route.view) ? 'more' : 'agents'
+  const tab = route.view === 'jarvis' ? 'jarvis' : ['ideas', 'idea', 'prioritized', 'everything'].includes(route.view) ? 'ideas' : route.view === 'history' ? 'history' : ['more', 'settings'].includes(route.view) ? 'more' : 'agents'
   const brainDump = allLists.find(l => l.name === 'Brain Dump')
 
   return (
@@ -358,7 +365,7 @@ function App() {
         <a href="#/history" className={tab === 'history' ? 'on' : ''}>History</a>
         <a href="#/more" className={tab === 'more' ? 'on' : ''}>More</a>
       </nav>
-      {(route.view === 'ideas' || route.view === 'idea' || route.view === 'prioritized') && <IdeasListPicker lists={allLists} current={route.view === 'prioritized' ? '★' : currentListName}
+      {['ideas', 'idea', 'prioritized', 'everything'].includes(route.view) && <IdeasListPicker lists={allLists} current={route.view === 'prioritized' ? '★' : route.view === 'everything' ? '*' : currentListName}
         onNew={() => setModal({ kind: 'name', title: 'New list', color: COLORS[6], action: 'Create', submit: (name, color) => { setModal(null); act(api.post('/api/lists', { name, color }), () => go(`#/ideas/${enc(name)}`)) } })} />}
 
       {jarvisOpen && route.view !== 'jarvis' && <Jarvis onClose={() => setJarvisOpen(false)} onChanged={refreshAll} />}
@@ -420,10 +427,11 @@ function FolderChip({ f, on, onMenu }: { f: Folder; on: boolean; onMenu: (x: num
 }
 
 function IdeasListPicker({ lists, current, onNew }: { lists: List[]; current: string; onNew: () => void }) {
-  useEffect(() => { if (current && current !== '★') remember.set('lastList', current) }, [current])
+  useEffect(() => { if (current && current !== '★' && current !== '*') remember.set('lastList', current) }, [current])
   const cur = lists.find(l => l.name === current)
   const pick = (e: React.MouseEvent) => openMenu(e.clientX, e.clientY, [
     { label: 'Prioritized', checked: current === '★', onClick: () => { location.hash = '#/prioritized' } },
+    { label: 'All notes', checked: current === '*', onClick: () => { location.hash = '#/everything' } },
     'sep',
     ...listGroups(lists).filter(g => g.length).flatMap((g, n) => [...(n ? ['sep' as const] : []), ...g.map(l => ({
       label: l.name + (l.name === 'Brain Dump' && l.unsorted > 0 ? ` · ${l.unsorted} to sort` : '') + (l.kind === 'checklist' ? ' · checklist' : '') + (l.section ? ` · ${l.section}` : ''),
@@ -436,7 +444,7 @@ function IdeasListPicker({ lists, current, onNew }: { lists: List[]; current: st
     <div className="ideas-chips">
       <button className="list-pick" onClick={pick}>
         {current === '★' ? <span className="prio p3">!</span> : <span className="sq round" style={{ background: cur?.color }} />}
-        <span className="list-pick-name">{current === '★' ? 'Prioritized' : current}</span>
+        <span className="list-pick-name">{current === '★' ? 'Prioritized' : current === '*' ? 'All notes' : current}</span>
         <span className="chev">▾</span>
       </button>
     </div>

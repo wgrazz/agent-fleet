@@ -303,6 +303,7 @@ export function Sidebar(props: {
       {!props.folders.length && <button className="ni ghost" onClick={props.onNewFolder}>New folder…</button>}
       <div className="sec">Ideas<button className="sec-add" onClick={props.onNewList} aria-label="New list">+</button></div>
       <a className={`ni ${props.route === 'prioritized' ? 'on' : ''}`} href="#/prioritized"><span className="prio p3 side">!</span>Prioritized</a>
+      <a className={`ni ${props.route === 'everything' ? 'on' : ''}`} href="#/everything"><LinesIcon />All notes</a>
       {ideaLists.map(row)}
       <div className="sec">Checklists<button className="sec-add" onClick={props.onNewChecklist} aria-label="New checklist">+</button></div>
       {checklists.map(row)}
@@ -542,6 +543,7 @@ export const TermIcon = () => svg(<><rect x="1.5" y="2.5" width="13" height="11"
 export const SendIcon = () => svg(<path d="M8 13V3M3.5 7.5 8 3l4.5 4.5" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round" />)
 export const ClockIcon = () => svg(<><circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="1.6" fill="none" /><path d="M8 4.5V8l2.5 1.5" stroke="currentColor" strokeWidth="1.6" fill="none" strokeLinecap="round" /></>)
 export const FlagIcon = () => svg(<path d="M4 14V2.5M4 3h8l-2 3 2 3H4" stroke="#ff3b30" strokeWidth="1.6" fill="none" strokeLinejoin="round" strokeLinecap="round" />)
+export const LinesIcon = () => svg(<path d="M3 4h10M3 8h10M3 12h10" stroke="currentColor" strokeWidth="1.4" fill="none" strokeLinecap="round" />)
 export const InboxIcon = () => svg(<path d="M2 9.5 4 3h8l2 6.5V13H2zM2 9.5h3.5l1 1.5h3l1-1.5H14" stroke="currentColor" strokeWidth="1.4" fill="none" strokeLinejoin="round" />)
 export const SparkIcon = () => svg(<path d="M8 1.5 9.4 6.6 14.5 8 9.4 9.4 8 14.5 6.6 9.4 1.5 8l5.1-1.4z" fill="currentColor" />, 12)
 export const WandIcon = () => svg(<><path d="m3 13 7-7" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" /><path d="M11 1.5v3M9.5 3h3M13.5 6v2M12.5 7h2" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" /></>, 12)

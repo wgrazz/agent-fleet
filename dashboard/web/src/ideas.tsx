@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { api, isHeading, remember, type Idea, type List } from './api.ts'
 import { AREAS, areaColor } from './areas.ts'
-import { Dialog, InboxIcon, isPhone, SparkIcon, STATUS_LABEL, useHold } from './components.tsx'
+import { Dialog, InboxIcon, LinesIcon, isPhone, SparkIcon, STATUS_LABEL, useHold } from './components.tsx'
 import type { Step } from './steps.ts'
 
 export const PRIORITY = ['None', 'Low', 'Medium', 'High']
@@ -29,6 +29,26 @@ export const SORTS: Record<string, { label: string; by: Order }> = {
   manual: { label: 'My order', by: mine },
 }
 
+/** The sort you picked, the same in every list and remembered on this device. */
+function useSort() {
+  const [sort, set] = useState(() => SORTS[remember.get('ideaSort')] ? remember.get('ideaSort') : 'newest')
+  return [sort, (s: string) => { set(s); remember.set('ideaSort', s) }] as const
+}
+
+function IdeaTools({ sort, setSort, area, setArea }: { sort: string; setSort: (s: string) => void; area: string; setArea: (a: string) => void }) {
+  return (
+    <div className="idea-tools">
+      <select aria-label="Sort" value={sort} onChange={e => setSort(e.target.value)}>
+        {Object.entries(SORTS).map(([k, s]) => <option key={k} value={k}>{s.label}</option>)}
+      </select>
+      <select aria-label="Filter by area" value={area} onChange={e => setArea(e.target.value)}>
+        <option value="">All areas</option>
+        {AREAS.map(a => <option key={a.name} value={a.name}>{a.name}</option>)}
+      </select>
+    </div>
+  )
+}
+
 export function IdeasPane({ list, items, selected, onChange, onError, onSort, onHeaderMenu, onMenu }: {
   list: List; items: Idea[]; selected: number | null; onChange: () => void; onError: (e: Error) => void
   onSort: () => void; onHeaderMenu: (x: number, y: number) => void; onMenu: (i: Idea, x: number, y: number) => void
@@ -37,8 +57,7 @@ export function IdeasPane({ list, items, selected, onChange, onError, onSort, on
   const [showDone, setShowDone] = useState(false)
   const [dragging, setDragging] = useState<number | null>(null)
   const [area, setArea] = useState('')
-  const [sort, setSortState] = useState(() => SORTS[remember.get('ideaSort')] ? remember.get('ideaSort') : 'newest')
-  const setSort = (s: string) => { setSortState(s); remember.set('ideaSort', s) }
+  const [sort, setSort] = useSort()
   const shown = area ? items.filter(i => i.area === area) : items
   const checklist = list.kind === 'checklist'
   // a checklist keeps its order with checked steps in place; an ideas list moves them under Done
@@ -71,17 +90,7 @@ export function IdeasPane({ list, items, selected, onChange, onError, onSort, on
         {list.name === 'Brain Dump' && open.length > 0 && <button className="btn small primary" onClick={onSort}>Sort {open.length}</button>}
         <button className="btn small" aria-label="List options" onClick={e => { const r = e.currentTarget.getBoundingClientRect(); onHeaderMenu(r.right - 220, r.bottom + 4) }}>⋯</button>
       </div>
-      {!checklist && (
-        <div className="idea-tools">
-          <select aria-label="Sort" value={sort} onChange={e => setSort(e.target.value)}>
-            {Object.entries(SORTS).map(([k, s]) => <option key={k} value={k}>{s.label}</option>)}
-          </select>
-          <select aria-label="Filter by area" value={area} onChange={e => setArea(e.target.value)}>
-            <option value="">All areas</option>
-            {AREAS.map(a => <option key={a.name} value={a.name}>{a.name}</option>)}
-          </select>
-        </div>
-      )}
+      {!checklist && <IdeaTools sort={sort} setSort={setSort} area={area} setArea={setArea} />}
       <form className="add" onSubmit={e => { e.preventDefault(); add() }}>
         <input value={draft} onChange={e => setDraft(e.target.value)} placeholder={checklist ? 'Add a step… (## starts a heading)' : `Add to ${list.name}${area ? ` · ${area}` : ''}…`} enterKeyHint="done" />
       </form>
@@ -313,6 +322,28 @@ export function ImportNotes({ onClose, onDone }: { onClose: () => void; onDone: 
   )
 }
 
+
+/** Every open note in every ideas list (checklist steps stay in their checklists), sorted and filtered like a list. */
+export function AllNotesPane({ items, lists, selected, onChange, onError, onMenu }: {
+  items: Idea[]; lists: List[]; selected: number | null; onChange: () => void; onError: (e: Error) => void; onMenu: (i: Idea, x: number, y: number) => void
+}) {
+  const [sort, setSort] = useSort()
+  const [area, setArea] = useState('')
+  const checklists = new Set(lists.filter(l => l.kind === 'checklist').map(l => l.name))
+  const open = items.filter(i => !i.done && !checklists.has(i.list) && !isHeading(i.text) && (!area || i.area === area))
+    .sort(sort === 'manual' ? (a, b) => a.list.localeCompare(b.list) || SORTS.manual.by(a, b) : SORTS[sort].by)
+  const toggle = (i: Idea) => api.patch(`/api/ideas/${i.id}`, { done: !i.done }).then(onChange).catch(onError)
+  return (
+    <section className="list ideas">
+      <div className="lh"><h4><LinesIcon />All notes</h4><span className="progress">{open.length}</span></div>
+      <IdeaTools sort={sort} setSort={setSort} area={area} setArea={setArea} />
+      <div className="scroll">
+        {open.map(i => <IdeaRow key={i.id} i={i} on={i.id === selected} showList onToggle={() => toggle(i)} onMenu={(x, y) => onMenu(i, x, y)} />)}
+        {!open.length && <div className="empty">{area ? `No open notes in ${area}.` : 'No open notes.'}</div>}
+      </div>
+    </section>
+  )
+}
 
 /** Every open idea that has a priority, across all lists, most important first. */
 export function PriorityPane({ items, selected, onChange, onError, onMenu }: {
