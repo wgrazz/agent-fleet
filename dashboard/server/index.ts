@@ -559,7 +559,9 @@ const routes: [string, RegExp, Route][] = [
     const b = await body(req)
     const text = str(b.text, 10_000).trim()
     if (!text) throw new HttpError(400, 'empty idea')
-    return { id: ideas.addIdea(text, str(b.list, 60).trim() || 'Brain Dump') }
+    try {
+      return { id: ideas.addIdea(text, str(b.list, 60).trim() || 'Brain Dump', { area: str(b.area, 40) || undefined }) }
+    } catch (e) { throw new HttpError(400, (e as Error).message) }
   }],
   // steps picked out of an agent's reply ("Add to-dos" under a chat message)
   ['POST', /^\/api\/ideas\/many$/, async req => {

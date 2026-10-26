@@ -322,7 +322,7 @@ details.ai-note { display: block; }
 .sugg { color: var(--accent); }
 .idea-area { display: inline-flex; align-items: center; gap: 4px; color: var(--dim); }
 .idea-area .sq { width: 7px; height: 7px; }
-.area-filter { max-width: 9.5em; font-size: 12px; }
+.area-filter { max-width: 7.5em; font-size: 12px; border: 1px solid var(--line); background: var(--bg); color: var(--text); border-radius: 7px; padding: 3px 4px; }
 .idea-agent { display: inline-flex; gap: 4px; align-items: center; }
 .check { width: 19px; height: 19px; border-radius: 50%; border: 1.6px solid var(--faint); flex-shrink: 0; margin-top: 1px; display: grid; place-items: center; }
 .check:hover { border-color: var(--accent); }

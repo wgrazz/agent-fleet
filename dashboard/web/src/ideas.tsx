@@ -34,7 +34,7 @@ export function IdeasPane({ list, items, selected, onChange, onError, onSort, on
     const text = draft.trim()
     if (!text) return
     setDraft('')
-    await api.post('/api/ideas', { text, list: list.name }).catch(onError)
+    await api.post('/api/ideas', { text, list: list.name, area: area || undefined }).catch(onError)
     onChange()
   }
   const toggle = (i: Idea) => api.patch(`/api/ideas/${i.id}`, { done: !i.done }).then(onChange).catch(onError)
@@ -58,7 +58,7 @@ export function IdeasPane({ list, items, selected, onChange, onError, onSort, on
         <button className="btn small" aria-label="List options" onClick={e => { const r = e.currentTarget.getBoundingClientRect(); onHeaderMenu(r.right - 220, r.bottom + 4) }}>⋯</button>
       </div>
       <form className="add" onSubmit={e => { e.preventDefault(); add() }}>
-        <input value={draft} onChange={e => setDraft(e.target.value)} placeholder={`Add to ${list.name}…`} enterKeyHint="done" />
+        <input value={draft} onChange={e => setDraft(e.target.value)} placeholder={`Add to ${list.name}${area ? ` · ${area}` : ''}…`} enterKeyHint="done" />
       </form>
       <div className="scroll">
         {open.map(i => (

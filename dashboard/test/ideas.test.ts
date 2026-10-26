@@ -42,6 +42,8 @@ describe('ideas', () => {
     expect(m.updateIdea(id, { area: 'Shopping · Search' })!.area).toBe('Shopping · Search')
     expect(m.updateIdea(id, { area: null })!.area).toBeNull()
     expect(() => m.updateIdea(id, { area: 'Gardening' })).toThrow(/area/)
+    expect(m.idea(m.addIdea('Logo sketches', 'Create', { area: 'Brand & Design' }))!.area).toBe('Brand & Design')
+    expect(() => m.addIdea('Weeding', 'Do', { area: 'Gardening' })).toThrow(/area/)
   })
   it('deleting a list moves its open ideas to Brain Dump', () => {
     m.createList('Temp')

@@ -7,6 +7,7 @@ import {
   type MenuItem, type StartFields, useHold,
 } from './components.tsx'
 import { ConversationView, HistoryPane, Jarvis, Palette, speak, spokenAlerts } from './extras.tsx'
+import { AREAS } from './areas.ts'
 import { IdeaDetail, IdeasPane, ImportNotes, PRIORITY, PriorityPane, QuickCapture, SortMode } from './ideas.tsx'
 import { SettingsPage } from './settings.tsx'
 import { FullTerminal } from './terminal.tsx'
@@ -203,6 +204,8 @@ function App() {
   const ideaMenu = (i: Idea, x: number, y: number) => openMenu(x, y, [
     { label: i.done ? 'Mark not done' : 'Mark done', onClick: () => act(api.patch(`/api/ideas/${i.id}`, { done: !i.done })) },
     { label: 'Priority', items: [3, 2, 1, 0].map(p => ({ label: PRIORITY[p], checked: i.priority === p, onClick: () => act(api.patch(`/api/ideas/${i.id}`, { priority: p })) })) },
+    { label: 'Area', items: [...AREAS.map(a => ({ label: a.name, swatch: a.color, checked: i.area === a.name, onClick: () => act(api.patch(`/api/ideas/${i.id}`, { area: a.name })) })),
+      { label: 'None', checked: !i.area, onClick: () => act(api.patch(`/api/ideas/${i.id}`, { area: null })) }] },
     { label: 'Move to', items: allLists.filter(l => l.name !== i.list).map(l => ({ label: l.name, swatch: l.color, onClick: () => act(api.patch(`/api/ideas/${i.id}`, { list: l.name })) })) },
     { label: 'Start an agent on this', onClick: () => startFromIdea(i) },
     { label: 'Interview me about it', onClick: () => setModal({ kind: 'interview', topic: i.text, ideaId: i.id }) },

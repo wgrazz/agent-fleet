@@ -93,11 +93,16 @@ export function ideas(list?: string): Idea[] {
 
 export const idea = (id: number) => db.prepare('SELECT * FROM ideas WHERE id = ?').get(id) as Idea | undefined
 
-export function addIdea(text: string, list = 'Brain Dump', extra: { source?: string; done?: boolean; notes?: string; agent?: string } = {}) {
+const checkArea = (area: string | null) => {
+  if (area !== null && !AREAS.some(a => a.name === area)) throw new Error(`area: one of ${AREAS.map(a => a.name).join(', ')}`)
+}
+
+export function addIdea(text: string, list = 'Brain Dump', extra: { source?: string; done?: boolean; notes?: string; agent?: string; area?: string } = {}) {
+  checkArea(extra.area ?? null)
   ensureList(list)
   const pos = (db.prepare('SELECT coalesce(max(position), max(id), 0) + 1 AS p FROM ideas WHERE list = ?').get(list) as { p: number }).p
-  const r = db.prepare('INSERT INTO ideas (list, text, created_at, position, source, done, done_at, notes, agent) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
-    .run(list, text, now(), pos, extra.source ?? null, extra.done ? 1 : 0, extra.done ? now() : null, extra.notes ?? '', extra.agent ?? null)
+  const r = db.prepare('INSERT INTO ideas (list, text, created_at, position, source, done, done_at, notes, agent, area) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+    .run(list, text, now(), pos, extra.source ?? null, extra.done ? 1 : 0, extra.done ? now() : null, extra.notes ?? '', extra.agent ?? null, extra.area ?? null)
   return Number(r.lastInsertRowid)
 }
 
@@ -105,7 +110,7 @@ export function updateIdea(id: number, p: Partial<Pick<Idea, 'text' | 'notes' | 
   const cur = idea(id)
   if (!cur) throw new Error('no such idea')
   if (p.area !== undefined) {
-    if (p.area !== null && !AREAS.some(a => a.name === p.area)) throw new Error(`area: one of ${AREAS.map(a => a.name).join(', ')}`)
+    checkArea(p.area)
     db.prepare('UPDATE ideas SET area = ? WHERE id = ?').run(p.area, id)
   }
   if (p.text !== undefined) db.prepare('UPDATE ideas SET text = ? WHERE id = ?').run(p.text, id)
