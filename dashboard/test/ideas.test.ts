@@ -45,6 +45,19 @@ describe('ideas', () => {
     expect(m.idea(m.addIdea('Logo sketches', 'Create', { area: 'Brand & Design' }))!.area).toBe('Brand & Design')
     expect(() => m.addIdea('Weeding', 'Do', { area: 'Gardening' })).toThrow(/area/)
   })
+  it('a checklist counts its steps, not its headings; lists can go in More', () => {
+    m.createList('Move house', undefined, 'checklist')
+    m.addIdea('## Before', 'Move house')
+    m.updateIdea(m.addIdea('Book the van', 'Move house'), { done: true })
+    m.addIdea('Pack books', 'Move house')
+    const l = m.lists().find(x => x.name === 'Move house')!
+    expect([l.kind, l.open, l.done]).toEqual(['checklist', 1, 1])
+    m.updateList(l.id, { section: 'More' })
+    expect(m.lists().find(x => x.name === 'Move house')!.section).toBe('More')
+    expect(() => m.updateList(l.id, { section: 'Attic' })).toThrow(/section/)
+    expect(() => m.createList('Odd', undefined, 'kanban')).toThrow(/kind/)
+    expect(() => m.updateList(m.lists().find(x => x.name === 'Brain Dump')!.id, { section: 'More' })).toThrow()
+  })
   it('deleting a list moves its open ideas to Brain Dump', () => {
     m.createList('Temp')
     const id = m.addIdea('keep me', 'Temp')

@@ -47,6 +47,10 @@ const IDEA_COLUMNS: Record<string, string> = {
 }
 const have = new Set((db.prepare('PRAGMA table_info(ideas)').all() as { name: string }[]).map(c => c.name))
 for (const [col, type] of Object.entries(IDEA_COLUMNS)) if (!have.has(col)) db.exec(`ALTER TABLE ideas ADD COLUMN ${col} ${type}`)
+// kind 'checklist': steps stay in order and checked ones stay put; section 'More': tucked into the sidebar's collapsed More group
+const listCols = new Set((db.prepare('PRAGMA table_info(lists)').all() as { name: string }[]).map(c => c.name))
+if (!listCols.has('kind')) db.exec("ALTER TABLE lists ADD COLUMN kind TEXT NOT NULL DEFAULT 'ideas'")
+if (!listCols.has('section')) db.exec('ALTER TABLE lists ADD COLUMN section TEXT')
 if (!(db.prepare('PRAGMA table_info(paused)').all() as { name: string }[]).some(c => c.name === 'resume_at')) db.exec('ALTER TABLE paused ADD COLUMN resume_at INTEGER')
 /** A copy of the whole database once a day, last 30 kept, in ~/.fleet/backups. `fleet restore` brings ideas back from one. */
 export function dailyBackup() {

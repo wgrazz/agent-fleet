@@ -533,14 +533,16 @@ const routes: [string, RegExp, Route][] = [
     const b = await body(req)
     const name = str(b.name, 60).trim()
     if (!name) throw new HttpError(400, 'list name: 1-60 characters')
-    try { ideas.createList(name, str(b.color, 20) || undefined) } catch { throw new HttpError(409, `there's already a list called ${name}`) }
+    if (b.kind !== undefined && !ideas.KINDS.includes(b.kind)) throw new HttpError(400, 'kind: ideas or checklist')
+    try { ideas.createList(name, str(b.color, 20) || undefined, b.kind) } catch { throw new HttpError(409, `there's already a list called ${name}`) }
     return { ok: true }
   }],
   ['PATCH', /^\/api\/lists\/(\d+)$/, async (req, [id]) => {
     const b = await body(req)
     try {
       ideas.updateList(int(id), { name: str(b.name, 60).trim() || undefined, color: str(b.color, 20) || undefined,
-        position: typeof b.position === 'number' ? b.position : undefined, archived: typeof b.archived === 'boolean' ? b.archived : undefined })
+        position: typeof b.position === 'number' ? b.position : undefined, archived: typeof b.archived === 'boolean' ? b.archived : undefined,
+        kind: str(b.kind, 20) || undefined, section: b.section === null ? null : str(b.section, 20) || undefined })
     } catch (e) { throw new HttpError(400, (e as Error).message) }
     return { ok: true }
   }],
@@ -570,6 +572,7 @@ const routes: [string, RegExp, Route][] = [
     const agent = str(b.agent, 80) || undefined
     const items = (Array.isArray(b.items) ? b.items.slice(0, 200) : []).map((i: any) => ({ text: str(i?.text, 10_000).trim(), notes: str(i?.notes, 50_000) })).filter((i: { text: string }) => i.text)
     if (!items.length) throw new HttpError(400, 'no to-dos')
+    if (b.checklist === true) ideas.ensureList(list, 'checklist')
     for (const i of items) ideas.addIdea(i.text, list, { notes: i.notes, agent })
     return { list, added: items.length }
   }],

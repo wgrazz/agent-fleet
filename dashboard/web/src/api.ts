@@ -22,7 +22,10 @@ export type Agent = {
 export type Placed = { key: string; folder_id: number | null }
 export type LiveAgent = Agent & Placed & { queued: { id: number; text: string }[] }
 export type Folder = { id: number; name: string; color: string; position: number }
-export type List = { id: number; name: string; color: string; position: number; archived: number; open: number; done: number; unsorted: number }
+export type List = { id: number; name: string; color: string; position: number; archived: number; kind: 'ideas' | 'checklist'; section: string | null; open: number; done: number; unsorted: number }
+export const isHeading = (text: string) => text.startsWith('## ')
+/** Lists as the sidebar groups them: idea lists, checklists, then the collapsed More group. */
+export const listGroups = (ls: List[]) => [ls.filter(l => l.kind !== 'checklist' && !l.section), ls.filter(l => l.kind === 'checklist' && !l.section), ls.filter(l => l.section)]
 export type Idea = {
   id: number; list: string; text: string; notes: string; done: number; done_at: number | null; created_at: number
   position: number | null; repeat: string | null; next_due: number | null; agent: string | null; agent_status: Status | 'gone' | null

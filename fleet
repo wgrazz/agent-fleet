@@ -22,6 +22,7 @@ LATER
   fleet paused           list paused agents
   fleet unpause ID|NAME  bring a paused agent back in a new session with its conversation
   fleet idea [-l LIST] TEXT   jot an idea (lands in Brain Dump unless you name a list)
+  fleet checklist TITLE < STEPS   a checklist for the owner from STEPS on stdin: one step per line, '## ' lines are headings
   fleet restore [DATE]   list the daily backups of your ideas, or put ideas and lists back as they were on DATE
   fleet import-notes [--dry-run]   copy your numbered Apple Notes checklists into Ideas (needs Full Disk Access)
 
@@ -412,6 +413,11 @@ def db():
     for col, kind in IDEA_COLUMNS.items():  # same list as dashboard/server/store.ts
         if col not in have:
             con.execute(f'ALTER TABLE ideas ADD COLUMN {col} {kind}')
+    list_cols = {r[1] for r in con.execute('PRAGMA table_info(lists)')}  # same as dashboard/server/store.ts
+    if 'kind' not in list_cols:
+        con.execute("ALTER TABLE lists ADD COLUMN kind TEXT NOT NULL DEFAULT 'ideas'")
+    if 'section' not in list_cols:
+        con.execute('ALTER TABLE lists ADD COLUMN section TEXT')
     if 'resume_at' not in {r[1] for r in con.execute('PRAGMA table_info(paused)')}:
         con.execute('ALTER TABLE paused ADD COLUMN resume_at INTEGER')
     return con
@@ -636,6 +642,33 @@ def idea(args):
     with con:
         con.execute('INSERT INTO ideas (list, text, created_at) VALUES (?, ?, ?)', (lst, text, int(time.time())))
     print(f'Added to {lst}.')
+
+
+def checklist(args):
+    """Make (or add to) a checklist: steps from stdin, one per line. '- [x]' steps come in checked; '#' lines are headings."""
+    title = ' '.join(args).strip()[:60]
+    if not title or sys.stdin.isatty():
+        sys.exit("fleet checklist TITLE < steps.md   (one step per line; '## ' lines are headings)")
+    steps = []
+    for line in sys.stdin.read().splitlines():
+        line = line.strip()
+        heading = re.match(r'^#+\s*(.+)', line)
+        if heading:
+            steps.append(('## ' + heading.group(1), False))
+        elif line:
+            done = re.match(r'^[-*+]\s*\[[xX]\]', line) is not None
+            steps.append((re.sub(r'^(?:[-*+]\s*(?:\[[ xX]\]\s*)?|\d+[.)]\s+)', '', line), done))
+    if not steps:
+        sys.exit('No steps on stdin.')
+    con = db()
+    now = int(time.time())
+    with con:
+        con.execute("INSERT OR IGNORE INTO lists (name, position, kind) VALUES (?, 100, 'checklist')", (title,))
+        start = con.execute('SELECT coalesce(max(position), 0) FROM ideas WHERE list = ?', (title,)).fetchone()[0]
+        for n, (text, done) in enumerate(steps, 1):
+            con.execute('INSERT INTO ideas (list, text, created_at, position, done, done_at) VALUES (?, ?, ?, ?, ?, ?)',
+                        (title, text, now, start + n, int(done), now if done else None))
+    print(f"Checklist '{title}': {sum(1 for t, _ in steps if not t.startswith('## '))} steps.")
 
 
 def hook(event):
@@ -1322,6 +1355,8 @@ def main(args):
         return unpause(rest[0], detach='--detach' in rest[1:])
     if cmd == 'idea':
         return idea(rest)
+    if cmd == 'checklist':
+        return checklist(rest)
     if cmd == 'restore' and len(rest) <= 1:
         return restore(rest)
     if cmd == 'read' and rest:

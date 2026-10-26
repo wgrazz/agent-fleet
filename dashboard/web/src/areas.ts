@@ -9,5 +9,6 @@ export const AREAS = [
   { name: 'Company', color: '#ff9f0a' },
   { name: 'Setup', color: '#8e8e93' },
   { name: 'Personal', color: '#bf5af2' },
+  { name: 'Other ventures', color: '#ac8e68' },
 ]
 export const areaColor = (name: string | null) => AREAS.find(a => a.name === name)?.color

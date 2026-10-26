@@ -1,6 +1,6 @@
 import { StrictMode, useCallback, useEffect, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
-import { api, onOffline, remember, Unauthorized, usePoll, type Conversation, type Folder, type Idea, type List, type LiveAgent, type Paused, type Profile, type Usage } from './api.ts'
+import { api, listGroups, onOffline, remember, Unauthorized, usePoll, type Conversation, type Folder, type Idea, type List, type LiveAgent, type Paused, type Profile, type Usage } from './api.ts'
 import { AgentList, AgentView, PausedList } from './agents.tsx'
 import {
   COLORS, Confirm, CustomForm, InterviewForm, isPhone, MenuHost, MicIcon, PullToRefresh, NameDialog, NewAgentButton, openMenu, ORDER, PauseUntil, Sidebar, UsageMeters,
@@ -195,6 +195,10 @@ function App() {
       act(api.patch(`/api/lists/${l.id}`, { name, color }), () => route.view === 'ideas' && route.a === l.name && go(`#/ideas/${enc(name)}`))
     } }) }] : []),
     { label: 'Color', items: COLORS.map(c => ({ label: c === l.color ? 'Current' : ' ', swatch: c, checked: c === l.color, onClick: () => act(api.patch(`/api/lists/${l.id}`, { color: c })) })) },
+    ...(!pinned(l) ? [
+      { label: l.kind === 'checklist' ? 'Make it an ideas list' : 'Make it a checklist', onClick: () => act(api.patch(`/api/lists/${l.id}`, { kind: l.kind === 'checklist' ? 'ideas' : 'checklist' })) },
+      { label: l.section ? 'Move out of More' : 'Move to More', onClick: () => act(api.patch(`/api/lists/${l.id}`, { section: l.section ? null : 'More' })) },
+    ] : []),
     { label: 'Import from Apple Notes…', onClick: () => setModal({ kind: 'import' }) },
     ...(!pinned(l) ? ['sep' as const, { label: 'Delete list…', danger: true, onClick: () => setModal({ kind: 'confirm', title: `Delete ${l.name}?`, action: 'Delete',
       text: `Open items move to Brain Dump; the ${l.done} done item${l.done === 1 ? '' : 's'} go with the list.`,
@@ -342,6 +346,7 @@ function App() {
       <Sidebar route={sideRoute} needs={needs} paused={paused.data?.length ?? 0} folders={folderList} counts={counts} lists={allLists}
         usage={usage.data ?? []} newButton={newButton} push={push} onJarvis={() => setJarvisOpen(true)} onNewFolder={() => newFolder()} onFolderMenu={folderMenu}
         onNewList={() => setModal({ kind: 'name', title: 'New list', color: COLORS[6], action: 'Create', submit: (name, color) => { setModal(null); act(api.post('/api/lists', { name, color }), () => go(`#/ideas/${enc(name)}`)) } })}
+        onNewChecklist={() => setModal({ kind: 'name', title: 'New checklist', color: COLORS[6], action: 'Create', submit: (name, color) => { setModal(null); act(api.post('/api/lists', { name, color, kind: 'checklist' }), () => go(`#/ideas/${enc(name)}`)) } })}
         onListMenu={listMenu} onDrop={(fid, key) => key && act(api.put('/api/placements', { key, folder_id: fid }))} />
       {middle}
       {detail}
@@ -420,10 +425,10 @@ function IdeasListPicker({ lists, current, onNew }: { lists: List[]; current: st
   const pick = (e: React.MouseEvent) => openMenu(e.clientX, e.clientY, [
     { label: 'Prioritized', checked: current === '★', onClick: () => { location.hash = '#/prioritized' } },
     'sep',
-    ...lists.map(l => ({
-      label: l.name + (l.name === 'Brain Dump' && l.unsorted > 0 ? ` · ${l.unsorted} to sort` : ''), swatch: l.color, checked: l.name === current,
-      onClick: () => { location.hash = `#/ideas/${enc(l.name)}` },
-    })),
+    ...listGroups(lists).filter(g => g.length).flatMap((g, n) => [...(n ? ['sep' as const] : []), ...g.map(l => ({
+      label: l.name + (l.name === 'Brain Dump' && l.unsorted > 0 ? ` · ${l.unsorted} to sort` : '') + (l.kind === 'checklist' ? ' · checklist' : '') + (l.section ? ` · ${l.section}` : ''),
+      swatch: l.color, checked: l.name === current, onClick: () => { location.hash = `#/ideas/${enc(l.name)}` },
+    }))]),
     'sep',
     { label: '+ New list', onClick: onNew },
   ], 'Lists')

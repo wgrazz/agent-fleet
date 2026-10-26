@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { api, type Idea, type List } from './api.ts'
+import { api, isHeading, type Idea, type List } from './api.ts'
 import { AREAS, areaColor } from './areas.ts'
 import { Dialog, InboxIcon, isPhone, SparkIcon, STATUS_LABEL, useHold } from './components.tsx'
 import type { Step } from './steps.ts'
@@ -28,8 +28,11 @@ export function IdeasPane({ list, items, selected, onChange, onError, onSort, on
   const [dragging, setDragging] = useState<number | null>(null)
   const [area, setArea] = useState('')
   const shown = area ? items.filter(i => i.area === area) : items
-  const open = shown.filter(i => !i.done)
-  const done = shown.filter(i => i.done)
+  const checklist = list.kind === 'checklist'
+  // a checklist keeps its order with checked steps in place; an ideas list moves them under Done
+  const open = checklist ? [...shown].sort((a, b) => (a.position ?? a.id) - (b.position ?? b.id)) : shown.filter(i => !i.done)
+  const done = checklist ? [] : shown.filter(i => i.done)
+  const steps = shown.filter(i => !isHeading(i.text))
   const add = async () => {
     const text = draft.trim()
     if (!text) return
@@ -50,15 +53,16 @@ export function IdeasPane({ list, items, selected, onChange, onError, onSort, on
     <section className="list ideas">
       <div className="lh">
         <h4><span className="sq round" style={{ background: list.color }} />{list.name}</h4>
+        {checklist && steps.length > 0 && <span className="progress">{steps.filter(i => i.done).length}/{steps.length}</span>}
         {list.name === 'Brain Dump' && open.length > 0 && <button className="btn small primary" onClick={onSort}>Sort {open.length}</button>}
-        <select className="area-filter" aria-label="Filter by area" value={area} onChange={e => setArea(e.target.value)}>
+        {!checklist && <select className="area-filter" aria-label="Filter by area" value={area} onChange={e => setArea(e.target.value)}>
           <option value="">All areas</option>
           {AREAS.map(a => <option key={a.name} value={a.name}>{a.name}</option>)}
-        </select>
+        </select>}
         <button className="btn small" aria-label="List options" onClick={e => { const r = e.currentTarget.getBoundingClientRect(); onHeaderMenu(r.right - 220, r.bottom + 4) }}>⋯</button>
       </div>
       <form className="add" onSubmit={e => { e.preventDefault(); add() }}>
-        <input value={draft} onChange={e => setDraft(e.target.value)} placeholder={`Add to ${list.name}${area ? ` · ${area}` : ''}…`} enterKeyHint="done" />
+        <input value={draft} onChange={e => setDraft(e.target.value)} placeholder={checklist ? 'Add a step… (## starts a heading)' : `Add to ${list.name}${area ? ` · ${area}` : ''}…`} enterKeyHint="done" />
       </form>
       <div className="scroll">
         {open.map(i => (
@@ -82,6 +86,9 @@ export function IdeasPane({ list, items, selected, onChange, onError, onSort, on
 
 function IdeaRow({ i, on, onToggle, onMenu, dragProps, showList }: { i: Idea; on: boolean; onToggle: () => void; onMenu: (x: number, y: number) => void; dragProps?: object; showList?: boolean }) {
   const hold = useHold(onMenu)
+  if (isHeading(i.text)) return (
+    <div className={`idea heading ${on ? 'on' : ''}`} {...dragProps} {...hold}><a href={`#/idea/${i.id}`} className="idea-body">{i.text.slice(3)}</a></div>
+  )
   return (
     <div className={`idea ${on ? 'on' : ''} ${i.done ? 'is-done' : ''}`} {...dragProps} {...hold}>
       <button className={`check ${i.done ? 'checked' : ''}`} role="checkbox" aria-checked={!!i.done} aria-label="Done" onClick={onToggle} />
@@ -326,13 +333,14 @@ export function AddTodos({ plan, agent, onClose }: { plan: { title: string; step
   const [keep, setKeep] = useState(() => plan.steps.map(() => true))
   const [list, setList] = useState(plan.title.slice(0, 60) || 'For you')
   const [names, setNames] = useState<string[]>([])
+  const [asChecklist, setAsChecklist] = useState(true)
   const [state, setState] = useState<'idle' | 'busy' | 'done'>('idle')
   const [error, setError] = useState('')
   useEffect(() => { api.get<List[]>('/api/lists').then(ls => setNames(ls.map(l => l.name))).catch(() => {}) }, [])
   const picked = plan.steps.filter((_, n) => keep[n])
   const add = () => {
     setState('busy')
-    api.post('/api/ideas/many', { list: list.trim(), agent, items: picked }).then(() => setState('done')).catch(e => { setError(e.message); setState('idle') })
+    api.post('/api/ideas/many', { list: list.trim(), agent, items: picked, checklist: asChecklist }).then(() => setState('done')).catch(e => { setError(e.message); setState('idle') })
   }
   return (
     <Dialog title={state === 'done' ? 'Added' : 'Add to-dos'} onClose={onClose}>
@@ -341,7 +349,7 @@ export function AddTodos({ plan, agent, onClose }: { plan: { title: string; step
           <p className="dialog-text">{picked.length} to-do{picked.length > 1 ? 's' : ''} in {list.trim() || 'For you'}{agent ? `, each linked back to ${agent}` : ''}.</p>
           <div className="form-actions">
             <button className="btn" onClick={onClose}>Close</button>
-            <a className="btn primary" href={`#/ideas/${encodeURIComponent(list.trim() || 'For you')}`} onClick={onClose}>Open list</a>
+            <a className="btn primary" href={`#/ideas/${encodeURIComponent(list.trim() || 'For you')}`} onClick={onClose}>Open {asChecklist ? 'checklist' : 'list'}</a>
           </div>
         </>
       ) : (
@@ -352,7 +360,8 @@ export function AddTodos({ plan, agent, onClose }: { plan: { title: string; step
                 <span>{s.text}{s.notes && <small> · with notes</small>}</span></label>
             ))}
           </div>
-          <label>List<input list="todo-lists" value={list} onChange={e => setList(e.target.value)} maxLength={60} placeholder="For you" /></label>
+          <label className="check-row"><input type="checkbox" checked={asChecklist} onChange={e => setAsChecklist(e.target.checked)} />As a checklist (keeps the steps in order)</label>
+          <label>{asChecklist ? 'Checklist' : 'List'}<input list="todo-lists" value={list} onChange={e => setList(e.target.value)} maxLength={60} placeholder="For you" /></label>
           <datalist id="todo-lists">{names.map(n => <option key={n} value={n} />)}</datalist>
           {error && <p className="hint">{error}</p>}
           <div className="form-actions">

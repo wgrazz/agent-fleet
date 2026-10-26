@@ -3,7 +3,7 @@ import { AREAS } from '../web/src/areas.ts'
 import { rankIdeas, sortIdeas } from './ai.ts'
 import { db } from './store.ts'
 
-export type List = { id: number; name: string; color: string; position: number; archived: number; open: number; done: number; unsorted?: number }
+export type List = { id: number; name: string; color: string; position: number; archived: number; kind: string; section: string | null; open: number; done: number; unsorted?: number }
 export type Idea = {
   id: number; list: string; text: string; notes: string; done: number; done_at: number | null; created_at: number
   position: number | null; repeat: string | null; next_due: number | null; agent: string | null; source: string | null
@@ -13,6 +13,10 @@ export type Idea = {
 const now = () => Math.floor(Date.now() / 1000)
 // Brain Dump is the inbox everything else falls back to, so it can't be renamed or deleted
 export const PINNED = ['Brain Dump']
+export const KINDS = ['ideas', 'checklist']
+export const SECTIONS = ['More']
+// in a checklist, a step written "## Something" is a heading: shown as one, never counted or ranked
+const STEP = "i.text NOT LIKE '## %'"
 
 // ---------- recurring ----------
 
@@ -43,18 +47,19 @@ function reopenDue() {
 
 export function lists(): List[] {
   reopenDue()
-  const rows = db.prepare(`SELECT l.*, coalesce(sum(i.done = 0), 0) AS open, coalesce(sum(i.done = 1), 0) AS done,
+  const rows = db.prepare(`SELECT l.*, coalesce(sum(i.done = 0 AND ${STEP}), 0) AS open, coalesce(sum(i.done = 1 AND ${STEP}), 0) AS done,
       coalesce(sum(i.done = 0 AND l.name = 'Brain Dump' AND i.suggestion IS NULL), 0) AS unsorted
     FROM lists l LEFT JOIN ideas i ON i.list = l.name WHERE l.archived = 0 GROUP BY l.id ORDER BY l.position, l.id`).all() as List[]
   return rows
 }
 
-export function createList(name: string, color?: string) {
+export function createList(name: string, color?: string, kind = 'ideas') {
+  if (!KINDS.includes(kind)) throw new Error('kind: ideas or checklist')
   const pos = (db.prepare('SELECT coalesce(max(position), 0) + 1 AS p FROM lists').get() as { p: number }).p
-  db.prepare('INSERT INTO lists (name, color, position) VALUES (?, ?, ?)').run(name, color ?? '#8e8e93', pos)
+  db.prepare('INSERT INTO lists (name, color, position, kind) VALUES (?, ?, ?, ?)').run(name, color ?? '#8e8e93', pos, kind)
 }
 
-export function updateList(id: number, patch: { name?: string; color?: string; position?: number; archived?: boolean }) {
+export function updateList(id: number, patch: { name?: string; color?: string; position?: number; archived?: boolean; kind?: string; section?: string | null }) {
   const list = db.prepare('SELECT * FROM lists WHERE id = ?').get(id) as List | undefined
   if (!list) throw new Error('no such list')
   if (patch.name !== undefined && patch.name !== list.name) {
@@ -62,6 +67,13 @@ export function updateList(id: number, patch: { name?: string; color?: string; p
     db.prepare('UPDATE lists SET name = ? WHERE id = ?').run(patch.name, id)
     db.prepare('UPDATE ideas SET list = ? WHERE list = ?').run(patch.name, list.name)
     db.prepare('UPDATE ideas SET suggestion = ? WHERE suggestion = ?').run(patch.name, list.name)
+  }
+  if (patch.kind !== undefined || patch.section !== undefined) {
+    if (PINNED.includes(list.name)) throw new Error(`${list.name} stays where it is`)
+    if (patch.kind !== undefined && !KINDS.includes(patch.kind)) throw new Error('kind: ideas or checklist')
+    if (patch.section && !SECTIONS.includes(patch.section)) throw new Error('section: More or none')
+    if (patch.kind !== undefined) db.prepare('UPDATE lists SET kind = ? WHERE id = ?').run(patch.kind, id)
+    if (patch.section !== undefined) db.prepare('UPDATE lists SET section = ? WHERE id = ?').run(patch.section, id)
   }
   if (patch.color) db.prepare('UPDATE lists SET color = ? WHERE id = ?').run(patch.color, id)
   if (patch.position !== undefined) db.prepare('UPDATE lists SET position = ? WHERE id = ?').run(patch.position, id)
@@ -81,7 +93,7 @@ export function deleteList(id: number) {
   db.prepare('DELETE FROM lists WHERE id = ?').run(id)
 }
 
-const ensureList = (name: string) => db.prepare('INSERT OR IGNORE INTO lists (name, position) VALUES (?, 100)').run(name)
+export const ensureList = (name: string, kind = 'ideas') => db.prepare('INSERT OR IGNORE INTO lists (name, position, kind) VALUES (?, 100, ?)').run(name, kind)
 
 // ---------- items ----------
 
@@ -169,7 +181,7 @@ export function undoTurn(turn?: number) {
 export async function suggestSorting(limit = 40) {
   const pending = db.prepare("SELECT id, text FROM ideas WHERE list = 'Brain Dump' AND done = 0 AND suggestion IS NULL ORDER BY id LIMIT ?").all(limit) as { id: number; text: string }[]
   if (!pending.length) return 0
-  const targets = lists().filter(l => l.name !== 'Brain Dump').map(l => ({
+  const targets = lists().filter(l => l.name !== 'Brain Dump' && l.kind !== 'checklist').map(l => ({
     name: l.name,
     examples: (db.prepare('SELECT text FROM ideas WHERE list = ? ORDER BY done, id DESC LIMIT 3').all(l.name) as { text: string }[]).map(r => r.text),
   }))
@@ -188,7 +200,9 @@ export const prioritized = () => {
 
 /** Claude reads every open idea (and what your agents are doing) and sets a priority with a one-line reason. */
 export async function rankAll(context: string) {
-  const open = db.prepare('SELECT id, list, text, priority FROM ideas WHERE done = 0 ORDER BY id DESC LIMIT 200').all() as { id: number; list: string; text: string; priority: number }[]
+  // checklist steps are done in order, not ranked
+  const open = db.prepare(`SELECT id, list, text, priority FROM ideas i WHERE done = 0 AND ${STEP}
+    AND list NOT IN (SELECT name FROM lists WHERE kind = 'checklist') ORDER BY id DESC LIMIT 200`).all() as { id: number; list: string; text: string; priority: number }[]
   if (!open.length) return { summary: 'You have no open ideas to rank.', next: [] as Idea[], counts: [0, 0, 0] }
   const r = await rankIdeas(open, context)
   const set = db.prepare('UPDATE ideas SET priority = ?, why = ? WHERE id = ? AND done = 0')

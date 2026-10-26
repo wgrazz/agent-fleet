@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { api, remember, type Agent, type Folder, type Improved, type List, type Profile, type Route, type Status, type Usage } from './api.ts'
+import { api, listGroups, remember, type Agent, type Folder, type Improved, type List, type Profile, type Route, type Status, type Usage } from './api.ts'
 
 export const TOOLS = ['claude', 'codex', 'cursor', 'copilot', 'agy'] as const
 const TOOL_LABEL: Record<string, string> = { claude: 'Claude', codex: 'Codex', cursor: 'Cursor', copilot: 'Copilot', agy: 'Antigravity' }
@@ -275,9 +275,11 @@ export function PullToRefresh() {
 export function Sidebar(props: {
   route: string; needs: number; paused: number; folders: Folder[]; counts: Map<number, number>; lists: List[]; usage: Usage[]
   newButton: ReactNode; push: ReactNode; onJarvis: () => void; onNewFolder: () => void; onFolderMenu: (f: Folder, x: number, y: number) => void
-  onNewList: () => void; onListMenu: (l: List, x: number, y: number) => void; onDrop: (folderId: number | null, key: string) => void
+  onNewList: () => void; onNewChecklist: () => void; onListMenu: (l: List, x: number, y: number) => void; onDrop: (folderId: number | null, key: string) => void
 }) {
   const [over, setOver] = useState<number | 'all' | null>(null)
+  const [ideaLists, checklists, more] = listGroups(props.lists)
+  const row = (l: List) => <ListRow key={l.id} l={l} on={props.route === `ideas/${l.name}`} onMenu={(x, y) => props.onListMenu(l, x, y)} />
   const dropProps = (target: number | null) => ({
     onDragOver: (e: React.DragEvent) => { if (e.dataTransfer.types.includes('fleet/key')) { e.preventDefault(); setOver(target ?? 'all') } },
     onDragLeave: () => setOver(null),
@@ -301,9 +303,11 @@ export function Sidebar(props: {
       {!props.folders.length && <button className="ni ghost" onClick={props.onNewFolder}>New folder…</button>}
       <div className="sec">Ideas<button className="sec-add" onClick={props.onNewList} aria-label="New list">+</button></div>
       <a className={`ni ${props.route === 'prioritized' ? 'on' : ''}`} href="#/prioritized"><span className="prio p3 side">!</span>Prioritized</a>
-      {props.lists.map(l => (
-        <ListRow key={l.id} l={l} on={props.route === `ideas/${l.name}`} onMenu={(x, y) => props.onListMenu(l, x, y)} />
-      ))}
+      {ideaLists.map(row)}
+      <div className="sec">Checklists<button className="sec-add" onClick={props.onNewChecklist} aria-label="New checklist">+</button></div>
+      {checklists.map(row)}
+      {!checklists.length && <button className="ni ghost" onClick={props.onNewChecklist}>New checklist…</button>}
+      {more.length > 0 && <details className="nav-more" open={more.some(l => props.route === `ideas/${l.name}`) || undefined}><summary className="sec">More</summary>{more.map(row)}</details>}
       <div className="sec">Library</div>
       <a className={`ni ${props.route === 'history' ? 'on' : ''}`} href="#/history"><ClockIcon />History</a>
       <a className={`ni ${props.route === 'paused' ? 'on' : ''}`} href="#/paused"><PauseIcon />Paused<b>{props.paused || ''}</b></a>
