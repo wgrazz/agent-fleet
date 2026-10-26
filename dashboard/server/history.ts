@@ -140,10 +140,22 @@ function claudeMessages(path: string): Message[] {
       if (d.type === 'user' && b.type === 'text' && /^\[Request interrupted/.test(b.text ?? '')) push(out, { role: 'tool', text: 'Interrupted' })
       else if (b.type === 'text' && b.text?.trim() && !(d.type === 'user' && isWrapper(b.text)))
         push(out, { role: d.type === 'user' ? 'user' : 'assistant', text: d.type === 'user' ? typed(b.text) : b.text.trim() })
-      else if (b.type === 'tool_use') push(out, { role: 'tool', text: summarizeTool(b.name, b.input) })
+      else if (b.type === 'tool_use') push(out, asked(b.name, b.input) ?? { role: 'tool', text: summarizeTool(b.name, b.input) })
     }
   }
   return out.slice(-MAX)
+}
+
+// Claude's questions and plans are the conversation, not tool noise: show them in full so they can be read and
+// answered from the chat. Option numbers match the screen's menu, so the quick-reply buttons line up.
+export function asked(name: string, input: any): Message | null {
+  if (name === 'ExitPlanMode' && typeof input?.plan === 'string') return { role: 'assistant', text: `**Plan for your approval**\n\n${input.plan}` }
+  if (name !== 'AskUserQuestion' || !Array.isArray(input?.questions)) return null
+  const text = input.questions.map((q: any) => {
+    const opts = (q.options ?? []).map((o: any, i: number) => `- **${i + 1}.** ${o.label}${o.description ? ` — ${o.description}` : ''}`)
+    return [`**${q.question}**${q.multiSelect ? ' (pick any)' : ''}`, opts.join('\n')].filter(Boolean).join('\n\n')
+  })
+  return { role: 'assistant', text: text.join('\n\n') }
 }
 
 function codexMessages(path: string): Message[] {
