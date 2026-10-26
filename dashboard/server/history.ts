@@ -127,6 +127,7 @@ function push(out: Message[], m: Message) {
 
 function claudeMessages(path: string): Message[] {
   const out: Message[] = []
+  const names = new Map<string, string>() // tool_use id -> tool name, to know what a tool_result answers
   for (const line of readFileSync(path, 'utf8').split('\n')) {
     const d = parse(line)
     if (!d || d.isSidechain || d.isMeta || (d.type !== 'user' && d.type !== 'assistant')) continue
@@ -140,10 +141,27 @@ function claudeMessages(path: string): Message[] {
       if (d.type === 'user' && b.type === 'text' && /^\[Request interrupted/.test(b.text ?? '')) push(out, { role: 'tool', text: 'Interrupted' })
       else if (b.type === 'text' && b.text?.trim() && !(d.type === 'user' && isWrapper(b.text)))
         push(out, { role: d.type === 'user' ? 'user' : 'assistant', text: d.type === 'user' ? typed(b.text) : b.text.trim() })
-      else if (b.type === 'tool_use') push(out, asked(b.name, b.input) ?? { role: 'tool', text: summarizeTool(b.name, b.input) })
+      else if (b.type === 'tool_use') {
+        names.set(b.id, b.name)
+        push(out, asked(b.name, b.input) ?? { role: 'tool', text: summarizeTool(b.name, b.input) })
+      } else if (b.type === 'tool_result') {
+        const reply = answered(names.get(b.tool_use_id), d.toolUseResult, b.is_error ? String(b.content ?? '') : '')
+        if (reply) push(out, { role: 'user', text: reply })
+      }
     }
   }
   return out.slice(-MAX)
+}
+
+// Your answer to a question or plan, from the dashboard or the terminal, shown as your own message.
+export function answered(tool: string | undefined, result: any, error: string): string {
+  if (tool === 'AskUserQuestion' && result?.answers && typeof result.answers === 'object')
+    return Object.entries(result.answers).map(([q, a]) => `- ${q} → **${a}**`).join('\n')
+  if (tool !== 'ExitPlanMode') return ''
+  if (!error) return 'Approved the plan'
+  // the dashboard's feedback comes back as the whole message; the terminal's after "the user said:"
+  const said = error.match(/the user said:\s*([\s\S]+)$/i)?.[1] ?? (/^The user doesn.t want to proceed/.test(error) ? '' : error)
+  return said.trim() ? `Keep planning: ${said.trim()}` : 'Keep planning'
 }
 
 // Claude's questions and plans are the conversation, not tool noise: show them in full so they can be read and
