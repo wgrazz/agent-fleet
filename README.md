@@ -185,7 +185,10 @@ Reading things and music happen right away. Calendar events, reminders and email
 **Jarvis outside the dashboard.** `fleet ask "what needs me?"` talks to the same Jarvis, with the
 same memory, cost cap and actions, from any terminal or script. That makes it easy to connect to:
 
-- **Siri, hands-free on the iPhone.** In Shortcuts, make a shortcut named "Jarvis":
+- **Siri, hands-free on the iPhone.** On the phone, open Settings → **Hey Siri** → **Add the Jarvis
+  shortcut** (or run `fleet dash siri` on the Mac and AirDrop the file). Say "Hey Siri, Jarvis", then
+  talk; Siri reads the answer and listens again until you stop talking. To build it by hand instead,
+  make a shortcut named "Jarvis":
   1. **Dictate Text.**
   2. **Get Contents of URL:**
      - URL: `https://<your-mac>.<tailnet>.ts.net/api/jarvis`
