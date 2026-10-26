@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { api, isHeading, type Idea, type List } from './api.ts'
+import { api, isHeading, remember, type Idea, type List } from './api.ts'
 import { AREAS, areaColor } from './areas.ts'
 import { Dialog, InboxIcon, isPhone, SparkIcon, STATUS_LABEL, useHold } from './components.tsx'
 import type { Step } from './steps.ts'
@@ -19,6 +19,16 @@ export function repeatLabel(rule: string | null) {
 
 // ---------- the list pane ----------
 
+type Order = (a: Idea, b: Idea) => number
+const newest: Order = (a, b) => b.created_at - a.created_at || b.id - a.id
+const mine: Order = (a, b) => (a.position ?? a.id) - (b.position ?? b.id)
+export const SORTS: Record<string, { label: string; by: Order }> = {
+  newest: { label: 'Newest first', by: newest },
+  oldest: { label: 'Oldest first', by: (a, b) => -newest(a, b) },
+  priority: { label: 'Priority', by: (a, b) => b.priority - a.priority || newest(a, b) },
+  manual: { label: 'My order', by: mine },
+}
+
 export function IdeasPane({ list, items, selected, onChange, onError, onSort, onHeaderMenu, onMenu }: {
   list: List; items: Idea[]; selected: number | null; onChange: () => void; onError: (e: Error) => void
   onSort: () => void; onHeaderMenu: (x: number, y: number) => void; onMenu: (i: Idea, x: number, y: number) => void
@@ -27,11 +37,15 @@ export function IdeasPane({ list, items, selected, onChange, onError, onSort, on
   const [showDone, setShowDone] = useState(false)
   const [dragging, setDragging] = useState<number | null>(null)
   const [area, setArea] = useState('')
+  const [sort, setSortState] = useState(() => SORTS[remember.get('ideaSort')] ? remember.get('ideaSort') : 'newest')
+  const setSort = (s: string) => { setSortState(s); remember.set('ideaSort', s) }
   const shown = area ? items.filter(i => i.area === area) : items
   const checklist = list.kind === 'checklist'
   // a checklist keeps its order with checked steps in place; an ideas list moves them under Done
-  const open = checklist ? [...shown].sort((a, b) => (a.position ?? a.id) - (b.position ?? b.id)) : shown.filter(i => !i.done)
-  const done = checklist ? [] : shown.filter(i => i.done)
+  const order = checklist ? mine : SORTS[sort].by
+  const open = (checklist ? [...shown] : shown.filter(i => !i.done)).sort(order)
+  const done = checklist ? [] : shown.filter(i => i.done).sort((a, b) => (b.done_at ?? 0) - (a.done_at ?? 0)) // latest finished first
+  const canDrag = !isPhone() && (checklist || sort === 'manual')
   const steps = shown.filter(i => !isHeading(i.text))
   const add = async () => {
     const text = draft.trim()
@@ -55,12 +69,19 @@ export function IdeasPane({ list, items, selected, onChange, onError, onSort, on
         <h4><span className="sq round" style={{ background: list.color }} />{list.name}</h4>
         {checklist && steps.length > 0 && <span className="progress">{steps.filter(i => i.done).length}/{steps.length}</span>}
         {list.name === 'Brain Dump' && open.length > 0 && <button className="btn small primary" onClick={onSort}>Sort {open.length}</button>}
-        {!checklist && <select className="area-filter" aria-label="Filter by area" value={area} onChange={e => setArea(e.target.value)}>
-          <option value="">All areas</option>
-          {AREAS.map(a => <option key={a.name} value={a.name}>{a.name}</option>)}
-        </select>}
         <button className="btn small" aria-label="List options" onClick={e => { const r = e.currentTarget.getBoundingClientRect(); onHeaderMenu(r.right - 220, r.bottom + 4) }}>⋯</button>
       </div>
+      {!checklist && (
+        <div className="idea-tools">
+          <select aria-label="Sort" value={sort} onChange={e => setSort(e.target.value)}>
+            {Object.entries(SORTS).map(([k, s]) => <option key={k} value={k}>{s.label}</option>)}
+          </select>
+          <select aria-label="Filter by area" value={area} onChange={e => setArea(e.target.value)}>
+            <option value="">All areas</option>
+            {AREAS.map(a => <option key={a.name} value={a.name}>{a.name}</option>)}
+          </select>
+        </div>
+      )}
       <form className="add" onSubmit={e => { e.preventDefault(); add() }}>
         <input value={draft} onChange={e => setDraft(e.target.value)} placeholder={checklist ? 'Add a step… (## starts a heading)' : `Add to ${list.name}${area ? ` · ${area}` : ''}…`} enterKeyHint="done" />
       </form>
@@ -68,7 +89,7 @@ export function IdeasPane({ list, items, selected, onChange, onError, onSort, on
         {open.map(i => (
           <IdeaRow key={i.id} i={i} on={i.id === selected} onToggle={() => toggle(i)} onMenu={(x, y) => onMenu(i, x, y)}
             dragProps={{
-              draggable: !isPhone(), onDragStart: () => setDragging(i.id), onDragEnd: () => setDragging(null),
+              draggable: canDrag, onDragStart: () => setDragging(i.id), onDragEnd: () => setDragging(null),
               onDragOver: (e: React.DragEvent) => dragging !== null && e.preventDefault(), onDrop: () => dropOn(i),
             }} />
         ))}
