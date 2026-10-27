@@ -35,14 +35,31 @@ function useSort() {
   return [sort, (s: string) => { set(s); remember.set('ideaSort', s) }] as const
 }
 
-/** The area filter, remembered on this device for each list (and All notes), so leaving and coming back keeps it. */
-function useArea(where: string) {
+/** A filter remembered on this device for each list (and All notes), so leaving and coming back keeps it. */
+function useFilter(kind: string, where: string, ok: (v: string) => boolean) {
   const [, bump] = useState(0)
-  const saved = remember.get(`area:${where}`)
-  return [AREAS.some(a => a.name === saved) ? saved : '', (a: string) => { remember.set(`area:${where}`, a); bump(n => n + 1) }] as const
+  const saved = remember.get(`${kind}:${where}`)
+  return [ok(saved) ? saved : '', (v: string) => { remember.set(`${kind}:${where}`, v); bump(n => n + 1) }] as const
 }
 
-function IdeaTools({ sort, setSort, area, setArea }: { sort: string; setSort: (s: string) => void; area: string; setArea: (a: string) => void }) {
+// whether a note has an agent on it: any (running or finished), one still running, or none
+const AGENT_FILTERS: Record<string, { label: string; keep: (i: Idea) => boolean }> = {
+  any: { label: 'Has an agent', keep: i => !!i.agent },
+  live: { label: 'Agent running', keep: i => !!i.agent && i.agent_status !== 'gone' && i.agent_status !== 'crashed' },
+  none: { label: 'No agent', keep: i => !i.agent },
+}
+
+/** The area and agent filters for a list (or All notes), with what they keep. */
+function useIdeaFilters(where: string) {
+  const [area, setArea] = useFilter('area', where, v => AREAS.some(a => a.name === v))
+  const [agent, setAgent] = useFilter('agent', where, v => v in AGENT_FILTERS)
+  const keep = (i: Idea) => (!area || i.area === area) && (!agent || AGENT_FILTERS[agent].keep(i))
+  return { area, setArea, agent, setAgent, keep }
+}
+
+function IdeaTools({ sort, setSort, area, setArea, agent, setAgent }: {
+  sort: string; setSort: (s: string) => void; area: string; setArea: (a: string) => void; agent: string; setAgent: (a: string) => void
+}) {
   return (
     <div className="idea-tools">
       <select aria-label="Sort" value={sort} onChange={e => setSort(e.target.value)}>
@@ -51,6 +68,10 @@ function IdeaTools({ sort, setSort, area, setArea }: { sort: string; setSort: (s
       <select aria-label="Filter by area" value={area} onChange={e => setArea(e.target.value)}>
         <option value="">All areas</option>
         {AREAS.map(a => <option key={a.name} value={a.name}>{a.name}</option>)}
+      </select>
+      <select aria-label="Filter by agent" value={agent} onChange={e => setAgent(e.target.value)}>
+        <option value="">Any agent or none</option>
+        {Object.entries(AGENT_FILTERS).map(([k, f]) => <option key={k} value={k}>{f.label}</option>)}
       </select>
     </div>
   )
@@ -84,9 +105,9 @@ export function IdeasPane({ list, items, selected, onChange, onError, onSort, on
   const [draft, setDraft] = useState('')
   const [showDone, setShowDone] = useState(false)
   const [dragging, setDragging] = useState<number | null>(null)
-  const [area, setArea] = useArea(list.name)
+  const { area, setArea, agent, setAgent, keep } = useIdeaFilters(list.name)
   const [sort, setSort] = useSort()
-  const shown = area ? items.filter(i => i.area === area) : items
+  const shown = items.filter(keep)
   // what Undo (shake, ⌘Z or the button) reverses, newest last: a check or uncheck (done = how it was), or a step you added
   const [undos, setUndos] = useState<{ id: number; done?: boolean }[]>([])
   const [flash, setFlash] = useState('')
@@ -157,7 +178,7 @@ export function IdeasPane({ list, items, selected, onChange, onError, onSort, on
         {list.name === 'Brain Dump' && open.length > 0 && <button className="btn small primary" onClick={onSort}>Sort {open.length}</button>}
         <button className="btn small" aria-label="List options" onClick={e => { const r = e.currentTarget.getBoundingClientRect(); onHeaderMenu(r.right - 220, r.bottom + 4) }}>⋯</button>
       </div>
-      {!checklist && <IdeaTools sort={sort} setSort={setSort} area={area} setArea={setArea} />}
+      {!checklist && <IdeaTools sort={sort} setSort={setSort} area={area} setArea={setArea} agent={agent} setAgent={setAgent} />}
       <form className="add" onSubmit={e => { e.preventDefault(); add() }}>
         <input value={draft} onChange={e => setDraft(e.target.value)} placeholder={checklist ? 'Add a step… (## starts a heading)' : `Add to ${list.name}${area ? ` · ${area}` : ''}…`} enterKeyHint="done" />
       </form>
@@ -169,7 +190,7 @@ export function IdeasPane({ list, items, selected, onChange, onError, onSort, on
               onDragOver: (e: React.DragEvent) => dragging !== null && e.preventDefault(), onDrop: () => dropOn(i),
             }} />
         ))}
-        {!open.length && <div className="empty">{area ? `Nothing open in ${area} here.` : list.name === 'Brain Dump' ? 'Inbox zero. Jot anything here, or say "Jarvis, idea: …".' : 'Nothing open here.'}</div>}
+        {!open.length && <div className="empty">{agent ? 'Nothing open here matches these filters.' : area ? `Nothing open in ${area} here.` : list.name === 'Brain Dump' ? 'Inbox zero. Jot anything here, or say "Jarvis, idea: …".' : 'Nothing open here.'}</div>}
         {done.length > 0 && (
           <>
             <button className="grp done-toggle" onClick={() => setShowDone(!showDone)}>{showDone ? '▾' : '▸'} Done ({done.length})</button>
@@ -396,15 +417,15 @@ export function AllNotesPane({ items, lists, selected, onChange, onError, onMenu
   items: Idea[]; lists: List[]; selected: number | null; onChange: () => void; onError: (e: Error) => void; onMenu: (i: Idea, x: number, y: number) => void
 }) {
   const [sort, setSort] = useSort()
-  const [area, setArea] = useArea('*all notes')
+  const { area, setArea, agent, setAgent, keep } = useIdeaFilters('*all notes')
   const checklists = new Set(lists.filter(l => l.kind === 'checklist').map(l => l.name))
-  const open = items.filter(i => !i.done && !checklists.has(i.list) && !isHeading(i.text) && (!area || i.area === area))
+  const open = items.filter(i => !i.done && !checklists.has(i.list) && !isHeading(i.text) && keep(i))
     .sort(sort === 'manual' ? (a, b) => a.list.localeCompare(b.list) || SORTS.manual.by(a, b) : SORTS[sort].by)
   const toggle = (i: Idea) => api.patch(`/api/ideas/${i.id}`, { done: !i.done }).then(onChange).catch(onError)
   return (
     <section className="list ideas">
       <div className="lh"><h4><LinesIcon />All notes</h4><span className="progress">{open.length}</span></div>
-      <IdeaTools sort={sort} setSort={setSort} area={area} setArea={setArea} />
+      <IdeaTools sort={sort} setSort={setSort} area={area} setArea={setArea} agent={agent} setAgent={setAgent} />
       <div className="scroll">
         {open.map(i => <IdeaRow key={i.id} i={i} on={i.id === selected} showList onToggle={() => toggle(i)} onMenu={(x, y) => onMenu(i, x, y)} />)}
         {!open.length && <div className="empty">{area ? `No open notes in ${area}.` : 'No open notes.'}</div>}
