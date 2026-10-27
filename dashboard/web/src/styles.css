@@ -326,7 +326,7 @@ details.ai-note { display: block; }
 .add input { width: 100%; border: 1px solid var(--line); background: var(--bg); border-radius: 8px; padding: 7px 10px; }
 .idea { display: flex; gap: 10px; align-items: flex-start; margin: 1px 8px; padding: 8px 10px; border-radius: 9px; }
 .idea:hover { background: var(--hover); }
-/* checklist row: Copy / Copy and check off show on hover; on touch screens, when you hold the step */
+/* list row: Copy / Copy and check off show on hover; on touch screens, when you hold the note */
 .idea-acts { display: flex; gap: 4px; flex-shrink: 0; visibility: hidden; }
 .idea-acts .btn { display: inline-flex; align-items: center; gap: 2px; }
 @media (hover: hover) { .idea:hover .idea-acts, .idea:focus-within .idea-acts { visibility: visible; } }

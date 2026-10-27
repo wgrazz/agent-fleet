@@ -157,7 +157,7 @@ export function IdeasPane({ list, items, selected, onChange, onError, onSort, on
       <div className="scroll">
         {open.map(i => (
           <IdeaRow key={i.id} i={i} on={i.id === selected} onToggle={() => toggle(i)} onMenu={(x, y) => onMenu(i, x, y)}
-            onCopy={checklist ? () => copy(i) : undefined} onCopyCheck={checklist ? () => copyAndCheck(i) : undefined}
+            onCopy={() => copy(i)} onCopyCheck={() => copyAndCheck(i)}
             dragProps={{
               draggable: canDrag, onDragStart: () => setDragging(i.id), onDragEnd: () => setDragging(null),
               onDragOver: (e: React.DragEvent) => dragging !== null && e.preventDefault(), onDrop: () => dropOn(i),
@@ -167,7 +167,7 @@ export function IdeasPane({ list, items, selected, onChange, onError, onSort, on
         {done.length > 0 && (
           <>
             <button className="grp done-toggle" onClick={() => setShowDone(!showDone)}>{showDone ? '▾' : '▸'} Done ({done.length})</button>
-            {showDone && done.map(i => <IdeaRow key={i.id} i={i} on={i.id === selected} onToggle={() => toggle(i)} onMenu={(x, y) => onMenu(i, x, y)} />)}
+            {showDone && done.map(i => <IdeaRow key={i.id} i={i} on={i.id === selected} onToggle={() => toggle(i)} onMenu={(x, y) => onMenu(i, x, y)} onCopy={() => copy(i)} />)}
           </>
         )}
       </div>
@@ -179,7 +179,7 @@ function IdeaRow({ i, on, onToggle, onMenu, dragProps, showList, onCopy, onCopyC
   i: Idea; on: boolean; onToggle: () => void; onMenu: (x: number, y: number) => void; dragProps?: object; showList?: boolean
   onCopy?: () => void; onCopyCheck?: () => void
 }) {
-  // on a touch screen, holding a checklist step brings up its buttons (⋯ still opens the menu); a tap anywhere else hides them
+  // on a touch screen, holding a note brings up its buttons (⋯ still opens the menu); a tap anywhere else hides them
   const [acts, setActs] = useState(false)
   const row = useRef<HTMLDivElement>(null)
   useEffect(() => {
