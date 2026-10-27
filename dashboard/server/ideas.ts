@@ -177,17 +177,26 @@ export function undoTurn(turn?: number) {
 // ---------- sorting ----------
 
 /** Ask Claude where each unsorted Brain Dump note belongs; list suggestions are stored on the items, never applied.
- *  The area is just a tag you can change, so it's filled in when the note has none. */
+ *  The area is just a tag you can change, so it's filled in on any open note that has none, in any list but a checklist. */
 export async function suggestSorting(limit = 40) {
-  const pending = db.prepare("SELECT id, text FROM ideas WHERE list = 'Brain Dump' AND done = 0 AND suggestion IS NULL ORDER BY id LIMIT ?").all(limit) as { id: number; text: string }[]
+  // ponytail: a note no area fits is asked about again each sort; mark it tried if that wastes calls
+  const pending = db.prepare(`SELECT id, text FROM ideas WHERE done = 0 AND (
+      (list = 'Brain Dump' AND suggestion IS NULL)
+      OR (area IS NULL AND text NOT LIKE '## %' AND list NOT IN (SELECT name FROM lists WHERE kind = 'checklist'))
+    ) ORDER BY (list = 'Brain Dump' AND suggestion IS NULL) DESC, id LIMIT ?`).all(limit) as { id: number; text: string }[]
   if (!pending.length) return 0
   const targets = lists().filter(l => l.name !== 'Brain Dump' && l.kind !== 'checklist').map(l => ({
     name: l.name,
     examples: (db.prepare('SELECT text FROM ideas WHERE list = ? ORDER BY done, id DESC LIMIT 3').all(l.name) as { text: string }[]).map(r => r.text),
   }))
   const { suggestions } = await sortIdeas(pending, targets)
-  const set = db.prepare("UPDATE ideas SET suggestion = ?, suggestion_conf = ?, area = coalesce(area, ?) WHERE id = ? AND list = 'Brain Dump'")
-  for (const s of suggestions) if (pending.some(p => p.id === s.id)) set.run(s.list, Math.max(0, Math.min(1, s.confidence)), AREAS.some(a => a.name === s.area) ? s.area : null, s.id)
+  const suggest = db.prepare("UPDATE ideas SET suggestion = ?, suggestion_conf = ? WHERE id = ? AND list = 'Brain Dump'")
+  const tag = db.prepare('UPDATE ideas SET area = coalesce(area, ?) WHERE id = ?')
+  for (const s of suggestions) {
+    if (!pending.some(p => p.id === s.id)) continue
+    suggest.run(s.list, Math.max(0, Math.min(1, s.confidence)), s.id)
+    if (AREAS.some(a => a.name === s.area)) tag.run(s.area, s.id)
+  }
   return suggestions.length
 }
 

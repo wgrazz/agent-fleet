@@ -18,7 +18,7 @@ import { aiBudget, usage } from './usage.ts'
 import { kokoroInstalled, speech, voices } from './tts.ts'
 import { readFileSync as readFile } from 'node:fs'
 import * as J from './jarvis.ts'
-import { AREAS, areaColor } from '../web/src/areas.ts'
+import { AREAS, areaColor, notePrompt } from '../web/src/areas.ts'
 import { attach } from './ws.ts'
 
 const NAME = /^[A-Za-z0-9._-]{1,40}$/ // same rule as the fleet CLI
@@ -613,7 +613,7 @@ const routes: [string, RegExp, Route][] = [
     const item = ideaOr404(id)
     const b = await body(req)
     const slug = item.text.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 28)
-    const started = await startAgent({ ...b, folder_id: ideaFolder(b, item.area), name: str(b.name, 40) || slug, prompt: str(b.prompt, 100_000) || `${item.text}${item.notes ? `\n\n${item.notes}` : ''}` })
+    const started = await startAgent({ ...b, folder_id: ideaFolder(b, item.area), name: str(b.name, 40) || slug, prompt: str(b.prompt, 100_000) || notePrompt(item) })
     ideas.updateIdea(item.id, { agent: started.name })
     return started
   }],

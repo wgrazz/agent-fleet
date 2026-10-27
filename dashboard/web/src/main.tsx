@@ -7,7 +7,7 @@ import {
   type MenuItem, type StartFields, useHold,
 } from './components.tsx'
 import { ConversationView, HistoryPane, Jarvis, Palette, speak, spokenAlerts } from './extras.tsx'
-import { AREAS } from './areas.ts'
+import { AREAS, notePrompt } from './areas.ts'
 import { AllNotesPane, IdeaDetail, IdeasPane, ImportNotes, PRIORITY, PriorityPane, QuickCapture, SortMode } from './ideas.tsx'
 import { SettingsPage } from './settings.tsx'
 import { FullTerminal } from './terminal.tsx'
@@ -216,19 +216,17 @@ function App() {
       { label: 'None', checked: !i.area, onClick: () => act(api.patch(`/api/ideas/${i.id}`, { area: null })) }] },
     { label: 'Move to', items: allLists.filter(l => l.name !== i.list).map(l => ({ label: l.name, swatch: l.color, onClick: () => act(api.patch(`/api/ideas/${i.id}`, { list: l.name })) })) },
     { label: 'Start an agent on this', onClick: () => startFromIdea(i) },
-    { label: 'Interview me about it', onClick: () => setModal({ kind: 'interview', topic: i.text, ideaId: i.id }) },
+    { label: 'Interview me about it', onClick: () => setModal({ kind: 'interview', topic: notePrompt(i), ideaId: i.id }) },
     'sep',
     { label: 'Delete', danger: true, onClick: () => act(api.del(`/api/ideas/${i.id}`)) },
   ], i.text.slice(0, 40))
 
-  const startFromIdea = (i: Idea) => setModal({ kind: 'custom', title: 'Start an agent on this idea', ideaId: i.id, initial: { folder_id: folderList.find(f => f.name === i.area)?.id ?? null, prompt: `${i.text}${i.notes ? `\n\n${i.notes}` : ''}` } })
+  const startFromIdea = (i: Idea) => setModal({ kind: 'custom', title: 'Start an agent on this idea', ideaId: i.id, initial: { folder_id: folderList.find(f => f.name === i.area)?.id ?? null, prompt: notePrompt(i) } })
 
   const runSort = () => {
     setModal({ kind: 'sort' })
-    if ((allLists.find(l => l.name === 'Brain Dump')?.unsorted ?? 0) > 0) {
-      setSorting(true)
-      api.post('/api/ideas/sort').then(() => ideas.refresh()).catch(fail).finally(() => setSorting(false))
-    }
+    setSorting(true) // always: notes in any list may still need an area even when Brain Dump has none to sort
+    api.post('/api/ideas/sort').then(() => ideas.refresh()).catch(fail).finally(() => setSorting(false))
   }
 
   // ---------- keyboard ----------
@@ -331,7 +329,7 @@ function App() {
   } else if (route.view === 'idea' && ideaItem) {
     detail = <IdeaDetail key={ideaItem.id} idea={ideaItem} lists={allLists} onBack={() => go(`#/ideas/${enc(ideaItem.list)}`)}
       onChange={() => { ideas.refresh(); lists.refresh(); api.get<Idea[]>(`/api/ideas?list=${enc(ideaItem.list)}`).then(xs => setIdeaItem(xs.find(i => i.id === ideaItem.id) ?? null)) }}
-      onError={fail} onStart={startFromIdea} onInterview={i => setModal({ kind: 'interview', topic: i.text, ideaId: i.id })}
+      onError={fail} onStart={startFromIdea} onInterview={i => setModal({ kind: 'interview', topic: notePrompt(i), ideaId: i.id })}
       onDelete={i => act(api.del(`/api/ideas/${i.id}`), () => go(`#/ideas/${enc(i.list)}`))} />
   } else if (conversation) {
     detail = <ConversationView key={conversation.id} c={conversation} onBack={() => go('#/history')} onResume={() => resume(conversation)}

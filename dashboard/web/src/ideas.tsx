@@ -326,6 +326,7 @@ export function SortMode({ items, lists, onDone, onError, onStart, loading }: {
             onTouchMove={e => { if (touch.current) setSwipe(e.touches[0].clientX - touch.current.x) }}
             onTouchEnd={() => { if (swipe > 90) accept(); else if (swipe < -90) skip(); setSwipe(0); touch.current = null }}>
             <p className="sort-text">{cur.text}</p>
+            {cur.area && <span className="idea-area"><span className="sq round" style={{ background: areaColor(cur.area) }} />{cur.area}</span>}
             {cur.suggestion && cur.suggestion !== 'Brain Dump' ? (
               <p className="sort-sugg"><SparkIcon /> Claude thinks: <b>{cur.suggestion}</b>{cur.suggestion_conf !== null && cur.suggestion_conf < 0.6 ? ' (not sure)' : ''}</p>
             ) : <p className="sort-sugg dim">{loading ? 'Claude is reading your Brain Dump…' : 'No suggestion. Pick a list.'}</p>}
