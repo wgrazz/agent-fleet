@@ -77,27 +77,6 @@ function IdeaTools({ sort, setSort, area, setArea, agent, setAgent }: {
   )
 }
 
-/** A shake of the phone, once per shake. iOS only reports motion after askMotion() runs inside a tap. */
-function useShake(on: () => void) {
-  const cb = useRef(on)
-  cb.current = on
-  useEffect(() => {
-    let last = 0
-    const m = (e: DeviceMotionEvent) => {
-      const a = e.acceleration
-      // ponytail: one threshold (m/s², gravity removed); raise it if walking sets it off, lower if shakes are missed
-      if (a && Math.hypot(a.x ?? 0, a.y ?? 0, a.z ?? 0) > 18 && Date.now() - last > 1500) { last = Date.now(); cb.current() }
-    }
-    addEventListener('devicemotion', m)
-    return () => removeEventListener('devicemotion', m)
-  }, [])
-}
-let motionAsked = false
-const askMotion = () => {
-  const D = (globalThis as any).DeviceMotionEvent
-  if (!motionAsked && typeof D?.requestPermission === 'function') { motionAsked = true; D.requestPermission().catch(() => {}) }
-}
-
 export function IdeasPane({ list, items, selected, onChange, onError, onSort, onHeaderMenu, onMenu }: {
   list: List; items: Idea[]; selected: number | null; onChange: () => void; onError: (e: Error) => void
   onSort: () => void; onHeaderMenu: (x: number, y: number) => void; onMenu: (i: Idea, x: number, y: number, top?: MenuItem[]) => void
@@ -108,7 +87,7 @@ export function IdeasPane({ list, items, selected, onChange, onError, onSort, on
   const { area, setArea, agent, setAgent, keep } = useIdeaFilters(list.name)
   const [sort, setSort] = useSort()
   const shown = items.filter(keep)
-  // what Undo (shake, ⌘Z or the button) reverses, newest last: a check or uncheck (done = how it was), or a step you added
+  // what Undo (⌘Z or the button) reverses, newest last: a check or uncheck (done = how it was), or a step you added
   const [undos, setUndos] = useState<{ id: number; done?: boolean }[]>([])
   const [flash, setFlash] = useState('')
   useEffect(() => { if (!flash) return; const t = setTimeout(() => setFlash(''), 1500); return () => clearTimeout(t) }, [flash])
@@ -129,13 +108,11 @@ export function IdeasPane({ list, items, selected, onChange, onError, onSort, on
     onChange()
   }
   const setDone = (i: Idea, done: boolean) => {
-    askMotion()
     setUndos(u => [...u, { id: i.id, done: !!i.done }])
     return api.patch(`/api/ideas/${i.id}`, { done }).then(onChange).catch(onError)
   }
   const toggle = (i: Idea) => setDone(i, !i.done)
   const copy = (i: Idea) => {
-    askMotion()
     return navigator.clipboard.writeText(i.text).then(() => { setFlash('Copied'); return true }, e => { onError(e); return false })
   }
   const copyAndCheck = (i: Idea) => copy(i).then(ok => { if (ok && !i.done) setDone(i, true) }) // a failed copy leaves it unchecked
@@ -150,7 +127,6 @@ export function IdeasPane({ list, items, selected, onChange, onError, onSort, on
     ;(last.done === undefined ? api.del(`/api/ideas/${last.id}`) : api.patch(`/api/ideas/${last.id}`, { done: last.done }))
       .then(() => { setFlash('Undone'); onChange() }).catch(onError)
   }
-  useShake(undo)
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (!(e.metaKey || e.ctrlKey) || e.key.toLowerCase() !== 'z' || e.shiftKey) return
@@ -174,7 +150,7 @@ export function IdeasPane({ list, items, selected, onChange, onError, onSort, on
       <div className="lh">
         <h4><span className="sq round" style={{ background: list.color }} />{list.name}</h4>
         {checklist && steps.length > 0 && <span className="progress">{steps.filter(i => i.done).length}/{steps.length}</span>}
-        {flash ? <span className="progress">{flash}</span> : undos.length > 0 && <button className="btn small" title="Undo (shake or ⌘Z)" onClick={undo}>Undo</button>}
+        {flash ? <span className="progress">{flash}</span> : undos.length > 0 && <button className="btn small" title="Undo (⌘Z)" onClick={undo}>Undo</button>}
         {list.name === 'Brain Dump' && open.length > 0 && <button className="btn small primary" onClick={onSort}>Sort {open.length}</button>}
         <button className="btn small" aria-label="List options" onClick={e => { const r = e.currentTarget.getBoundingClientRect(); onHeaderMenu(r.right - 220, r.bottom + 4) }}>⋯</button>
       </div>
