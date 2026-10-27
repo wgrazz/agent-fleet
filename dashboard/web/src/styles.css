@@ -326,12 +326,6 @@ details.ai-note { display: block; }
 .add input { width: 100%; border: 1px solid var(--line); background: var(--bg); border-radius: 8px; padding: 7px 10px; }
 .idea { display: flex; gap: 10px; align-items: flex-start; margin: 1px 8px; padding: 8px 10px; border-radius: 9px; }
 .idea:hover { background: var(--hover); }
-/* list row: Copy / Copy and check off show on hover; on touch screens, when you hold the note */
-.idea-acts { display: flex; gap: 4px; flex-shrink: 0; visibility: hidden; }
-.idea-acts .btn { display: inline-flex; align-items: center; gap: 2px; }
-@media (hover: hover) { .idea:hover .idea-acts, .idea:focus-within .idea-acts { visibility: visible; } }
-@media (hover: none) { .idea-acts { display: none; } }
-.idea.show-acts .idea-acts { display: flex; visibility: visible; }
 .idea.on { background: color-mix(in srgb, var(--accent) 14%, transparent); }
 .idea-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .idea-text { line-height: 1.4; overflow-wrap: anywhere; }

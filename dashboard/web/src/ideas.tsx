@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { api, isHeading, remember, type Idea, type List } from './api.ts'
 import { AREAS, areaColor } from './areas.ts'
-import { Dialog, InboxIcon, LinesIcon, isPhone, SparkIcon, STATUS_LABEL, useHold } from './components.tsx'
+import { Dialog, InboxIcon, LinesIcon, isPhone, SparkIcon, STATUS_LABEL, useHold, type MenuItem } from './components.tsx'
 import type { Step } from './steps.ts'
 
 export const PRIORITY = ['None', 'Low', 'Medium', 'High']
@@ -70,13 +70,9 @@ const askMotion = () => {
   if (!motionAsked && typeof D?.requestPermission === 'function') { motionAsked = true; D.requestPermission().catch(() => {}) }
 }
 
-const CopyIcon = () => (
-  <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><rect x="5" y="5" width="8.5" height="8.5" rx="1.5" /><path d="M10.5 5V3.5A1.5 1.5 0 0 0 9 2H3.5A1.5 1.5 0 0 0 2 3.5V9a1.5 1.5 0 0 0 1.5 1.5H5" /></svg>
-)
-
 export function IdeasPane({ list, items, selected, onChange, onError, onSort, onHeaderMenu, onMenu }: {
   list: List; items: Idea[]; selected: number | null; onChange: () => void; onError: (e: Error) => void
-  onSort: () => void; onHeaderMenu: (x: number, y: number) => void; onMenu: (i: Idea, x: number, y: number) => void
+  onSort: () => void; onHeaderMenu: (x: number, y: number) => void; onMenu: (i: Idea, x: number, y: number, top?: MenuItem[]) => void
 }) {
   const [draft, setDraft] = useState('')
   const [showDone, setShowDone] = useState(false)
@@ -115,6 +111,10 @@ export function IdeasPane({ list, items, selected, onChange, onError, onSort, on
     return navigator.clipboard.writeText(i.text).then(() => { setFlash('Copied'); return true }, e => { onError(e); return false })
   }
   const copyAndCheck = (i: Idea) => copy(i).then(ok => { if (ok && !i.done) setDone(i, true) }) // a failed copy leaves it unchecked
+  const menu = (i: Idea) => (x: number, y: number) => onMenu(i, x, y, [
+    { label: 'Copy', onClick: () => copy(i) },
+    ...(i.done ? [] : [{ label: 'Copy & check off', onClick: () => copyAndCheck(i) }]),
+  ])
   const undo = () => {
     const last = undos.at(-1)
     if (!last) return
@@ -156,8 +156,7 @@ export function IdeasPane({ list, items, selected, onChange, onError, onSort, on
       </form>
       <div className="scroll">
         {open.map(i => (
-          <IdeaRow key={i.id} i={i} on={i.id === selected} onToggle={() => toggle(i)} onMenu={(x, y) => onMenu(i, x, y)}
-            onCopy={() => copy(i)} onCopyCheck={() => copyAndCheck(i)}
+          <IdeaRow key={i.id} i={i} on={i.id === selected} onToggle={() => toggle(i)} onMenu={menu(i)}
             dragProps={{
               draggable: canDrag, onDragStart: () => setDragging(i.id), onDragEnd: () => setDragging(null),
               onDragOver: (e: React.DragEvent) => dragging !== null && e.preventDefault(), onDrop: () => dropOn(i),
@@ -167,7 +166,7 @@ export function IdeasPane({ list, items, selected, onChange, onError, onSort, on
         {done.length > 0 && (
           <>
             <button className="grp done-toggle" onClick={() => setShowDone(!showDone)}>{showDone ? '▾' : '▸'} Done ({done.length})</button>
-            {showDone && done.map(i => <IdeaRow key={i.id} i={i} on={i.id === selected} onToggle={() => toggle(i)} onMenu={(x, y) => onMenu(i, x, y)} onCopy={() => copy(i)} />)}
+            {showDone && done.map(i => <IdeaRow key={i.id} i={i} on={i.id === selected} onToggle={() => toggle(i)} onMenu={menu(i)} />)}
           </>
         )}
       </div>
@@ -175,26 +174,13 @@ export function IdeasPane({ list, items, selected, onChange, onError, onSort, on
   )
 }
 
-function IdeaRow({ i, on, onToggle, onMenu, dragProps, showList, onCopy, onCopyCheck }: {
-  i: Idea; on: boolean; onToggle: () => void; onMenu: (x: number, y: number) => void; dragProps?: object; showList?: boolean
-  onCopy?: () => void; onCopyCheck?: () => void
-}) {
-  // on a touch screen, holding a note brings up its buttons (⋯ still opens the menu); a tap anywhere else hides them
-  const [acts, setActs] = useState(false)
-  const row = useRef<HTMLDivElement>(null)
-  useEffect(() => {
-    if (!acts) return
-    const away = (e: PointerEvent) => { if (!row.current?.contains(e.target as Node)) setActs(false) }
-    addEventListener('pointerdown', away)
-    return () => removeEventListener('pointerdown', away)
-  }, [acts])
-  const hold = useHold((x, y) => (onCopy && matchMedia('(hover: none)').matches ? setActs(true) : onMenu(x, y)))
-  const then = (f?: () => void) => () => { setActs(false); f?.() }
+function IdeaRow({ i, on, onToggle, onMenu, dragProps, showList }: { i: Idea; on: boolean; onToggle: () => void; onMenu: (x: number, y: number) => void; dragProps?: object; showList?: boolean }) {
+  const hold = useHold(onMenu)
   if (isHeading(i.text)) return (
     <div className={`idea heading ${on ? 'on' : ''}`} {...dragProps} {...hold}><a href={`#/idea/${i.id}`} className="idea-body">{i.text.slice(3)}</a></div>
   )
   return (
-    <div ref={row} className={`idea ${on ? 'on' : ''} ${i.done ? 'is-done' : ''} ${acts ? 'show-acts' : ''}`} {...dragProps} {...hold}>
+    <div className={`idea ${on ? 'on' : ''} ${i.done ? 'is-done' : ''}`} {...dragProps} {...hold}>
       <button className={`check ${i.done ? 'checked' : ''}`} role="checkbox" aria-checked={!!i.done} aria-label="Done" onClick={onToggle} />
       <a href={`#/idea/${i.id}`} className="idea-body">
         <span className="idea-text">{i.priority > 0 && !i.done && <span className={`prio p${i.priority}`} title={i.why ?? PRIORITY[i.priority]}>{'!'.repeat(i.priority)}</span>}{i.text}</span>
@@ -208,13 +194,6 @@ function IdeaRow({ i, on, onToggle, onMenu, dragProps, showList, onCopy, onCopyC
           {i.suggestion && !i.done && <span className="sugg">→ {i.suggestion}</span>}
         </span>
       </a>
-      {onCopy && (
-        <span className="idea-acts">
-          <button className="btn small" title="Copy" aria-label="Copy" onClick={then(onCopy)}><CopyIcon /></button>
-          {!i.done && onCopyCheck && <button className="btn small" title="Copy and check off" aria-label="Copy and check off" onClick={then(onCopyCheck)}><CopyIcon />✓</button>}
-          {acts && <button className="btn small" aria-label="More" onClick={e => { const r = e.currentTarget.getBoundingClientRect(); setActs(false); onMenu(r.right - 220, r.bottom + 4) }}>⋯</button>}
-        </span>
-      )}
     </div>
   )
 }

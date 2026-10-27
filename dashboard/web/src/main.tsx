@@ -209,7 +209,12 @@ function App() {
       yes: () => act(api.del(`/api/lists/${l.id}`), () => go('#/ideas/Brain%20Dump')) }) }] : []),
   ], l.name)
 
-  const ideaMenu = (i: Idea, x: number, y: number) => openMenu(x, y, [
+  // a list passes its own Copy items (so its Undo covers Copy & check off); other views get these
+  const ideaMenu = (i: Idea, x: number, y: number, top: MenuItem[] = [
+    { label: 'Copy', onClick: () => act(navigator.clipboard.writeText(i.text), () => setToast('Copied')) },
+    ...(i.done ? [] : [{ label: 'Copy & check off', onClick: () => act(navigator.clipboard.writeText(i.text).then(() => api.patch(`/api/ideas/${i.id}`, { done: true }))) }]),
+  ]) => openMenu(x, y, [
+    ...top,
     { label: i.done ? 'Mark not done' : 'Mark done', onClick: () => act(api.patch(`/api/ideas/${i.id}`, { done: !i.done })) },
     { label: 'Priority', items: [3, 2, 1, 0].map(p => ({ label: PRIORITY[p], checked: i.priority === p, onClick: () => act(api.patch(`/api/ideas/${i.id}`, { priority: p })) })) },
     { label: 'Area', items: [...AREAS.map(a => ({ label: a.name, swatch: a.color, checked: i.area === a.name, onClick: () => act(api.patch(`/api/ideas/${i.id}`, { area: a.name })) })),
