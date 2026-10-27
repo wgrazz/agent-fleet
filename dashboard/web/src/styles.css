@@ -105,6 +105,7 @@ kbd { font: 600 10.5px var(--mono); opacity: .6; margin-right: 5px; }
 /* tool avatars + status dot */
 .tool { position: relative; display: inline-block; width: 26px; height: 26px; }
 .av { width: 26px; height: 26px; border-radius: 7px; display: grid; place-items: center; font-weight: 800; font-size: 12px; color: #fff; background: #8e8e93; }
+.av svg { width: 62%; height: 62%; }
 .tool.lg, .tool.lg .av { width: 32px; height: 32px; border-radius: 9px; font-size: 15px; }
 .av-claude { background: #d97757; } .av-codex { background: #111; } .av-cursor { background: #2b2b2b; }
 .av-agy { background: linear-gradient(135deg, #4285f4, #9b72cb); } .av-copilot { background: #6e40c9; }
