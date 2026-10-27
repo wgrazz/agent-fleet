@@ -1,6 +1,6 @@
 import { StrictMode, useCallback, useEffect, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
-import { api, listGroups, onOffline, remember, Unauthorized, usePoll, type Conversation, type Folder, type Idea, type List, type LiveAgent, type Paused, type Profile, type Usage } from './api.ts'
+import { api, listGroups, onOffline, remember, Unauthorized, usePoll, type Conversation, type Folder, type Idea, type LeftMessage, type List, type LiveAgent, type Paused, type Profile, type Usage } from './api.ts'
 import { AgentList, AgentView, PausedList } from './agents.tsx'
 import {
   COLORS, Confirm, CustomForm, InterviewForm, isPhone, MenuHost, MicIcon, PullToRefresh, NameDialog, NewAgentButton, openMenu, ORDER, PauseUntil, Sidebar, UsageMeters,
@@ -50,6 +50,7 @@ function App() {
   const fail = useCallback((e: Error) => (e instanceof Unauthorized ? setLocked(true) : /isn't reachable/.test(e.message) && document.querySelector('.offline-bar') ? null : setToast(e.message)), [])
   const agents = usePoll<LiveAgent[]>('/api/agents', 2000, fail)
   const paused = usePoll<Paused[]>('/api/paused', 5000, fail)
+  const left = usePoll<LeftMessage[]>('/api/queued/left', 5000, fail)
   const folders = usePoll<Folder[]>('/api/folders', 15000, fail)
   const lists = usePoll<List[]>('/api/lists', 5000, fail)
   const usage = usePoll<Usage[]>('/api/usage', 30000, fail)
@@ -323,6 +324,7 @@ function App() {
     const folder = folderList.find(f => f.id === fid)
     middle = <AgentList agents={fid !== null ? all.filter(a => a.folder_id === fid) : all} selected={route.a} onMenu={agentMenu}
       paused={fid === null ? { items: paused.data ?? [], onResume: p => act(api.post(`/api/paused/${p.id}/resume`), () => openAgent(p.name)), onForget: p => act(api.del(`/api/paused/${p.id}`)) } : undefined}
+      left={fid === null ? { items: left.data ?? [], onChange: left.refresh, onError: fail, onNew: text => setModal({ kind: 'custom', initial: { prompt: text } }) } : undefined}
       header={listHeader(folder?.name ?? 'All agents', folder?.color)}
       past={fid !== null ? (history ?? []).filter(c => c.folder_id === fid && !c.running) : undefined}
       empty={fid !== null ? <div className="empty">Nothing in {folder?.name ?? 'this folder'} yet. Drag agents here, or hold one and pick Move to folder.</div> : undefined} />

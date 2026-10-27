@@ -100,9 +100,17 @@ describe('fake agent through the API', () => {
     expect([a.status, a.exit]).toEqual(['crashed', 'exit 3'])
   })
 
-  it('kills the session', async () => {
+  it('kills the session; a message still queued for it is kept, not dropped', async () => {
+    await api('POST', `/api/agents/${name}/queue`, { text: 'read me later' })
     expect((await api('DELETE', `/api/agents/${name}`)).status).toBe(200)
     expect(await agent()).toBeUndefined()
+    await new Promise(r => setTimeout(r, 2500)) // a queue check runs meanwhile
+    const [q] = (await api('GET', '/api/queued/left')).data
+    expect([q.agent, q.text]).toEqual([name, 'read me later'])
+    expect((await api('POST', `/api/queued/${q.id}/send`, {})).status).toBe(404) // its agent is gone: it stays
+    expect((await api('GET', '/api/queued/left')).data).toHaveLength(1)
+    await api('DELETE', `/api/queued/${q.id}`)
+    expect((await api('GET', '/api/queued/left')).data).toEqual([])
   })
 
   it('has a folder per area, and an agent started from a note lands in its area folder', async () => {

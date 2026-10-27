@@ -629,4 +629,7 @@ html.holding, html.holding *, .it, .it *, .idea-body, .idea-body *, .chip-f, .ni
 .queued-it.pending { opacity: .6; }
 .queued-text { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .queued .x { padding: 2px 8px; color: var(--faint); font-size: 16px; }
+.queued.left { margin: 8px; }
+.queued-text.open { white-space: pre-wrap; overflow-wrap: anywhere; }
+.queued.left .queued-text { cursor: pointer; }
 .grp-toggle { display: flex; width: 100%; text-align: left; }

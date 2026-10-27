@@ -1,16 +1,42 @@
 import { Fragment, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
-import { api, remember, type Ask, type Conversation, type LiveAgent, type Message, type Paused, type RepoChanges } from './api.ts'
-import { activity, age, ago, Avatar, isPhone, ORDER, PauseIcon, SendIcon, STATUS_LABEL, TermIcon, toolLabel, useHold } from './components.tsx'
+import { api, remember, type Ask, type Conversation, type LeftMessage, type LiveAgent, type Message, type Paused, type RepoChanges } from './api.ts'
+import { activity, age, ago, Avatar, isPhone, openMenu, ORDER, PauseIcon, SendIcon, STATUS_LABEL, TermIcon, toolLabel, useHold } from './components.tsx'
 import { AddTodos } from './ideas.tsx'
 import { planSteps } from './steps.ts'
 import { ScreenView } from './terminal.tsx'
 
 // ---------- list ----------
 
-export function AgentList({ agents, selected, header, past, onMenu, empty, paused }: {
+/** Queued messages whose agent ended before they went out: send one to another agent (or a new one), copy it, or delete it. */
+function LeftMessages({ items, agents, onChange, onError, onNew }: {
+  items: LeftMessage[]; agents: LiveAgent[]; onChange: () => void; onError: (e: Error) => void; onNew: (text: string) => void
+}) {
+  const [open, setOpen] = useState<number | null>(null)
+  const done = (p: Promise<unknown>) => p.then(onChange).catch(onError)
+  return (
+    <div className="queued left">
+      <div className="queued-h">Never sent · their agent ended</div>
+      {items.map(q => (
+        <div className="queued-it" key={q.id}>
+          <span className={`queued-text ${open === q.id ? 'open' : ''}`} onClick={() => setOpen(open === q.id ? null : q.id)}><b>{q.agent}</b> · {q.text}</span>
+          <button className="btn small" onClick={e => openMenu(e.clientX, e.clientY, [
+            ...agents.filter(a => a.controllable).map(a => ({ label: a.name, onClick: () => done(api.post(`/api/queued/${q.id}/send`, { to: a.name })) })),
+            { label: 'New agent with this…', onClick: () => onNew(q.text) },
+            'sep',
+            { label: 'Copy', onClick: () => done(navigator.clipboard.writeText(q.text)) },
+          ], 'Send to')}>Send to…</button>
+          <button className="x" onClick={() => done(api.del(`/api/queued/${q.id}`))} aria-label="Delete">×</button>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+export function AgentList({ agents, selected, header, past, onMenu, empty, paused, left }: {
   agents: LiveAgent[]; selected: string; header: ReactNode; past?: Conversation[]; empty?: ReactNode
   onMenu: (a: LiveAgent, x: number, y: number) => void
   paused?: { items: Paused[]; onResume: (p: Paused) => void; onForget: (p: Paused) => void }
+  left?: { items: LeftMessage[]; onChange: () => void; onError: (e: Error) => void; onNew: (text: string) => void }
 }) {
   const [showPaused, setShowPaused] = useState(remember.get('list.paused') !== 'hide')
   const togglePaused = () => { setShowPaused(!showPaused); remember.set('list.paused', showPaused ? 'hide' : '') }
@@ -18,6 +44,7 @@ export function AgentList({ agents, selected, header, past, onMenu, empty, pause
     <section className="list">
       {header}
       <div className="scroll">
+        {left && left.items.length > 0 && <LeftMessages agents={agents} {...left} />}
         {ORDER.map(status => {
           const group = agents.filter(a => a.controllable && a.status === status)
           if (!group.length) return null

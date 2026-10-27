@@ -139,10 +139,16 @@ function decoratedAgents() {
 
 // ---------- queued messages ----------
 // Typed while the agent was busy: each goes out once the agent has finished its turn (and has had a turn since the
-// last queued one went out), instead of interrupting it.
-type Queued = { id: number; agent: string; text: string }
-let queue = db.prepare('SELECT id, agent, text FROM queued ORDER BY id').all() as Queued[]
-const loadQueue = () => { queue = db.prepare('SELECT id, agent, text FROM queued ORDER BY id').all() as Queued[] }
+// last queued one went out), instead of interrupting it. A message is only removed once it has actually been sent;
+// one whose agent has gone stays (Agents shows it) until you send it somewhere else or delete it.
+type Queued = { id: number; agent: string; text: string; at: number }
+let queue = db.prepare('SELECT id, agent, text, at FROM queued ORDER BY id').all() as Queued[]
+const loadQueue = () => { queue = db.prepare('SELECT id, agent, text, at FROM queued ORDER BY id').all() as Queued[] }
+async function sendOne(q: Queued, to = q.agent) {
+  await sendText(to, q.text)
+  db.prepare('DELETE FROM queued WHERE id = ?').run(q.id)
+  loadQueue()
+}
 const sentAt = new Map<string, number>()
 const IDLE = new Set(['done', 'ready', 'waiting'])
 
@@ -151,15 +157,10 @@ async function sendQueued() {
     const next = queue.find(q => q.agent === a.name)
     if (!next || !a.controllable || !IDLE.has(a.status)) continue
     const last = sentAt.get(a.name) ?? 0
-    if (a.status_since < last && Date.now() - last < 20_000) continue // still hasn't picked up the last one
-    db.prepare('DELETE FROM queued WHERE id = ?').run(next.id)
-    loadQueue()
+    if (a.status_since < last && Date.now() - last < 20_000) continue // still hasn't picked up the last one (or the send failed: retry in 20 s)
     sentAt.set(a.name, Date.now())
-    await sendText(a.name, next.text).catch(e => console.error(`couldn't send queued message to ${a.name}:`, (e as Error).message))
+    await sendOne(next).catch(e => console.error(`couldn't send queued message to ${a.name}, keeping it:`, (e as Error).message))
   }
-  // an agent that's gone takes its queue with it
-  const live = new Set(list().map(a => a.name))
-  if (queue.some(q => !live.has(q.agent)) && list().length) { db.prepare(`DELETE FROM queued WHERE agent NOT IN (${[...live].map(() => '?').join(',') || "''"})`).run(...live); loadQueue() }
 }
 
 function usageText(u: Awaited<ReturnType<typeof usage>>) {
@@ -341,12 +342,14 @@ const routes: [string, RegExp, Route][] = [
     await sendQueued() // it may already be free
     return { ok: true }
   }],
+  // messages whose agent has gone: kept so you can send them elsewhere or delete them
+  ['GET', /^\/api\/queued\/left$/, async () => { const live = new Set(list().map(a => a.name)); return queue.filter(q => !live.has(q.agent)) }],
   ['DELETE', /^\/api\/queued\/(\d+)$/, async (_req, [id]) => { db.prepare('DELETE FROM queued WHERE id = ?').run(int(id)); loadQueue(); return { ok: true } }],
-  ['POST', /^\/api\/queued\/(\d+)\/send$/, async (_req, [id]) => {
+  ['POST', /^\/api\/queued\/(\d+)\/send$/, async (req, [id]) => {
     const q = queue.find(x => x.id === int(id)) ?? (() => { throw new HttpError(404, 'already sent') })()
-    db.prepare('DELETE FROM queued WHERE id = ?').run(q.id)
-    loadQueue()
-    await sendText(q.agent, q.text)
+    const to = str((await body(req)).to, 40) || q.agent // {to}: another agent, for one whose agent has gone
+    agentOr404(to) // gone: 404, so the message stays
+    await sendOne(q, to)
     return { ok: true }
   }],
 
@@ -737,7 +740,7 @@ async function upload(req: IncomingMessage) {
 }
 
 export const server = createServer(async (req, res) => {
-  const url = new URL(req.url ?? '/', 'http://localhost')
+  const url = new URL(req.url ?? '/', 'http://localhost'), t0 = Date.now()
   try {
     // ?key=… once: remember it in a cookie and drop it from the address bar
     const given = url.searchParams.get('key')
@@ -755,14 +758,20 @@ export const server = createServer(async (req, res) => {
       if (req.method !== 'GET') return send(res, 405)
       return serveStatic(req, res, url.pathname)
     }
-    if (!authorized(req)) return send(res, 401, { error: 'open the dashboard link with ?key= first' })
+    // the Siri shortcut's two calls are logged, so a run that goes quiet on the phone shows where it stopped
+    const siri = url.pathname === '/api/jarvis/say' || url.pathname === '/api/tts'
+    if (!authorized(req)) {
+      if (siri) console.log(`${url.pathname}: refused, wrong or missing key (an old shortcut? add it again from Settings)`)
+      return send(res, 401, { error: 'open the dashboard link with ?key= first' })
+    }
     if (url.pathname === '/api/tts' && req.method === 'POST') {
       const b = await body(req)
       const text = str(b.text, 2000).replace(/\u2063/g, '').trim() // (the Siri shortcut's end-of-conversation mark)
-      if (!text) throw new HttpError(400, 'nothing to say')
+      if (!text) { console.log('/api/tts: nothing to say'); throw new HttpError(400, 'nothing to say') }
       const engine = ['kokoro', 'mac'].includes(b.engine) ? b.engine : config.voice_engine === 'mac' ? 'mac' : 'kokoro'
       if (engine === 'kokoro' && !kokoroInstalled()) throw new HttpError(409, 'natural voice not installed: run fleet tts install')
       const file = await speech(text, engine, str(b.voice, 60) || config.voice || (engine === 'kokoro' ? 'bm_george' : ''), Number(b.speed) || config.voice_speed || 1)
+      console.log(`/api/tts: ${text.length} chars in ${((Date.now() - t0) / 1000).toFixed(1)}s`)
       res.writeHead(200, { 'Content-Type': 'audio/mp4', 'Cache-Control': 'private, max-age=3600' })
       return res.end(readFile(file))
     }
@@ -771,10 +780,12 @@ export const server = createServer(async (req, res) => {
     // Always 200: whatever comes back is what Siri says.
     if (url.pathname === '/api/jarvis/say' && req.method === 'POST') {
       const said = str((await body(req)).text, 2000).trim()
+      console.log(`/api/jarvis/say: heard ${said.length} chars`)
       const say = !said ? `Okay.${END}` : await runJarvis(said) // silence ends the conversation (and the shortcut resumes your music)
         // a trailing invisible separator (U+2063) tells the shortcut the conversation is over; Siri doesn't read it out
         .then(r => r.say + ((r as { proposals?: unknown[] }).proposals?.length ? ' That needs your OK in Fleet.' : '') + ((r as { end?: boolean }).end ? END : ''))
         .catch(e => `Sorry, that didn't work: ${(e as Error).message}`)
+      console.log(`/api/jarvis/say: answered ${say.length} chars in ${((Date.now() - t0) / 1000).toFixed(1)}s`)
       res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' })
       return res.end(say)
     }

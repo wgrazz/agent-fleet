@@ -23,6 +23,8 @@ export type Agent = {
 export type Question = { question: string; header?: string; multiSelect?: boolean; options: { label: string; description?: string }[] }
 export type Ask = { id: string; kind: 'question' | 'plan'; questions: Question[]; plan: string }
 export type Placed = { key: string; folder_id: number | null }
+/** A queued message whose agent has gone. */
+export type LeftMessage = { id: number; agent: string; text: string; at: number }
 export type LiveAgent = Agent & Placed & { queued: { id: number; text: string }[] }
 export type Folder = { id: number; name: string; color: string; position: number }
 export type List = { id: number; name: string; color: string; position: number; archived: number; kind: 'ideas' | 'checklist'; section: string | null; open: number; done: number; unsorted: number }
