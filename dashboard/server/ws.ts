@@ -29,7 +29,9 @@ function screen(ws: WebSocket, name: string) {
 
 function terminal(ws: WebSocket, name: string, cols: number, rows: number) {
   // ponytail: attaching resizes the tmux window to this client (window-size latest); detaching gives it back
-  const term = pty.spawn('tmux', ['attach-session', '-t', `=${name}`], {
+  // -T sync: xterm.js understands synchronized updates, so tmux sends each redraw as one frame instead of the
+  // half-drawn pieces that made the terminal flicker (tmux can't tell that from TERM=xterm-256color alone)
+  const term = pty.spawn('tmux', ['-T', 'sync', 'attach-session', '-t', `=${name}`], {
     name: 'xterm-256color', cols, rows, cwd: homedir(), env: { ...process.env, TERM: 'xterm-256color' } as Record<string, string>,
   })
   term.onData(d => ws.readyState === ws.OPEN && ws.send(d))

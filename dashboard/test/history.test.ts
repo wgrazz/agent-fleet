@@ -2,7 +2,7 @@ import { mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { answered, asked, statusOf } from '../server/history.ts'
+import { answered, asked, claudeMessages, statusOf } from '../server/history.ts'
 
 describe('asked', () => {
   it('shows a question with numbered options and a plan in full', () => {
@@ -36,5 +36,19 @@ describe('statusOf', () => {
       { type: 'event_msg', payload: { type: 'token_count', info: { last_token_usage: { input_tokens: 4000 }, model_context_window: 258_400 } } },
     ]))).toEqual({ model: 'gpt-6', effort: 'high', context: 4000, window: 258_400 })
     expect(statusOf('codex', log([]))).toBeNull()
+  })
+})
+
+describe('claudeMessages', () => {
+  it('keeps a message Claude Code dropped as an unknown /command', () => {
+    const f = join(mkdtempSync(join(tmpdir(), 'cm-')), 'x.jsonl')
+    const warn = (content: string) => ({ type: 'system', subtype: 'informational', level: 'warning', content })
+    writeFileSync(f, [warn('Unknown command: /admin'), warn('Args from unknown skill: for shipping first'), warn('Unknown command: /x')].map(l => JSON.stringify(l)).join('\n'))
+    expect(claudeMessages(f)).toEqual([
+      { role: 'user', text: '/admin for shipping first' },
+      { role: 'tool', text: 'Not sent: Claude Code has no /admin command, so it dropped this message' },
+      { role: 'user', text: '/x' },
+      { role: 'tool', text: 'Not sent: Claude Code has no /x command, so it dropped this message' },
+    ])
   })
 })

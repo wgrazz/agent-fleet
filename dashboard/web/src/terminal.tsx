@@ -44,8 +44,10 @@ export function ScreenView({ name }: { name: string }) {
           cols = JSON.parse(text).cols
           return layout()
         }
-        term.reset()
-        term.write(text.replace(/\n$/, '').replace(/\n/g, '\r\n'), () => term.scrollToBottom())
+        // clear and redraw as one synchronized frame: reset() blanked the screen until the new text was parsed,
+        // so it blinked on every update (twice a second while the agent works)
+        const frame = text.replace(/\n$/, '').replace(/\n/g, '\r\n')
+        term.write(`\x1b[?2026h\x1b[0m\x1b[H\x1b[2J\x1b[3J${frame}\x1b[?2026l`, () => term.scrollToBottom())
       }
       // the agent may be restarting or the Mac waking up: retry quietly
       ws.onclose = () => !closed && setTimeout(connect, 2000)

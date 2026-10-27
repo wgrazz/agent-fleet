@@ -125,11 +125,20 @@ function push(out: Message[], m: Message) {
   else out.push(m)
 }
 
-function claudeMessages(path: string): Message[] {
+export function claudeMessages(path: string): Message[] {
   const out: Message[] = []
   const names = new Map<string, string>() // tool_use id -> tool name, to know what a tool_result answers
   for (const line of readFileSync(path, 'utf8').split('\n')) {
     const d = parse(line)
+    // A message starting with an unknown /word never reaches Claude: Claude Code logs only these two warnings.
+    // Show what was typed and that it wasn't sent, instead of letting it vanish.
+    if (d?.type === 'system' && d.level === 'warning' && typeof d.content === 'string') {
+      const cmd = /^Unknown command: (\/\S+)$/.exec(d.content)?.[1]
+      const args = /^Args from unknown skill: ([\s\S]+)$/.exec(d.content)?.[1]
+      if (cmd) out.push({ role: 'user', text: cmd }, { role: 'tool', text: `Not sent: Claude Code has no ${cmd} command, so it dropped this message` })
+      else if (args && out.at(-2)?.role === 'user') out.at(-2)!.text += ` ${args}`
+      continue
+    }
     if (!d || d.isSidechain || d.isMeta || (d.type !== 'user' && d.type !== 'assistant')) continue
     if (d.isCompactSummary) { out.push({ role: 'tool', text: 'Earlier conversation was summarized here to save space' }); continue }
     const c = d.message?.content
