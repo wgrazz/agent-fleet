@@ -21,6 +21,44 @@ function Section({ title, children, hint }: { title: string; children: ReactNode
   )
 }
 
+type ToolUpdate = { tool: string; current: string; latest: string; via: 'brew' | 'npm'; name: string }
+const LABEL: Record<string, string> = { claude: 'Claude Code', codex: 'Codex', copilot: 'Copilot', cursor: 'Cursor' }
+const newer = (u: ToolUpdate) => {
+  const [a, b] = [u.current, u.latest].map(v => v.split(/[.-]/).map(n => Number(n) || 0))
+  for (let i = 0; i < Math.max(a.length, b.length); i++) if ((b[i] ?? 0) !== (a[i] ?? 0)) return (b[i] ?? 0) > (a[i] ?? 0)
+  return false
+}
+
+/** Agent tool versions, checked once a day on the Mac; Update runs the same upgrade you'd type (brew or npm). */
+function Updates({ onError }: { onError: (e: Error) => void }) {
+  const [u, setU] = useState<{ at: number; tools: ToolUpdate[] } | null>(null)
+  const [busy, setBusy] = useState('')
+  const load = (check = false) => {
+    if (check) setBusy('check')
+    return api.get<typeof u>(`/api/updates${check ? '?check=1' : ''}`).then(setU).catch(onError).finally(() => setBusy(''))
+  }
+  useEffect(() => { load().then(() => {}) }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  const update = (t: ToolUpdate) => {
+    setBusy(t.tool)
+    api.post<typeof u>(`/api/updates/${t.tool}`).then(setU).catch(onError).finally(() => setBusy(''))
+  }
+  return (
+    <Section title="Agent tools" hint="Checked once a day; your phone gets a notification when one is behind. Agents already running keep their version until you start new ones.">
+      {!u ? <p className="hint">Loading…</p> : !u.at ? <p className="hint">Not checked yet.</p> : !u.tools.length && <p className="hint">Nothing installed with Homebrew or npm to keep current.</p>}
+      {u?.tools.map(t => (
+        <div className="set-row" key={t.tool}>
+          <span><b>{LABEL[t.tool] ?? t.tool}</b> {t.current}{newer(t) ? <> → <b>{t.latest}</b></> : ' · up to date'}</span>
+          {newer(t) && <button className="btn small primary" disabled={!!busy} onClick={() => update(t)}>{busy === t.tool ? 'Updating…' : 'Update'}</button>}
+        </div>
+      ))}
+      <div className="set-row">
+        <span className="hint">{u?.at ? `Checked ${new Date(u.at).toLocaleString([], { weekday: 'short', hour: 'numeric', minute: '2-digit' })}` : ''}</span>
+        <button className="btn small" disabled={!!busy} onClick={() => load(true)}>{busy === 'check' ? 'Checking…' : 'Check now'}</button>
+      </div>
+    </Section>
+  )
+}
+
 export function SettingsPage({ usage, push, onBack, onError }: { usage: Usage[]; push: ReactNode; onBack: () => void; onError: (e: Error) => void }) {
   const [s, setS] = useState<Settings | null>(null)
   const [voiceList, setVoiceList] = useState<{ kokoro: string[] | null; mac: string[] }>({ kokoro: null, mac: [] })
@@ -67,6 +105,7 @@ export function SettingsPage({ usage, push, onBack, onError }: { usage: Usage[];
         {saved && <span className="chip ok">{saved}</span>}
       </header>
       <div className="set-scroll">
+        <Updates onError={onError} />
         <Section title="Jarvis's voice" hint="Natural voices are made on your Mac and played on whichever device you're using.">
           <div className="seg" role="radiogroup">
             {([['kokoro', 'Natural'], ['mac', 'Mac voices'], ['device', 'This device']] as const).map(([v, label]) => (

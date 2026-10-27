@@ -130,7 +130,7 @@ ${topic}
 
 Ask one question at a time and wait for my answer before the next. Prefer multiple-choice questions with 2-4 lettered options plus your recommendation, since I'm often answering from my phone; open questions are fine when choices don't fit. Start with purpose and who it's for, then scope, then the details that change what gets built. Push back when something seems not worth building, and say so plainly. Skip anything you can answer by looking at the code yourself.
 
-When you have enough (or I say "wrap up"), propose two or three approaches with your recommendation, then write the agreed plan as a short markdown spec: goal, what's in and out of scope, the design, and open questions. Save it to docs/ideas/ in this repo with a descriptive filename, and also run \`fleet idea -l Priority "<one-line summary> (spec: <path>)"\` so it shows up in my Ideas.`
+When you have enough (or I say "wrap up"), propose two or three approaches with your recommendation, then write the agreed plan as a short markdown spec: goal, what's in and out of scope, the design, and open questions. Save it to docs/ideas/ in this repo with a descriptive filename, and also run \`fleet idea -p high "<one-line summary> (spec: <path>)"\` so it lands in my Brain Dump tagged high priority.`
 
 // ---------- Jarvis ----------
 

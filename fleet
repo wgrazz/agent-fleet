@@ -21,7 +21,7 @@ LATER
   fleet adopt PID [NAME] move an agent running in a plain terminal window into Fleet, same conversation
   fleet paused           list paused agents
   fleet unpause ID|NAME  bring a paused agent back in a new session with its conversation
-  fleet idea [-l LIST] TEXT   jot an idea (lands in Brain Dump unless you name a list)
+  fleet idea [-l LIST] [-p low|medium|high] TEXT   jot an idea (lands in Brain Dump unless you name a list)
   fleet checklist TITLE < STEPS   a checklist for the owner from STEPS on stdin: one step per line, '## ' lines are headings
   fleet restore [DATE]   list the daily backups of your ideas, or put ideas and lists back as they were on DATE
   fleet import-notes [--dry-run]   copy your numbered Apple Notes checklists into Ideas (needs Full Disk Access)
@@ -631,17 +631,29 @@ def restore(args):
     print(f'Ideas and lists are back as they were on {args[0]}. What you had a moment ago is saved as {keep}.')
 
 
+PRIORITIES = {'low': 1, 'medium': 2, 'high': 3}
+
+
 def idea(args):
-    lst = 'Brain Dump'
-    if args[:1] == ['-l'] and len(args) > 1:
-        lst, args = args[1], args[2:]
+    lst, prio = 'Brain Dump', 0
+    while args[:1] in (['-l'], ['-p']) and len(args) > 1:
+        if args[0] == '-l':
+            lst = args[1]
+        elif args[1] in PRIORITIES:
+            prio = PRIORITIES[args[1]]
+        else:
+            sys.exit('fleet idea -p low|medium|high')
+        args = args[2:]
     text = ' '.join(args).strip()
     if not text:
-        sys.exit('fleet idea [-l LIST] TEXT')
+        sys.exit('fleet idea [-l LIST] [-p low|medium|high] TEXT')
     con = db()
     with con:
-        con.execute('INSERT INTO ideas (list, text, created_at) VALUES (?, ?, ?)', (lst, text, int(time.time())))
-    print(f'Added to {lst}.')
+        if prio:  # the priority column comes from the dashboard, which adds it the first time it runs
+            con.execute('INSERT INTO ideas (list, text, created_at, priority) VALUES (?, ?, ?, ?)', (lst, text, int(time.time()), prio))
+        else:
+            con.execute('INSERT INTO ideas (list, text, created_at) VALUES (?, ?, ?)', (lst, text, int(time.time())))
+    print(f'Added to {lst}' + (f', {[k for k, v in PRIORITIES.items() if v == prio][0]} priority.' if prio else '.'))
 
 
 def checklist(args):

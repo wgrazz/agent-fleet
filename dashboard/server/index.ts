@@ -9,7 +9,7 @@ import { improvePrompt, interviewPrompt, jarvisBrain, recommend, type JarvisActi
 import { changes } from './git.ts'
 import { conversations, transcript } from './history.ts'
 import * as ideas from './ideas.ts'
-import { notify, publicKey, subscribe } from './push.ts'
+import { notify, publicKey, pushAll, subscribe } from './push.ts'
 import { alerts, answerAsk, ingestHook, list, openAsk, poll, pollAsk, startPolling } from './state.ts'
 import { config, dailyBackup, db, FLEET_BIN, FLEET_DIR, saveConfig } from './store.ts'
 import { capture, run, sendKey, sendText } from './tmux.ts'
@@ -19,6 +19,7 @@ import { kokoroInstalled, speech, voices } from './tts.ts'
 import { readFileSync as readFile } from 'node:fs'
 import * as J from './jarvis.ts'
 import { FileError, findFiles, readText } from './files.ts'
+import { behind, checkAll, updates, upgrade } from './updates.ts'
 import { AREAS, areaColor, notePrompt } from '../web/src/areas.ts'
 import { attach } from './ws.ts'
 
@@ -452,6 +453,12 @@ const routes: [string, RegExp, Route][] = [
       .filter(c => !q || `${c.title} ${c.prompt} ${c.cwd}`.toLowerCase().includes(q))
       .map(c => ({ ...c, key: `sid:${c.id}`, folder_id: map.get(`sid:${c.id}`) ?? null, running: running.get(c.id) ?? null }))
   }],
+  // ---------- updates for the agent tools ----------
+  ['GET', /^\/api\/updates$/, async req => (new URL(req.url ?? '', 'http://x').searchParams.get('check') ? checkAll() : updates())],
+  ['POST', /^\/api\/updates\/(\w+)$/, async (_req, [tool]) => {
+    try { return await upgrade(tool) } catch (e: any) { throw new HttpError(500, String(e.stderr || e.message).trim().slice(-400)) }
+  }],
+
   // ---------- files an agent mentions ----------
   ['GET', /^\/api\/files\/read$/, async req => {
     const sp = new URL(req.url ?? '', 'http://x').searchParams
@@ -853,6 +860,17 @@ if (import.meta.main) {
   startPolling()
   setInterval(() => resumeDue().catch(e => console.error('resume check failed:', e)), 30_000)
   setInterval(() => sendQueued().catch(e => console.error('queue check failed:', e)), 2000)
+  // once a day (and a minute after starting): newer Claude Code / Codex? tell your phone once per new version
+  const updateCheck = () => checkAll().then(({ tools }) => {
+    const told = config.update_told ?? {}
+    for (const u of tools.filter(behind)) if (told[u.tool] !== u.latest) {
+      pushAll({ title: `${u.tool} ${u.latest} is out`, body: `You have ${u.current}. Tap Update in Fleet's Settings.`, url: '/#/settings', tag: `update-${u.tool}` }).catch(() => {})
+      told[u.tool] = u.latest
+    }
+    saveConfig({ update_told: told })
+  }).catch(e => console.error('update check failed:', e))
+  setTimeout(updateCheck, 60_000)
+  setInterval(updateCheck, 24 * 3600_000)
   dailyBackup()
   setInterval(dailyBackup, 3600_000)
   server.listen(config.port, '127.0.0.1', () => console.log(`fleet dashboard on http://127.0.0.1:${config.port}`))

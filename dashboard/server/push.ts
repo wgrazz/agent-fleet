@@ -19,7 +19,12 @@ const TITLE = { needs_you: 'needs you', done: 'is done', crashed: 'crashed' } as
 
 export async function notify(a: Agent) {
   const body = (a.message || a.exit || a.last_line || a.task).slice(0, 120)
-  const payload = JSON.stringify({ title: `${a.name} ${TITLE[a.status] ?? a.status}`, body, url: `/#/agent/${a.name}`, tag: a.name })
+  return pushAll({ title: `${a.name} ${TITLE[a.status] ?? a.status}`, body, url: `/#/agent/${a.name}`, tag: a.name })
+}
+
+/** A notification on every subscribed device. */
+export async function pushAll(p: { title: string; body: string; url: string; tag: string }) {
+  const payload = JSON.stringify(p)
   const subs = db.prepare('SELECT endpoint, sub FROM push_subs').all() as { endpoint: string; sub: string }[]
   await Promise.all(subs.map(async s => {
     try {

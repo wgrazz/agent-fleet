@@ -62,7 +62,7 @@ working on, and any follow-up waiters it armed. `fleet kill` cleans up.
 | `fleet new NAME` | Start a protected session called NAME in the current folder, then run `claude` / `codex` / `agent` inside it |
 | `fleet new NAME --tool T [--model M] [--effort E] [--profile P] [--detach] [PROMPT]` | Start NAME already running `claude`, `codex`, `cursor`, `copilot` or `agy`, optionally with a first prompt (`--resume ID` continues a past conversation) |
 | `fleet pause NAME` | Stop NAME's agent but keep its conversation; `fleet paused` lists, `fleet unpause ID\|NAME` brings it back |
-| `fleet idea [-l LIST] TEXT` | Jot an idea into `~/.fleet/fleet.db` (Brain Dump unless you name a list) |
+| `fleet idea [-l LIST] [-p low\|medium\|high] TEXT` | Jot an idea into `~/.fleet/fleet.db` (Brain Dump unless you name a list), optionally with a priority |
 | `fleet import-notes [--dry-run]` | Copy your numbered Apple Notes checklists into Ideas, checked items as done (needs Full Disk Access) |
 | `fleet rename OLD NEW` | Rename a session |
 | `fleet json` | The agent list as JSON (what the dashboard reads) |
