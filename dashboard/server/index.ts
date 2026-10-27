@@ -101,6 +101,16 @@ export async function startAgent(b: StartOpts): Promise<{ name: string }> {
   return { name }
 }
 
+const efforts = new Map<number, string>()
+async function claudeEffort(pid: number | null) {
+  if (pid && efforts.has(pid)) return efforts.get(pid)!
+  const args = pid ? await run('ps', ['-o', 'args=', '-p', String(pid)]).catch(() => '') : ''
+  let e = String(args).match(/--effort[= ](\S+)/)?.[1] ?? ''
+  if (!e) try { e = JSON.parse(readFile(join(homedir(), '.claude', 'settings.json'), 'utf8')).effortLevel ?? '' } catch {}
+  if (pid) efforts.set(pid, e)
+  return e
+}
+
 // ---------- folders ----------
 // An agent's folder follows its conversation id when it has one (so it survives pause/resume and renames),
 // otherwise its session name.
@@ -445,7 +455,10 @@ const routes: [string, RegExp, Route][] = [
     const sp = new URL(req.url ?? '', 'http://x').searchParams
     const t = await transcript(sp.get('tool') ?? '', sp.get('id') ?? '')
     if (!t) throw new HttpError(404, 'no transcript for that conversation')
-    return t.version === sp.get('v') ? { version: t.version, same: true } : t
+    if (t.version === sp.get('v')) return { version: t.version, same: true }
+    // Claude doesn't log its effort: the live agent's --effort, else your Claude Code default
+    const a = sp.get('agent') ? list().find(x => x.name === sp.get('agent')) : undefined
+    return t.status && !t.status.effort && sp.get('tool') === 'claude' ? { ...t, status: { ...t.status, effort: await claudeEffort(a?.pid ?? null) } } : t
   }],
   ['POST', /^\/api\/history\/resume$/, async req => {
     const b = await body(req)

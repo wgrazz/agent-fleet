@@ -630,6 +630,12 @@ html.holding, html.holding *, .it, .it *, .idea-body, .idea-body *, .chip-f, .ni
 .queued-text { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .queued .x { padding: 2px 8px; color: var(--faint); font-size: 16px; }
 .queued.left { margin: 8px; }
+.chat-status { position: sticky; top: -1px; z-index: 2; align-self: center; display: flex; gap: 10px; align-items: center; font-size: 11.5px; color: var(--dim); background: var(--panel); border: 1px solid var(--line); border-radius: 999px; padding: 3px 10px; font-variant-numeric: tabular-nums; }
+.chat-status .ctx { display: inline-flex; align-items: center; gap: 5px; }
+.chat-status .bar { width: 36px; height: 4px; border-radius: 2px; background: var(--line); overflow: hidden; }
+.chat-status .bar i { display: block; height: 100%; background: var(--accent); }
+.chat-status .ctx i.warm { background: #ff9f0a; }
+.chat-status .ctx i.hot { background: #ff453a; }
 .queued-text.open { white-space: pre-wrap; overflow-wrap: anywhere; }
 .queued.left .queued-text { cursor: pointer; }
 .grp-toggle { display: flex; width: 100%; text-align: left; }

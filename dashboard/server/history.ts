@@ -214,7 +214,33 @@ async function transcriptPath(tool: string, id: string): Promise<string | null> 
   return null
 }
 
-const transcriptCache = new Map<string, { version: string; messages: Message[] }>()
+/** What a status line shows: the model, its effort (Codex logs it; for Claude the server fills it in) and how full the context is. */
+export type Status = { model: string; effort: string; context: number; window: number }
+
+export function statusOf(tool: string, path: string): Status | null {
+  const s: Status = { model: '', effort: '', context: 0, window: 0 }
+  for (const line of readFileSync(path, 'utf8').split('\n')) {
+    if (tool === 'claude' ? !line.includes('"usage"') : !line.includes('"turn_context"') && !line.includes('"token_count"')) continue
+    const d = parse(line)
+    if (tool === 'claude') {
+      const m = d?.message
+      if (d?.type !== 'assistant' || d.isSidechain || !m?.usage || m.model === '<synthetic>') continue
+      s.model = m.model ?? s.model
+      s.context = (m.usage.input_tokens ?? 0) + (m.usage.cache_read_input_tokens ?? 0) + (m.usage.cache_creation_input_tokens ?? 0)
+    } else if (d?.type === 'turn_context') {
+      s.model = d.payload.model ?? s.model
+      s.effort = d.payload.effort ?? d.payload.collaboration_mode?.settings?.reasoning_effort ?? s.effort
+    } else if (d?.payload?.type === 'token_count' && d.payload.info) {
+      s.context = d.payload.info.last_token_usage?.input_tokens ?? s.context
+      s.window = d.payload.info.model_context_window ?? s.window
+    }
+  }
+  // ponytail: Claude's log doesn't say its window; 200k unless it's already past that (then the 1M one)
+  if (tool === 'claude' && s.model) s.window = s.context > 200_000 ? 1_000_000 : 200_000
+  return s.model ? s : null
+}
+
+const transcriptCache = new Map<string, { version: string; messages: Message[]; status: Status | null }>()
 
 /** Messages for a conversation, plus a version that changes whenever the log grows (so pollers can skip repeats). */
 export async function transcript(tool: string, id: string) {
@@ -224,7 +250,7 @@ export async function transcript(tool: string, id: string) {
   const version = `${st.size}`
   const hit = transcriptCache.get(path)
   if (hit?.version === version) return hit
-  const result = { version, messages: tool === 'claude' ? claudeMessages(path) : codexMessages(path) }
+  const result = { version, messages: tool === 'claude' ? claudeMessages(path) : codexMessages(path), status: statusOf(tool, path) }
   transcriptCache.set(path, result)
   return result
 }

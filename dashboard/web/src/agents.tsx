@@ -377,11 +377,27 @@ const QueueIcon = () => <svg width="16" height="16" viewBox="0 0 16 16" aria-hid
 
 // ---------- chat ----------
 
+type ChatStatus = { model: string; effort: string; context: number; window: number }
+const k = (n: number) => (n >= 1_000_000 ? `${(n / 1_000_000).toFixed(1)}M` : `${Math.round(n / 1000)}k`)
+
+/** Model · effort · context used, like a terminal status line; the bar turns amber past 70% and red past 90%. */
+function StatusLine({ s }: { s: ChatStatus }) {
+  const pct = s.window ? Math.min(100, Math.round((s.context / s.window) * 100)) : 0
+  return (
+    <div className="chat-status" title={s.window ? `${s.context.toLocaleString()} of ${s.window.toLocaleString()} tokens in context` : undefined}>
+      <span>{s.model.replace(/^claude-/, '').replace(/-\d{8}$/, '')}</span>
+      {s.effort && <span>{s.effort}</span>}
+      {s.context > 0 && <span className="ctx">{s.window > 0 && <span className="bar"><i className={pct > 90 ? 'hot' : pct > 70 ? 'warm' : ''} style={{ width: `${pct}%` }} /></span>}{k(s.context)}{s.window ? ` / ${k(s.window)} · ${pct}%` : ''}</span>}
+    </div>
+  )
+}
+
 /** A conversation as chat bubbles, read from the tool's own log. Live views poll and stick to the bottom. */
 export function ChatView({ tool, id, live, waiting, working, pending, onSeen, peek, agent }: {
   tool: string; id: string; live?: boolean; waiting?: string; working?: string; pending?: string; onSeen?: () => void; peek?: string; agent?: string
 }) {
   const [messages, setMessages] = useState<Message[] | null>(null)
+  const [status, setStatus] = useState<ChatStatus | null>(null)
   const [todos, setTodos] = useState<ReturnType<typeof planSteps> | null>(null)
   const [error, setError] = useState('')
   const box = useRef<HTMLDivElement>(null)
@@ -390,13 +406,14 @@ export function ChatView({ tool, id, live, waiting, working, pending, onSeen, pe
   useEffect(() => {
     let version = ''
     let stop = false
-    const load = () => api.get<{ version: string; same?: boolean; messages?: Message[] }>(`/api/transcript?tool=${tool}&id=${encodeURIComponent(id)}&v=${version}`)
-      .then(r => { if (!stop && !r.same && r.messages) { version = r.version; setMessages(r.messages) } })
+    const load = () => api.get<{ version: string; same?: boolean; messages?: Message[]; status?: ChatStatus | null }>(
+      `/api/transcript?tool=${tool}&id=${encodeURIComponent(id)}&v=${version}${agent ? `&agent=${encodeURIComponent(agent)}` : ''}`)
+      .then(r => { if (!stop && !r.same && r.messages) { version = r.version; setMessages(r.messages); setStatus(r.status ?? null) } })
       .catch(e => !stop && setError(e.message))
     load()
     const t = live ? setInterval(load, 2000) : 0
     return () => { stop = true; clearInterval(t) }
-  }, [tool, id, live])
+  }, [tool, id, live, agent])
 
   useLayoutEffect(() => {
     const el = box.current
@@ -419,6 +436,7 @@ export function ChatView({ tool, id, live, waiting, working, pending, onSeen, pe
   }
   return (
     <div className="chat" ref={box} onScroll={e => { const el = e.currentTarget; pinned.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80 }}>
+      {status && <StatusLine s={status} />}
       {blocks.map((b, i) => {
         if (Array.isArray(b)) return <ToolRun key={i} tools={b} />
         const plan = b.role === 'assistant' ? planSteps(b.text) : null
