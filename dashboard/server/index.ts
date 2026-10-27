@@ -697,6 +697,14 @@ const routes: [string, RegExp, Route][] = [
     await notify({ name: 'Fleet', status: 'test', message: 'Notifications work. This is what an agent alert looks like.', exit: '', last_line: '', task: '' } as any)
     return { ok: true }
   }],
+  // agent-notify.sh posts here; 503 with no subscribed device so the script falls back to Discord
+  ['POST', /^\/api\/notify$/, async req => {
+    const b = await body(req)
+    if (!str(b.body, 2000)) throw new HttpError(400, 'body: the message text, up to 2000 characters')
+    if (!(db.prepare('SELECT count(*) AS n FROM push_subs').get() as { n: number }).n) throw new HttpError(503, 'no device subscribed')
+    await pushAll({ title: str(b.title, 120) || 'Fleet', body: b.body, url: '/', tag: `notify-${Date.now()}` })
+    return { ok: true }
+  }],
 
   ['POST', /^\/api\/push\/subscribe$/, async req => {
     try {

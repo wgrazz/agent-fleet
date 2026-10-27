@@ -240,16 +240,18 @@ Needs Node.js 24+. In `dashboard/`:
 
 ## agent-notify.sh
 
-A nine-line companion: agents call it when a long job finishes, blocks, or gives up, so you get
-a Discord ping instead of checking back.
+A small companion: agents call it when a long job finishes, blocks, or gives up, so you get
+a ping instead of checking back. It goes to your phone through the dashboard's push
+(`POST /api/notify`) when the dashboard runs on this machine and a device is subscribed,
+and falls back to Discord otherwise (another machine, dashboard down, no phone set up).
 
 ```
-export DISCORD_AGENT_WEBHOOK=https://discord.com/api/webhooks/...
+export DISCORD_AGENT_WEBHOOK=https://discord.com/api/webhooks/...   # optional fallback
 AGENT_NAME=claude ./agent-notify.sh "Nightly import finished: 347 rows loaded"
-# → [claude @ shop-app] Nightly import finished: 347 rows loaded
+# → claude @ shop-app: Nightly import finished: 347 rows loaded
 ```
 
-It never fails the caller: a missing webhook or a failed post only warns on stderr.
+It never fails the caller: a failed post only warns on stderr.
 
 ## The long-wait pattern this supports
 
