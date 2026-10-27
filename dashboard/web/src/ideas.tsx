@@ -49,6 +49,31 @@ function IdeaTools({ sort, setSort, area, setArea }: { sort: string; setSort: (s
   )
 }
 
+/** A shake of the phone, once per shake. iOS only reports motion after askMotion() runs inside a tap. */
+function useShake(on: () => void) {
+  const cb = useRef(on)
+  cb.current = on
+  useEffect(() => {
+    let last = 0
+    const m = (e: DeviceMotionEvent) => {
+      const a = e.acceleration
+      // ponytail: one threshold (m/s², gravity removed); raise it if walking sets it off, lower if shakes are missed
+      if (a && Math.hypot(a.x ?? 0, a.y ?? 0, a.z ?? 0) > 18 && Date.now() - last > 1500) { last = Date.now(); cb.current() }
+    }
+    addEventListener('devicemotion', m)
+    return () => removeEventListener('devicemotion', m)
+  }, [])
+}
+let motionAsked = false
+const askMotion = () => {
+  const D = (globalThis as any).DeviceMotionEvent
+  if (!motionAsked && typeof D?.requestPermission === 'function') { motionAsked = true; D.requestPermission().catch(() => {}) }
+}
+
+const CopyIcon = () => (
+  <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><rect x="5" y="5" width="8.5" height="8.5" rx="1.5" /><path d="M10.5 5V3.5A1.5 1.5 0 0 0 9 2H3.5A1.5 1.5 0 0 0 2 3.5V9a1.5 1.5 0 0 0 1.5 1.5H5" /></svg>
+)
+
 export function IdeasPane({ list, items, selected, onChange, onError, onSort, onHeaderMenu, onMenu }: {
   list: List; items: Idea[]; selected: number | null; onChange: () => void; onError: (e: Error) => void
   onSort: () => void; onHeaderMenu: (x: number, y: number) => void; onMenu: (i: Idea, x: number, y: number) => void
@@ -59,6 +84,11 @@ export function IdeasPane({ list, items, selected, onChange, onError, onSort, on
   const [area, setArea] = useState('')
   const [sort, setSort] = useSort()
   const shown = area ? items.filter(i => i.area === area) : items
+  // what Undo (shake, ⌘Z or the button) reverses, newest last: a check or uncheck (done = how it was), or a step you added
+  const [undos, setUndos] = useState<{ id: number; done?: boolean }[]>([])
+  const [flash, setFlash] = useState('')
+  useEffect(() => { if (!flash) return; const t = setTimeout(() => setFlash(''), 1500); return () => clearTimeout(t) }, [flash])
+  useEffect(() => setUndos([]), [list.id])
   const checklist = list.kind === 'checklist'
   // a checklist keeps its order with checked steps in place; an ideas list moves them under Done
   const order = checklist ? mine : SORTS[sort].by
@@ -70,10 +100,39 @@ export function IdeasPane({ list, items, selected, onChange, onError, onSort, on
     const text = draft.trim()
     if (!text) return
     setDraft('')
-    await api.post('/api/ideas', { text, list: list.name, area: area || undefined }).catch(onError)
+    const r = await api.post<{ id: number }>('/api/ideas', { text, list: list.name, area: area || undefined }).catch(onError)
+    if (r) setUndos(u => [...u, { id: r.id }])
     onChange()
   }
-  const toggle = (i: Idea) => api.patch(`/api/ideas/${i.id}`, { done: !i.done }).then(onChange).catch(onError)
+  const setDone = (i: Idea, done: boolean) => {
+    askMotion()
+    setUndos(u => [...u, { id: i.id, done: !!i.done }])
+    return api.patch(`/api/ideas/${i.id}`, { done }).then(onChange).catch(onError)
+  }
+  const toggle = (i: Idea) => setDone(i, !i.done)
+  const copy = (i: Idea) => {
+    askMotion()
+    return navigator.clipboard.writeText(i.text).then(() => { setFlash('Copied'); return true }, e => { onError(e); return false })
+  }
+  const copyAndCheck = (i: Idea) => copy(i).then(ok => { if (ok && !i.done) setDone(i, true) }) // a failed copy leaves it unchecked
+  const undo = () => {
+    const last = undos.at(-1)
+    if (!last) return
+    setUndos(u => u.slice(0, -1))
+    ;(last.done === undefined ? api.del(`/api/ideas/${last.id}`) : api.patch(`/api/ideas/${last.id}`, { done: last.done }))
+      .then(() => { setFlash('Undone'); onChange() }).catch(onError)
+  }
+  useShake(undo)
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.metaKey || e.ctrlKey) || e.key.toLowerCase() !== 'z' || e.shiftKey) return
+      if ((e.target as HTMLElement).closest('input, textarea, select, [contenteditable]')) return // fields keep their own undo
+      e.preventDefault()
+      undo()
+    }
+    addEventListener('keydown', onKey)
+    return () => removeEventListener('keydown', onKey)
+  })
   const dropOn = (target: Idea) => {
     if (dragging === null || dragging === target.id) return
     const idx = open.findIndex(i => i.id === target.id)
@@ -87,6 +146,7 @@ export function IdeasPane({ list, items, selected, onChange, onError, onSort, on
       <div className="lh">
         <h4><span className="sq round" style={{ background: list.color }} />{list.name}</h4>
         {checklist && steps.length > 0 && <span className="progress">{steps.filter(i => i.done).length}/{steps.length}</span>}
+        {flash ? <span className="progress">{flash}</span> : undos.length > 0 && <button className="btn small" title="Undo (shake or ⌘Z)" onClick={undo}>Undo</button>}
         {list.name === 'Brain Dump' && open.length > 0 && <button className="btn small primary" onClick={onSort}>Sort {open.length}</button>}
         <button className="btn small" aria-label="List options" onClick={e => { const r = e.currentTarget.getBoundingClientRect(); onHeaderMenu(r.right - 220, r.bottom + 4) }}>⋯</button>
       </div>
@@ -97,6 +157,7 @@ export function IdeasPane({ list, items, selected, onChange, onError, onSort, on
       <div className="scroll">
         {open.map(i => (
           <IdeaRow key={i.id} i={i} on={i.id === selected} onToggle={() => toggle(i)} onMenu={(x, y) => onMenu(i, x, y)}
+            onCopy={checklist ? () => copy(i) : undefined} onCopyCheck={checklist ? () => copyAndCheck(i) : undefined}
             dragProps={{
               draggable: canDrag, onDragStart: () => setDragging(i.id), onDragEnd: () => setDragging(null),
               onDragOver: (e: React.DragEvent) => dragging !== null && e.preventDefault(), onDrop: () => dropOn(i),
@@ -114,7 +175,10 @@ export function IdeasPane({ list, items, selected, onChange, onError, onSort, on
   )
 }
 
-function IdeaRow({ i, on, onToggle, onMenu, dragProps, showList }: { i: Idea; on: boolean; onToggle: () => void; onMenu: (x: number, y: number) => void; dragProps?: object; showList?: boolean }) {
+function IdeaRow({ i, on, onToggle, onMenu, dragProps, showList, onCopy, onCopyCheck }: {
+  i: Idea; on: boolean; onToggle: () => void; onMenu: (x: number, y: number) => void; dragProps?: object; showList?: boolean
+  onCopy?: () => void; onCopyCheck?: () => void
+}) {
   const hold = useHold(onMenu)
   if (isHeading(i.text)) return (
     <div className={`idea heading ${on ? 'on' : ''}`} {...dragProps} {...hold}><a href={`#/idea/${i.id}`} className="idea-body">{i.text.slice(3)}</a></div>
@@ -134,6 +198,12 @@ function IdeaRow({ i, on, onToggle, onMenu, dragProps, showList }: { i: Idea; on
           {i.suggestion && !i.done && <span className="sugg">→ {i.suggestion}</span>}
         </span>
       </a>
+      {onCopy && (
+        <span className="idea-acts">
+          <button className="btn small" title="Copy" aria-label="Copy" onClick={onCopy}><CopyIcon /></button>
+          {!i.done && onCopyCheck && <button className="btn small" title="Copy and check off" aria-label="Copy and check off" onClick={onCopyCheck}><CopyIcon />✓</button>}
+        </span>
+      )}
     </div>
   )
 }
