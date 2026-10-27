@@ -1,6 +1,7 @@
 import { Fragment, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { api, remember, type Ask, type Conversation, type LeftMessage, type LiveAgent, type Message, type Paused, type RepoChanges } from './api.ts'
 import { activity, age, ago, Avatar, isPhone, openMenu, ORDER, PauseIcon, SendIcon, STATUS_LABEL, TermIcon, toolLabel, useHold } from './components.tsx'
+import { CodeOrFile, FileOpener, FilesView, FileViewer, PATH, PathRef } from './files.tsx'
 import { AddTodos } from './ideas.tsx'
 import { planSteps } from './steps.ts'
 import { ScreenView } from './terminal.tsx'
@@ -141,7 +142,7 @@ function PausedRow({ p, onResume, onForget }: { p: Paused; onResume: (p: Paused)
 
 // ---------- agent view ----------
 
-type Tab = 'chat' | 'terminal' | 'changes'
+type Tab = 'chat' | 'terminal' | 'changes' | 'files'
 
 export function AgentView({ agent, onBack, onTerminal, onPause, onMenu, onAdopt, send }: {
   agent: LiveAgent; onBack: () => void; onTerminal: () => void; onPause: () => void; onMenu: (x: number, y: number) => void
@@ -188,12 +189,13 @@ export function AgentView({ agent, onBack, onTerminal, onPause, onMenu, onAdopt,
           {chat && <button role="tab" aria-selected={shown === 'chat'} onClick={() => setTab('chat')}>Chat</button>}
           <button role="tab" aria-selected={shown === 'terminal'} onClick={() => setTab('terminal')}>Screen</button>
           <button role="tab" aria-selected={shown === 'changes'} onClick={() => setTab('changes')}>Changes</button>
+          <button role="tab" aria-selected={shown === 'files'} onClick={() => setTab('files')}>Files</button>
         </div>
       )}
       {!agent.controllable ? (
         chat ? (
           <>
-            <ChatView tool={agent.tool} id={agent.session_id} agent={agent.name} live working={agent.status === 'working' ? agent.working_line || 'Working…' : agent.status === 'waiting' ? 'Waiting on a background job, it picks up again when that finishes' : ''} />
+            <ChatView tool={agent.tool} id={agent.session_id} agent={agent.name} cwd={agent.cwd} live working={agent.status === 'working' ? agent.working_line || 'Working…' : agent.status === 'waiting' ? 'Waiting on a background job, it picks up again when that finishes' : ''} />
             <div className="ended">This one runs in a plain terminal window, so it's read-only here. <b>Add to Fleet</b> moves it into Fleet with the same conversation, so you can answer it from anywhere.</div>
           </>
         ) : (
@@ -203,10 +205,12 @@ export function AgentView({ agent, onBack, onTerminal, onPause, onMenu, onAdopt,
           </div>
         )
       ) : shown === 'chat' ? (
-        <ChatView tool={agent.tool} id={agent.session_id} agent={agent.name} live waiting={agent.status === 'needs_you' && !agent.ask ? agent.message : ''}
+        <ChatView tool={agent.tool} id={agent.session_id} agent={agent.name} cwd={agent.cwd} live waiting={agent.status === 'needs_you' && !agent.ask ? agent.message : ''}
           working={agent.status === 'working' ? agent.working_line || 'Working…' : agent.status === 'waiting' ? 'Waiting on a background job, it picks up again when that finishes' : ''} pending={pending} onSeen={() => setPending('')} peek={agent.name} />
       ) : shown === 'changes' ? (
         <ChangesView name={agent.name} />
+      ) : shown === 'files' ? (
+        <FilesTab cwd={agent.cwd} />
       ) : (
         <ScreenView name={agent.name} />
       )}
@@ -393,9 +397,11 @@ function StatusLine({ s }: { s: ChatStatus }) {
 }
 
 /** A conversation as chat bubbles, read from the tool's own log. Live views poll and stick to the bottom. */
-export function ChatView({ tool, id, live, waiting, working, pending, onSeen, peek, agent }: {
+export function ChatView({ tool, id, live, waiting, working, pending, onSeen, peek, agent, cwd }: {
   tool: string; id: string; live?: boolean; waiting?: string; working?: string; pending?: string; onSeen?: () => void; peek?: string; agent?: string
+  cwd?: string // where the conversation runs: file names in it open with a tap
 }) {
+  const [file, setFile] = useState('')
   const [messages, setMessages] = useState<Message[] | null>(null)
   const [status, setStatus] = useState<ChatStatus | null>(null)
   const [todos, setTodos] = useState<ReturnType<typeof planSteps> | null>(null)
@@ -435,6 +441,8 @@ export function ChatView({ tool, id, live, waiting, working, pending, onSeen, pe
     else blocks.push(m.role === 'tool' ? [m] : m)
   }
   return (
+    <FileOpener.Provider value={cwd ? setFile : null}>
+    {file && cwd && <FileViewer cwd={cwd} path={file} onClose={() => setFile('')} />}
     <div className="chat" ref={box} onScroll={e => { const el = e.currentTarget; pinned.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80 }}>
       {status && <StatusLine s={status} />}
       {blocks.map((b, i) => {
@@ -454,6 +462,7 @@ export function ChatView({ tool, id, live, waiting, working, pending, onSeen, pe
       {!messages.length && <div className="empty">No messages yet.</div>}
       {todos && <AddTodos plan={todos} agent={agent} onClose={() => setTodos(null)} />}
     </div>
+    </FileOpener.Provider>
   )
 }
 
@@ -520,21 +529,27 @@ export function Markdown({ text }: { text: string }) {
 
 function inline(s: string): ReactNode[] {
   const out: ReactNode[] = []
-  const re = /(`[^`]+`|\*\*[^*]+\*\*|\[[^\]]+\]\(https?:[^)\s]+\)|https?:\/\/[^\s)]+)/g
+  const re = new RegExp(`(\`[^\`]+\`|\\*\\*[^*]+\\*\\*|\\[[^\\]]+\\]\\(https?:[^)\\s]+\\)|https?:\\/\\/[^\\s)]+|${PATH.source})`, 'g')
   let last = 0
   for (const m of s.matchAll(re)) {
     if (m.index > last) out.push(s.slice(last, m.index))
     const t = m[0]
-    if (t.startsWith('`')) out.push(<code key={m.index}>{t.slice(1, -1)}</code>)
+    if (t.startsWith('`')) out.push(<CodeOrFile key={m.index} text={t.slice(1, -1)} />)
     else if (t.startsWith('**')) out.push(<b key={m.index}>{t.slice(2, -2)}</b>)
     else if (t.startsWith('[')) {
       const [, label, url] = t.match(/^\[([^\]]+)\]\((.+)\)$/)!
       out.push(<a key={m.index} href={url} target="_blank" rel="noreferrer">{label}</a>)
-    } else out.push(<a key={m.index} href={t} target="_blank" rel="noreferrer">{t}</a>)
+    } else if (/^https?:/.test(t)) out.push(<a key={m.index} href={t} target="_blank" rel="noreferrer">{t}</a>)
+    else out.push(<PathRef key={m.index} text={t.replace(/[.,;:]$/, '')} />, t.match(/[.,;:]$/)?.[0] ?? '')
     last = m.index + t.length
   }
   if (last < s.length) out.push(s.slice(last))
   return out
+}
+
+function FilesTab({ cwd }: { cwd: string }) {
+  const [file, setFile] = useState('')
+  return <>{file && <FileViewer cwd={cwd} path={file} onClose={() => setFile('')} />}<FilesView cwd={cwd} onOpen={setFile} /></>
 }
 
 // ---------- changes ----------

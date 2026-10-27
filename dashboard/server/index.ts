@@ -18,6 +18,7 @@ import { aiBudget, usage } from './usage.ts'
 import { kokoroInstalled, speech, voices } from './tts.ts'
 import { readFileSync as readFile } from 'node:fs'
 import * as J from './jarvis.ts'
+import { FileError, findFiles, readText } from './files.ts'
 import { AREAS, areaColor, notePrompt } from '../web/src/areas.ts'
 import { attach } from './ws.ts'
 
@@ -450,6 +451,15 @@ const routes: [string, RegExp, Route][] = [
     return (await conversations())
       .filter(c => !q || `${c.title} ${c.prompt} ${c.cwd}`.toLowerCase().includes(q))
       .map(c => ({ ...c, key: `sid:${c.id}`, folder_id: map.get(`sid:${c.id}`) ?? null, running: running.get(c.id) ?? null }))
+  }],
+  // ---------- files an agent mentions ----------
+  ['GET', /^\/api\/files\/read$/, async req => {
+    const sp = new URL(req.url ?? '', 'http://x').searchParams
+    try { return readText(sp.get('cwd') ?? '', sp.get('path') ?? '') } catch (e) { throw e instanceof FileError ? new HttpError(e.status, e.message) : e }
+  }],
+  ['GET', /^\/api\/files\/search$/, async req => {
+    const sp = new URL(req.url ?? '', 'http://x').searchParams
+    try { return await findFiles(sp.get('cwd') ?? '', str(sp.get('q'), 200)) } catch (e) { throw e instanceof FileError ? new HttpError(e.status, e.message) : e }
   }],
   ['GET', /^\/api\/transcript$/, async req => {
     const sp = new URL(req.url ?? '', 'http://x').searchParams

@@ -38,7 +38,7 @@ export function ConversationView({ c, onBack, onResume, onMenu }: { c: Conversat
           <button className="btn" aria-label="More" onClick={e => { const r = e.currentTarget.getBoundingClientRect(); onMenu(r.right - 220, r.bottom + 4) }}>⋯</button>
         </div>
       </header>
-      <ChatView tool={c.tool} id={c.id} />
+      <ChatView tool={c.tool} id={c.id} cwd={c.cwd} />
     </main>
   )
 }
