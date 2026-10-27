@@ -359,6 +359,8 @@ details.ai-note { display: block; }
 .st-inline { width: 7px; height: 7px; border-radius: 50%; display: inline-block; background: var(--idle); margin-right: 4px; }
 .st-inline.st-working { background: var(--work); } .st-inline.st-needs_you { background: var(--need); } .st-inline.st-done { background: var(--done); } .st-inline.st-waiting { background: var(--work); opacity: .55; } .st-inline.st-ready { background: var(--done); opacity: .45; } .st-ready { background: var(--done); opacity: .45; } .st-inline.st-crashed { background: var(--dead); }
 .idea-detail .idea-form { padding: 16px 18px; display: flex; flex-direction: column; gap: 12px; overflow-y: auto; }
+/* the form scrolls, so its boxes keep their size; without this a tall form on a phone squeezes the text boxes to a sliver */
+.idea-detail .idea-form > * { flex: none; }
 .idea-form label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; font-weight: 500; color: var(--dim); flex: 1; }
 .idea-form textarea, .idea-form select, .idea-form input { border: 1px solid var(--line); background: var(--bg); border-radius: 8px; padding: 7px 9px; font-size: 13.5px; resize: vertical; }
 .idea-title { font-size: 16px !important; font-weight: 600; }
