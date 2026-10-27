@@ -160,17 +160,20 @@ function anchored(from: HTMLElement, items: number) {
 
 export function MenuHost() {
   const [stack, setStack] = useState<MenuState[]>([])
-  const openedAt = useRef(0)
+  // a touch that began on the backdrop after the menu opened; the finger still down from the long press doesn't count,
+  // however long you keep holding, so lifting it never closes the menu (which used to let iOS select the text)
+  const began = useRef(false)
   const ghost = useRef<HTMLDivElement>(null)
   useEffect(() => {
-    showMenu = m => { openedAt.current = Date.now(); setStack(m ? [m] : []) }
+    showMenu = m => { began.current = false; setStack(m ? [m] : []) }
     return () => { showMenu = () => {} }
   }, [])
+  const onBackdrop = (e: React.SyntheticEvent) => e.target === e.currentTarget || !!ghost.current?.contains(e.target as Node)
   const dismiss = (e: React.SyntheticEvent) => {
-    if (e.target !== e.currentTarget && !ghost.current?.contains(e.target as Node)) return
+    if (!onBackdrop(e)) return
     e.preventDefault() // the tap that closes the menu must not also land on the row or button under it
-    // lifting the finger after a long press sends a tap that lands on the backdrop; don't let it close the menu
-    if (Date.now() - openedAt.current > 600) close()
+    e.stopPropagation()
+    if (e.type === 'mousedown' || began.current) close()
   }
   // closing removes the backdrop, and iOS can still deliver that tap's click to whatever was under it: eat it
   const close = () => {
@@ -207,7 +210,8 @@ export function MenuHost() {
   const sheet = isPhone() && !pop
   const style = pop ? pop.style : sheet ? {} : { left: Math.min(top.x, innerWidth - 240), top: Math.min(top.y, innerHeight - 40 - top.items.length * 34) }
   return (
-    <div className={`menu-overlay ${pop ? 'lifted' : ''}`} onMouseDown={dismiss} onTouchEnd={dismiss}>
+    <div className={`menu-overlay ${pop ? 'lifted' : ''}`} onMouseDown={dismiss} onTouchEnd={dismiss}
+      onTouchStart={e => { if (onBackdrop(e)) { began.current = true; e.stopPropagation() } }}>
       {pop && <div className="menu-ghost" ref={ghost} aria-hidden style={{ left: pop.rect.left, top: pop.rect.top, width: pop.rect.width, height: pop.rect.height }} />}
       <div className={`menu ctx ${sheet ? 'sheet' : ''} ${pop ? 'pop' : ''}`} role="menu" style={style}>
         {(top.title || stack.length > 1) && (
