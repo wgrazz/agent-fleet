@@ -41,6 +41,8 @@ export function AgentList({ agents, selected, header, past, onMenu, empty, pause
 }) {
   const [showPaused, setShowPaused] = useState(remember.get('list.paused') !== 'hide')
   const togglePaused = () => { setShowPaused(!showPaused); remember.set('list.paused', showPaused ? 'hide' : '') }
+  const [showPast, setShowPast] = useState(remember.get('list.past') !== 'hide')
+  const togglePast = () => { setShowPast(!showPast); remember.set('list.past', showPast ? 'hide' : '') }
   return (
     <section className="list">
       {header}
@@ -72,8 +74,10 @@ export function AgentList({ agents, selected, header, past, onMenu, empty, pause
         )}
         {past && past.length > 0 && (
           <div>
-            <div className="grp">Past conversations</div>
-            {past.map(c => <ConversationRow key={c.id} c={c} />)}
+            <button className="grp grp-toggle" onClick={togglePast} aria-expanded={showPast}>
+              Past conversations · {past.length}<span className="grp-hint">{showPast ? '▾' : '▸'}</span>
+            </button>
+            {showPast && past.map(c => <ConversationRow key={c.id} c={c} />)}
           </div>
         )}
         {!agents.length && !past?.length && (empty ?? <div className="empty">No agents running. Start one with <b>New agent</b>.</div>)}
