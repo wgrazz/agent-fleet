@@ -13,6 +13,7 @@ mkdirSync(FLEET_DIR, { recursive: true, mode: 0o700 })
 export type Config = {
   port: number; key: string; cwd?: string; jarvis_warn_pct?: number; jarvis_max_pct?: number
   ai_model?: string; voice_engine?: 'kokoro' | 'mac' | 'device'; voice?: string; voice_speed?: number
+  area_folders?: boolean // one folder per note area made once
 }
 
 // Same format and creation rule as config() in the fleet CLI: whoever runs first writes it, readable only by you.

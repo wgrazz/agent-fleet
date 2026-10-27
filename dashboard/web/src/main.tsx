@@ -221,7 +221,7 @@ function App() {
     { label: 'Delete', danger: true, onClick: () => act(api.del(`/api/ideas/${i.id}`)) },
   ], i.text.slice(0, 40))
 
-  const startFromIdea = (i: Idea) => setModal({ kind: 'custom', title: 'Start an agent on this idea', ideaId: i.id, initial: { prompt: `${i.text}${i.notes ? `\n\n${i.notes}` : ''}` } })
+  const startFromIdea = (i: Idea) => setModal({ kind: 'custom', title: 'Start an agent on this idea', ideaId: i.id, initial: { folder_id: folderList.find(f => f.name === i.area)?.id ?? null, prompt: `${i.text}${i.notes ? `\n\n${i.notes}` : ''}` } })
 
   const runSort = () => {
     setModal({ kind: 'sort' })

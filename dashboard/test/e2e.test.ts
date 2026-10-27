@@ -104,4 +104,15 @@ describe('fake agent through the API', () => {
     expect((await api('DELETE', `/api/agents/${name}`)).status).toBe(200)
     expect(await agent()).toBeUndefined()
   })
+
+  it('has a folder per area, and an agent started from a note lands in its area folder', async () => {
+    const folders = (await api('GET', '/api/folders')).data
+    const growth = folders.find((f: any) => f.name === 'Growth')
+    expect(growth).toBeDefined()
+    const { id } = (await api('POST', '/api/ideas', { text: 'area test', area: 'Growth' })).data
+    const started = (await api('POST', `/api/ideas/${id}/start`, { name: `${name}-n`, tool: 'fake', cwd: dir })).data
+    const a = (await api('GET', '/api/agents')).data.find((x: any) => x.name === started.name)
+    expect(a.folder_id).toBe(growth.id)
+    await api('DELETE', `/api/agents/${started.name}`)
+  })
 })

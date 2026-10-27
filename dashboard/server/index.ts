@@ -18,6 +18,7 @@ import { aiBudget, usage } from './usage.ts'
 import { kokoroInstalled, speech, voices } from './tts.ts'
 import { readFileSync as readFile } from 'node:fs'
 import * as J from './jarvis.ts'
+import { AREAS, areaColor } from '../web/src/areas.ts'
 import { attach } from './ws.ts'
 
 const NAME = /^[A-Za-z0-9._-]{1,40}$/ // same rule as the fleet CLI
@@ -109,6 +110,17 @@ function place(key: string, folder: number | null) {
   if (folder === null) db.prepare('DELETE FROM placements WHERE key = ?').run(key)
   else db.prepare('INSERT INTO placements (key, folder_id) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET folder_id = excluded.folder_id').run(key, folder)
 }
+
+/** The folder named after a note's area, made if missing: an agent started from a note lands in it. */
+function areaFolder(area: string) {
+  const f = db.prepare('SELECT id FROM folders WHERE name = ?').get(area) as { id: number } | undefined
+  if (f) return f.id
+  const pos = (db.prepare('SELECT coalesce(max(position), 0) + 1 AS p FROM folders').get() as { p: number }).p
+  return Number(db.prepare('INSERT INTO folders (name, color, position) VALUES (?, ?, ?)').run(area, areaColor(area) ?? '#8e8e93', pos).lastInsertRowid)
+}
+// one folder per area, once, so a folder you delete stays deleted (until a note in that area starts an agent)
+if (!config.area_folders) { for (const a of AREAS) areaFolder(a.name); saveConfig({ area_folders: true }) }
+const ideaFolder = (b: any, area: string | null) => (typeof b.folder_id === 'number' ? b.folder_id : area ? areaFolder(area) : undefined)
 
 const agentKey = (a: { name: string; session_id: string }) => (a.session_id ? `sid:${a.session_id}` : `name:${a.name}`)
 
@@ -490,7 +502,8 @@ const routes: [string, RegExp, Route][] = [
     const topic = str(b.topic, 20_000).trim()
     if (!topic) throw new HttpError(400, 'what should the interview be about?')
     const slug = topic.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 24)
-    const started = await startAgent({ tool: 'claude', name: `interview-${slug}`, prompt: interviewPrompt(topic), cwd: str(b.cwd, 1000), folder_id: b.folder_id })
+    const started = await startAgent({ tool: 'claude', name: `interview-${slug}`, prompt: interviewPrompt(topic), cwd: str(b.cwd, 1000),
+      folder_id: typeof b.idea_id === 'number' ? ideaFolder(b, ideas.idea(b.idea_id)?.area ?? null) : b.folder_id })
     if (typeof b.idea_id === 'number') ideas.updateIdea(b.idea_id, { agent: started.name })
     return started
   }],
@@ -600,7 +613,7 @@ const routes: [string, RegExp, Route][] = [
     const item = ideaOr404(id)
     const b = await body(req)
     const slug = item.text.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 28)
-    const started = await startAgent({ ...b, name: str(b.name, 40) || slug, prompt: str(b.prompt, 100_000) || `${item.text}${item.notes ? `\n\n${item.notes}` : ''}` })
+    const started = await startAgent({ ...b, folder_id: ideaFolder(b, item.area), name: str(b.name, 40) || slug, prompt: str(b.prompt, 100_000) || `${item.text}${item.notes ? `\n\n${item.notes}` : ''}` })
     ideas.updateIdea(item.id, { agent: started.name })
     return started
   }],
