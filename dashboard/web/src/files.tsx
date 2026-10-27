@@ -1,5 +1,5 @@
 // Files an agent mentions: tap one in the chat to read it here, or search the agent's folder from the Files tab.
-import { createContext, useContext, useEffect, useRef, useState } from 'react'
+import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react'
 import { Markdown } from './agents.tsx'
 import { api } from './api.ts'
 import { Dialog } from './components.tsx'
@@ -9,6 +9,8 @@ export const FileOpener = createContext<((path: string) => void) | null>(null)
 
 // a/b/c.md, ./x.ts, ~/notes/y.txt, /abs/z.py, optionally :12 or :12-30
 export const PATH = /(?:~\/|\.{1,2}\/|\/)?(?:[\w@+-][\w@.+-]*\/)+[\w@+-][\w@.+-]*\.[A-Za-z]\w{0,7}(?::\d+(?:-\d+)?)?/
+// a bare doc name in plain text: AGENTS.md, report.md, the-plan.mdx
+export const BARE = /\b[\w-][\w.-]*\.(?:md|markdown|mdx)\b(?::\d+(?:-\d+)?)?/
 const CODE_PATH = /^(?:~\/|\.{1,2}\/|\/)?(?:[^\s`/]+\/)*[^\s`/]+\.[A-Za-z]\w{0,7}(?::\d+(?:-\d+)?)?$|^(?:~\/|\/)?(?:[^`/]+\/)+[^`/]+\.[A-Za-z]\w{0,7}(?::\d+(?:-\d+)?)?$/
 
 /** `inline code` that is a file name: tappable when the chat knows its folder, plain code otherwise. */
@@ -18,27 +20,53 @@ export function CodeOrFile({ text }: { text: string }) {
   return <button type="button" className="file-ref code" onClick={() => open(text)} title="Open this file">{text}</button>
 }
 
-/** A path in plain text: tappable when the chat knows its folder. */
-export function PathRef({ text }: { text: string }) {
+/** A path in plain text (or a markdown link to one): tappable when the chat knows its folder. */
+export function PathRef({ text, label }: { text: string; label?: ReactNode }) {
   const open = useContext(FileOpener)
-  if (!open) return <>{text}</>
-  return <button type="button" className="file-ref" onClick={() => open(text)} title="Open this file">{text}</button>
+  if (!open) return <>{label ?? text}</>
+  return <button type="button" className="file-ref" onClick={() => open(text)} title={`Open ${text}`}>{label ?? text}</button>
 }
 
-export function FileViewer({ cwd, path, onClose }: { cwd: string; path: string; onClose: () => void }) {
+/** Taps on file names anywhere inside open them in one viewer, from `cwd`. */
+export function FilesHere({ cwd, children }: { cwd: string; children: ReactNode }) {
+  const [file, setFile] = useState('')
+  return (
+    <FileOpener.Provider value={setFile}>
+      {children}
+      {file && <FileViewer key={file} cwd={cwd} path={file} onClose={() => setFile('')} />}
+    </FileOpener.Provider>
+  )
+}
+
+export function FileViewer({ cwd, path: asked, onClose }: { cwd: string; path: string; onClose: () => void }) {
+  const [path, setPath] = useState(asked)
   const [file, setFile] = useState<{ path: string; rel: string; text: string } | null>(null)
   const [error, setError] = useState('')
+  const [choices, setChoices] = useState<string[]>([]) // not where it said: files with that name, to pick from
   const [raw, setRaw] = useState(false)
   const at = useRef<HTMLDivElement>(null)
   const [from, to] = (path.match(/:(\d+)(?:-(\d+))?$/)?.slice(1) ?? []).map(Number)
   useEffect(() => {
-    api.get<typeof file>(`/api/files/read?cwd=${encodeURIComponent(cwd)}&path=${encodeURIComponent(path)}`).then(setFile).catch(e => setError(e.message))
+    setFile(null); setError(''); setChoices([])
+    api.get<typeof file>(`/api/files/read?cwd=${encodeURIComponent(cwd)}&path=${encodeURIComponent(path)}`).then(setFile).catch(async e => {
+      const name = path.replace(/:\d+(-\d+)?$/, '').split('/').pop()!
+      const found = /no such file/.test(e.message) ? await api.get<string[]>(`/api/files/search?cwd=${encodeURIComponent(cwd)}&q=${encodeURIComponent(name)}`).catch(() => []) : []
+      const exact = found.filter(f => f.split('/').pop() === name)
+      if (exact.length === 1) return setPath(exact[0] + (path.match(/:\d+(-\d+)?$/)?.[0] ?? ''))
+      setChoices(exact.length ? exact : found)
+      setError(e.message)
+    })
   }, [cwd, path])
   useEffect(() => { at.current?.scrollIntoView({ block: 'center' }) }, [file, raw])
   const md = !!file && /\.(md|markdown|mdx)$/i.test(file.path) && !from
   return (
     <Dialog title={file?.rel || path} onClose={onClose} wide>
-      {error ? <p className="dialog-text">{error}</p> : !file ? <p className="dialog-text">Opening…</p> : (
+      {error ? (
+        <>
+          <p className="dialog-text">{choices.length ? `Which ${path.split('/').pop()}?` : error}</p>
+          {choices.map(c => <button key={c} className="file-hit" onClick={() => setPath(c)}><b>{c.split('/').pop()}</b><span>{c.split('/').slice(0, -1).join('/')}</span></button>)}
+        </>
+      ) : !file ? <p className="dialog-text">Opening…</p> : (
         <>
           <div className="file-acts">
             <button className="btn small" onClick={() => navigator.clipboard.writeText(file.path).catch(() => {})}>Copy path</button>
