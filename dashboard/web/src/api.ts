@@ -61,10 +61,10 @@ const listeners = new Set<(off: boolean, pending: number) => void>()
 export const onOffline = (f: (off: boolean, pending: number) => void) => { listeners.add(f); f(offline, readBox().length); return () => { listeners.delete(f) } }
 const announce = () => listeners.forEach(f => f(offline, readBox().length))
 function setOffline(off: boolean) {
-  if (off === offline) return
-  offline = off
-  announce()
-  if (!off) flush()
+  if (off !== offline) { offline = off; announce() }
+  // every answer from the Mac retries, not just the offline → online flip: the outbox survives reloads,
+  // and a replay cut short by a flaky reconnect or a 5xx would otherwise wait forever
+  if (!off && readBox().length) flush()
 }
 
 let flushing = false
