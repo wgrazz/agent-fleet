@@ -35,6 +35,13 @@ function useSort() {
   return [sort, (s: string) => { set(s); remember.set('ideaSort', s) }] as const
 }
 
+/** The area filter, remembered on this device for each list (and All notes), so leaving and coming back keeps it. */
+function useArea(where: string) {
+  const [, bump] = useState(0)
+  const saved = remember.get(`area:${where}`)
+  return [AREAS.some(a => a.name === saved) ? saved : '', (a: string) => { remember.set(`area:${where}`, a); bump(n => n + 1) }] as const
+}
+
 function IdeaTools({ sort, setSort, area, setArea }: { sort: string; setSort: (s: string) => void; area: string; setArea: (a: string) => void }) {
   return (
     <div className="idea-tools">
@@ -77,7 +84,7 @@ export function IdeasPane({ list, items, selected, onChange, onError, onSort, on
   const [draft, setDraft] = useState('')
   const [showDone, setShowDone] = useState(false)
   const [dragging, setDragging] = useState<number | null>(null)
-  const [area, setArea] = useState('')
+  const [area, setArea] = useArea(list.name)
   const [sort, setSort] = useSort()
   const shown = area ? items.filter(i => i.area === area) : items
   // what Undo (shake, ⌘Z or the button) reverses, newest last: a check or uncheck (done = how it was), or a step you added
@@ -389,7 +396,7 @@ export function AllNotesPane({ items, lists, selected, onChange, onError, onMenu
   items: Idea[]; lists: List[]; selected: number | null; onChange: () => void; onError: (e: Error) => void; onMenu: (i: Idea, x: number, y: number) => void
 }) {
   const [sort, setSort] = useSort()
-  const [area, setArea] = useState('')
+  const [area, setArea] = useArea('*all notes')
   const checklists = new Set(lists.filter(l => l.kind === 'checklist').map(l => l.name))
   const open = items.filter(i => !i.done && !checklists.has(i.list) && !isHeading(i.text) && (!area || i.area === area))
     .sort(sort === 'manual' ? (a, b) => a.list.localeCompare(b.list) || SORTS.manual.by(a, b) : SORTS[sort].by)

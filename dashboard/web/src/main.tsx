@@ -81,6 +81,7 @@ function App() {
       setRoute(r)
       if (['all', 'folder', 'paused', 'history', 'ideas', 'prioritized', 'everything'].includes(r.view)) lastListRoute.current = location.hash || '#/'
       if (r.view === 'ideas' || r.view === 'prioritized' || r.view === 'everything') remember.set('ideaFrom', r.view)
+      if (['ideas', 'idea', 'prioritized', 'everything'].includes(r.view)) remember.set('ideasRoute', location.hash) // the Ideas tab comes back here
     }
     addEventListener('hashchange', on)
     loadProfiles()
@@ -102,6 +103,11 @@ function App() {
   }, [toast])
 
   const needs = all.filter(a => a.status === 'needs_you').length
+  // where you last were in Ideas (a list, All notes, Prioritized or a note), unless that note is gone
+  const ideasTab = () => {
+    const r = remember.get('ideasRoute'), id = r.match(/^#\/idea\/(\d+)/)?.[1]
+    return r && (!id || ideas.data?.some(i => i.id === Number(id))) ? r : `#/ideas/${enc(remember.get('lastList') || 'Brain Dump')}`
+  }
   useEffect(() => {
     document.title = needs ? `(${needs}) Fleet` : 'Fleet'
     ;(navigator as any).setAppBadge?.(needs).catch?.(() => {})
@@ -363,7 +369,7 @@ function App() {
 
       <nav className="tabs" aria-label="Sections">
         <a href={lastListRoute.current.startsWith('#/folder') ? lastListRoute.current : '#/'} className={tab === 'agents' ? 'on' : ''}>Agents{needs > 0 && <span className="badge">{needs}</span>}</a>
-        <a href={`#/ideas/${enc(remember.get('lastList') || 'Brain Dump')}`} className={tab === 'ideas' ? 'on' : ''}>Ideas{(brainDump?.unsorted ?? 0) > 0 && <span className="badge gray">{brainDump!.unsorted}</span>}</a>
+        <a href={ideasTab()} className={tab === 'ideas' ? 'on' : ''}>Ideas{(brainDump?.unsorted ?? 0) > 0 && <span className="badge gray">{brainDump!.unsorted}</span>}</a>
         <button className="tab-mic" onClick={() => go('#/jarvis')} aria-label="Jarvis"><MicIcon /></button>
         <a href="#/history" className={tab === 'history' ? 'on' : ''}>History</a>
         <a href="#/more" className={tab === 'more' ? 'on' : ''}>More</a>
