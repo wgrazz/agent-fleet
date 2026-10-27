@@ -100,6 +100,7 @@ kbd { font: 600 10.5px var(--mono); opacity: .6; margin-right: 5px; }
 .it.paused { grid-template-columns: 26px minmax(0, 1fr) auto; }
 .row-actions { grid-column: 2 / 4; display: flex; gap: 6px; margin-top: 6px; }
 .empty { color: var(--faint); padding: 24px 18px; text-align: center; line-height: 1.5; }
+.empty.loading { display: flex; gap: 8px; align-items: center; justify-content: center; }
 .empty.big { margin: auto; max-width: 420px; font-size: 14px; }
 
 /* tool avatars + status dot */

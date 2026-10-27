@@ -15,9 +15,15 @@ async function fromCache(cacheName, key) {
   return new Response(await hit.blob(), { status: hit.status, headers })
 }
 
+// a request that hangs (a flaky phone connection) gives up after 10 s and uses the saved copy, instead of waiting a minute
+const timeout = (request, ms) => new Promise((ok, fail) => {
+  const t = setTimeout(() => fail(new Error('timeout')), ms)
+  fetch(request).then(r => { clearTimeout(t); ok(r) }, e => { clearTimeout(t); fail(e) })
+})
+
 async function networkFirst(request, cacheName, key = request) {
   try {
-    const res = await fetch(request)
+    const res = await timeout(request, request.mode === 'navigate' ? 15_000 : 10_000)
     if (res.ok) (await caches.open(cacheName)).put(key, res.clone())
     return res
   } catch {

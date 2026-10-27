@@ -67,7 +67,7 @@ function App() {
   const from = (v: string) => route.view === v || (route.view === 'idea' && remember.get('ideaFrom') === v)
   const fromPriority = from('prioritized')
   const fromEverything = from('everything')
-  const ideas = usePoll<Idea[]>(fromPriority ? '/api/ideas?priority=1' : fromEverything ? '/api/ideas?all=1' : `/api/ideas?list=${enc(currentListName || '-')}`,
+  const ideas = usePoll<Idea[]>(fromPriority ? '/api/ideas?priority=1' : fromEverything ? '/api/ideas?open=1' : `/api/ideas?list=${enc(currentListName || '-')}`,
     currentListName || fromPriority || fromEverything ? 4000 : 3_600_000, fail)
   useEffect(() => {
     if (route.view !== 'idea') return setIdeaItem(null)
@@ -307,6 +307,8 @@ function App() {
       onResume={p => act(api.post(`/api/paused/${p.id}/resume`), () => openAgent(p.name))} onForget={p => act(api.del(`/api/paused/${p.id}`))} />
   } else if (middleView.view === 'history') {
     middle = <HistoryPane items={history} q={historyQ} setQ={setHistoryQ} selected={route.b} onMenu={conversationMenu} />
+  } else if (ideas.data === null && (fromEverything || route.view === 'prioritized' || route.view === 'ideas' || route.view === 'idea')) {
+    middle = <section className="list ideas">{ideas.error ? <div className="empty">Couldn't load your notes: {ideas.error} Trying again…</div> : <div className="empty loading"><span className="dots"><i /><i /><i /></span>Loading notes…</div>}</section>
   } else if (fromEverything) {
     middle = <AllNotesPane items={ideas.data ?? []} lists={allLists} selected={route.view === 'idea' ? Number(route.a) : null}
       onChange={() => { ideas.refresh(); lists.refresh() }} onError={fail} onMenu={ideaMenu} />

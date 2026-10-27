@@ -143,17 +143,30 @@ export const api = {
 }
 
 // ponytail: polling; switch to a WebSocket event feed if 2 s ever feels slow
+/** Poll `path` every `ms`. data is null until `path` itself has answered (never another path's answer, even one
+ *  that arrives late), and a poll waits for the one before it instead of piling up on a slow connection. */
 export function usePoll<T>(path: string, ms: number, onError: (e: Error) => void) {
-  const [data, setData] = useState<T | null>(null)
+  const [got, setGot] = useState<{ path: string; data: T } | null>(null)
+  const [failed, setFailed] = useState<{ path: string; error: string } | null>(null)
   const errRef = useRef(onError)
   errRef.current = onError
-  const refresh = useCallback(() => api.get<T>(path).then(setData).catch(e => errRef.current(e)), [path])
+  const current = useRef(path)
+  current.current = path
+  const busy = useRef('')
+  const refresh = useCallback((force = true) => {
+    if (!force && busy.current === path) return Promise.resolve()
+    busy.current = path
+    return api.get<T>(path)
+      .then(data => { if (current.current === path) { setGot({ path, data }); setFailed(null) } })
+      .catch(e => { if (current.current === path) { setFailed({ path, error: e.message }); errRef.current(e) } })
+      .finally(() => { if (busy.current === path) busy.current = '' })
+  }, [path])
   useEffect(() => {
     refresh()
-    const t = setInterval(refresh, ms)
+    const t = setInterval(() => refresh(false), ms)
     return () => clearInterval(t)
   }, [refresh, ms])
-  return { data, refresh }
+  return { data: got?.path === path ? got.data : null, error: failed?.path === path ? failed.error : '', refresh: () => { refresh() } }
 }
 
 // localStorage can be missing or throw (private mode); these are conveniences only

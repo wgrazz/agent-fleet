@@ -592,7 +592,8 @@ const routes: [string, RegExp, Route][] = [
   ['GET', /^\/api\/ideas$/, async req => {
     const sp = new URL(req.url ?? '', 'http://x').searchParams
     const agents = new Map(list().map(a => [a.name, a.status]))
-    const rows = sp.get('priority') ? ideas.prioritized() : ideas.ideas(sp.get('list') ?? undefined)
+    // open=1: only open ones (All notes), a fraction of everything
+    const rows = sp.get('priority') ? ideas.prioritized() : ideas.ideas(sp.get('list') ?? undefined).filter(i => !sp.get('open') || !i.done)
     return rows.map(i => ({ ...i, agent_status: i.agent ? agents.get(i.agent) ?? 'gone' : null }))
   }],
   ['POST', /^\/api\/ideas\/rank$/, async () => ideas.rankAll(jarvisContext())],
