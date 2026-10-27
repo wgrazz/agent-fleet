@@ -1150,8 +1150,9 @@ def ts_host():
 
 def siri_shortcut(path, host=''):
     """A signed "Jarvis" shortcut for the iPhone: pause music, dictate, ask Jarvis, play the answer in Jarvis's voice, listen
-    again. It ends when Jarvis
-    signs off (you said bye, that's all, go away…), when you stop talking, or after 100 turns as a backstop.
+    again. It ends, and plays the music again, when Jarvis signs off (you said bye, that's all, go away…), when you say
+    nothing, or after 100 turns as a backstop.
+    ponytail: Shortcuts can't tell whether music was playing, so it always resumes; nothing playing before means it starts the last song.
     It holds your access key, so it's made on demand and never saved in the repo."""
     import plistlib
     import tempfile
@@ -1186,9 +1187,11 @@ def siri_shortcut(path, host=''):
             step('conditional', GroupingIdentifier=done, WFControlFlowMode=0, WFCondition=99, WFConditionalActionString='\u2063',
                  WFInput={'Type': 'Variable', 'Variable': {'Value': {'Type': 'ActionOutput', 'OutputUUID': answer, 'OutputName': 'Contents of URL'},
                                                            'WFSerializationType': 'WFTextTokenAttachment'}}),
+            step('pausemusic', WFPlayPauseBehavior='Play'),
             step('exit'),
             step('conditional', GroupingIdentifier=done, WFControlFlowMode=2),
             step('repeat.count', GroupingIdentifier=loop, WFControlFlowMode=2),
+            step('pausemusic', WFPlayPauseBehavior='Play'),  # the 100-turn backstop
         ],
         'WFWorkflowClientVersion': '2302.0.4', 'WFWorkflowMinimumClientVersion': 900, 'WFWorkflowMinimumClientVersionString': '900',
         'WFWorkflowIcon': {'WFWorkflowIconStartColor': 463140863, 'WFWorkflowIconGlyphNumber': 59511},

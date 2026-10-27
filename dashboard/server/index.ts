@@ -771,7 +771,7 @@ export const server = createServer(async (req, res) => {
     // Always 200: whatever comes back is what Siri says.
     if (url.pathname === '/api/jarvis/say' && req.method === 'POST') {
       const said = str((await body(req)).text, 2000).trim()
-      const say = !said ? "I didn't catch that." : await runJarvis(said)
+      const say = !said ? `Okay.${END}` : await runJarvis(said) // silence ends the conversation (and the shortcut resumes your music)
         // a trailing invisible separator (U+2063) tells the shortcut the conversation is over; Siri doesn't read it out
         .then(r => r.say + ((r as { proposals?: unknown[] }).proposals?.length ? ' That needs your OK in Fleet.' : '') + ((r as { end?: boolean }).end ? END : ''))
         .catch(e => `Sorry, that didn't work: ${(e as Error).message}`)
