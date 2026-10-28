@@ -13,13 +13,14 @@ mkdirSync(AI_DIR, { recursive: true })
 export const aiModel = () => process.env.FLEET_AI_MODEL ?? config.ai_model ?? 'sonnet'
 
 type Schema = Record<string, unknown>
-type AskOpts = { tools?: string[]; allow?: string[]; addDirs?: string[]; timeoutMs?: number; cwd?: string; feature?: string; resume?: string; persist?: boolean }
+type AskOpts = { tools?: string[]; allow?: string[]; deny?: string[]; addDirs?: string[]; timeoutMs?: number; cwd?: string; feature?: string; resume?: string; persist?: boolean; model?: string; budgetUsd?: number }
 export type Answer<T> = { value: T; session_id: string; cost: number }
 
 export function askFull<T>(task: string, system: string, schema: Schema, opts: AskOpts = {}): Promise<Answer<T>> {
   const tools = opts.tools ?? []
-  const args = ['-p', '--model', aiModel(), '--output-format', 'json', '--strict-mcp-config', '--setting-sources', 'project',
+  const args = ['-p', '--model', opts.model || aiModel(), '--output-format', 'json', '--strict-mcp-config', '--setting-sources', 'project',
     '--tools', tools.join(','), ...(tools.length ? ['--allowedTools', ...(opts.allow ?? tools)] : []),
+    ...(opts.deny?.length ? ['--disallowedTools', ...opts.deny] : []), ...(opts.budgetUsd ? ['--max-budget-usd', String(opts.budgetUsd)] : []),
     ...(opts.addDirs ?? []).flatMap(d => ['--add-dir', d]),
     ...(opts.persist ? [] : ['--no-session-persistence']), ...(opts.resume ? ['--resume', opts.resume] : []),
     '--system-prompt', system, '--json-schema', JSON.stringify(schema), '--', task]

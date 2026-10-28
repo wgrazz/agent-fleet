@@ -292,7 +292,7 @@ export function PullToRefresh() {
 // ---------- sidebar ----------
 
 export function Sidebar(props: {
-  route: string; needs: number; paused: number; folders: Folder[]; counts: Map<number, number>; lists: List[]; usage: Usage[]
+  route: string; needs: number; questions: number; paused: number; folders: Folder[]; counts: Map<number, number>; lists: List[]; usage: Usage[]
   newButton: ReactNode; push: ReactNode; onJarvis: () => void; onNewFolder: () => void; onFolderMenu: (f: Folder, x: number, y: number) => void
   onNewList: () => void; onNewChecklist: () => void; onListMenu: (l: List, x: number, y: number) => void; onDrop: (folderId: number | null, key: string) => void
 }) {
@@ -330,6 +330,7 @@ export function Sidebar(props: {
       {!checklists.length && <button className="ni ghost" onClick={props.onNewChecklist}>New checklist…</button>}
       {more.length > 0 && <details className="nav-more" open={more.some(l => props.route === `ideas/${l.name}`) || undefined}><summary className="sec">More</summary>{more.map(row)}</details>}
       <div className="sec">Library</div>
+      <a className={`ni ${props.route === 'team' ? 'on' : ''}`} href="#/team"><TeamIcon />Team{props.questions > 0 && <span className="badge">{props.questions}</span>}</a>
       <a className={`ni ${props.route === 'history' ? 'on' : ''}`} href="#/history"><ClockIcon />History</a>
       <a className={`ni ${props.route === 'paused' ? 'on' : ''}`} href="#/paused"><PauseIcon />Paused<b>{props.paused || ''}</b></a>
       <a className={`ni ${props.route === 'settings' ? 'on' : ''}`} href="#/settings"><GearIcon />Settings</a>
@@ -574,6 +575,7 @@ export const PlusIcon = () => svg(<path d="M8 3v10M3 8h10" stroke="currentColor"
 export const PauseIcon = () => svg(<><rect x="4" y="3" width="2.6" height="10" rx="1" fill="currentColor" /><rect x="9.4" y="3" width="2.6" height="10" rx="1" fill="currentColor" /></>, 12)
 export const TermIcon = () => svg(<><rect x="1.5" y="2.5" width="13" height="11" rx="2" stroke="currentColor" strokeWidth="1.5" fill="none" /><path d="m4.5 6.5 2 1.5-2 1.5M8 10h3" stroke="currentColor" strokeWidth="1.5" fill="none" strokeLinecap="round" /></>, 12)
 export const SendIcon = () => svg(<path d="M8 13V3M3.5 7.5 8 3l4.5 4.5" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round" />)
+export const TeamIcon = () => svg(<><circle cx="6" cy="5.5" r="2.3" stroke="currentColor" strokeWidth="1.5" fill="none" /><circle cx="11.5" cy="6.5" r="1.8" stroke="currentColor" strokeWidth="1.4" fill="none" /><path d="M2 13c.4-2.4 2-3.6 4-3.6s3.6 1.2 4 3.6M10.2 10c1.9-.3 3.4.7 3.8 2.8" stroke="currentColor" strokeWidth="1.5" fill="none" strokeLinecap="round" /></>)
 export const ClockIcon = () => svg(<><circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="1.6" fill="none" /><path d="M8 4.5V8l2.5 1.5" stroke="currentColor" strokeWidth="1.6" fill="none" strokeLinecap="round" /></>)
 export const FlagIcon = () => svg(<path d="M4 14V2.5M4 3h8l-2 3 2 3H4" stroke="#ff3b30" strokeWidth="1.6" fill="none" strokeLinejoin="round" strokeLinecap="round" />)
 export const CheckIcon = () => svg(<path d="m3 8.5 3 3 7-7" stroke="currentColor" strokeWidth="1.8" fill="none" strokeLinecap="round" strokeLinejoin="round" />)

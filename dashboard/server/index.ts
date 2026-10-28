@@ -9,6 +9,7 @@ import { improvePrompt, interviewPrompt, jarvisBrain, recommend, type JarvisActi
 import { changes } from './git.ts'
 import { conversations, transcript } from './history.ts'
 import * as ideas from './ideas.ts'
+import * as team from './roles.ts'
 import { notify, publicKey, pushAll, subscribe } from './push.ts'
 import { alerts, answerAsk, ingestHook, list, openAsk, poll, pollAsk, startPolling } from './state.ts'
 import { config, dailyBackup, db, FLEET_BIN, FLEET_DIR, saveConfig } from './store.ts'
@@ -178,6 +179,8 @@ async function sendQueued() {
 function usageText(u: Awaited<ReturnType<typeof usage>>) {
   return u.map(p => `${p.tool}: ${p.windows.length ? p.windows.map(w => `${w.label} ${w.pct}% used`).join(', ') : 'unknown'}`).join('\n')
 }
+
+const teamAgents = () => list().map(a => `- ${a.name} (${a.tool}, ${a.status.replace('_', ' ')})${a.task ? `: ${a.task.replace(/^\[[a-z]+\]\s*/, '')}` : ''}`).join('\n')
 
 function jarvisContext() {
   const agents = list().map(a => `- ${a.name} (${a.tool}, ${a.status === 'waiting' ? 'turn done, waiting on its own background job, not on you' : a.status.replace('_', ' ')})${a.message ? `: asking "${a.message}"` : a.task ? `: ${a.task.replace(/^\[[a-z]+\]\s*/, '')}` : ''}${a.quick_replies.length ? ` options: ${a.quick_replies.map(q => `${q.key}=${q.label}`).join(', ')}` : ''}${a.controllable ? '' : ' (read-only)'}`)
@@ -659,6 +662,43 @@ const routes: [string, RegExp, Route][] = [
     }
   }],
 
+  // Team: scheduled roles, their questions and tasks for you, and their settings
+  ['GET', /^\/api\/roles$/, async () => team.roles()],
+  ['GET', /^\/api\/roles\/([^/]+)$/, async (_req, [name]) => team.page(name) ?? (() => { throw new HttpError(404, `no role named ${name}`) })()],
+  ['PUT', /^\/api\/roles\/([^/]+)$/, async (req, [name]) => {
+    const b = await body(req)
+    const text = (k: string, max: number) => (typeof b[k] === 'string' && b[k].length <= max ? { [k]: b[k] } : {})
+    const flag = (k: string) => (typeof b[k] === 'boolean' ? { [k]: b[k] ? 1 : 0 } : {})
+    try {
+      return team.saveRole(name, {
+        ...text('title', 60), ...text('prompt', 20_000), ...text('schedule', 20), ...text('at', 5), ...text('model', 20), ...text('see', 40),
+        ...text('areas', 400), ...text('tools', 40), ...text('cwd', 1000), ...text('write_dir', 300), ...text('memory', 4000),
+        ...(typeof b.budget === 'number' ? { budget: b.budget } : {}), ...flag('enabled'), ...flag('git_commit'),
+      })
+    } catch (e) { throw new HttpError(400, (e as Error).message) }
+  }],
+  ['DELETE', /^\/api\/roles\/([^/]+)$/, async (_req, [name]) => { team.deleteRole(name); return { ok: true } }],
+  ['POST', /^\/api\/roles\/([^/]+)\/run$/, async (_req, [name]) => {
+    const r = team.roles().find(x => x.name === name)
+    if (!r) throw new HttpError(404, `no role named ${name}`)
+    if (r.running) throw new HttpError(409, `${r.title} is already running`)
+    team.runRole(name, teamAgents).catch(e => console.error(`role ${name}:`, e))
+    return { ok: true }
+  }],
+  ['POST', /^\/api\/roles\/([^/]+)\/messages$/, async (req, [name]) => {
+    if (!team.role(name)) throw new HttpError(404, `no role named ${name}`)
+    const text = str((await body(req)).text, 5000).trim()
+    if (!text) throw new HttpError(400, 'empty message')
+    return { id: team.message(name, text) }
+  }],
+  ['PATCH', /^\/api\/role-items\/(\d+)$/, async (req, [id]) => {
+    const b = await body(req)
+    try {
+      team.updateItem(int(id), { status: str(b.status, 20) || undefined, answer: typeof b.answer === 'string' ? b.answer.slice(0, 5000) : undefined })
+    } catch (e) { throw new HttpError(400, (e as Error).message) }
+    return { ok: true }
+  }],
+
   ['GET', /^\/api\/paused$/, async () => db.prepare('SELECT * FROM paused ORDER BY paused_at DESC').all()],
 
   ['POST', /^\/api\/paused\/(\d+)\/resume$/, async (_req, [id]) => {
@@ -867,6 +907,7 @@ if (import.meta.main) {
   alerts.on('alert', a => notify(a).catch(e => console.error('notify failed:', e)))
   startPolling()
   setInterval(() => resumeDue().catch(e => console.error('resume check failed:', e)), 30_000)
+  setInterval(() => team.due(teamAgents), 60_000)
   setInterval(() => sendQueued().catch(e => console.error('queue check failed:', e)), 2000)
   // once a day (and a minute after starting): newer Claude Code / Codex? tell your phone once per new version
   const updateCheck = () => checkAll().then(({ tools }) => {

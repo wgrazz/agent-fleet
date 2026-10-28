@@ -1,6 +1,6 @@
 import { StrictMode, useCallback, useEffect, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
-import { api, listGroups, onOffline, remember, Unauthorized, usePoll, type Conversation, type Folder, type Idea, type LeftMessage, type List, type LiveAgent, type Paused, type Profile, type Usage } from './api.ts'
+import { api, listGroups, onOffline, remember, Unauthorized, usePoll, type Conversation, type Folder, type Idea, type LeftMessage, type List, type LiveAgent, type Paused, type Profile, type Role, type Usage } from './api.ts'
 import { AgentList, AgentView, PausedList } from './agents.tsx'
 import {
   COLORS, Confirm, CustomForm, InterviewForm, isPhone, MenuHost, MicIcon, PullToRefresh, NameDialog, NewAgentButton, openMenu, ORDER, PauseUntil, Sidebar, UsageMeters,
@@ -10,14 +10,15 @@ import { ConversationView, HistoryPane, Jarvis, Palette, speak, spokenAlerts } f
 import { AREAS, notePrompt } from './areas.ts'
 import { AllNotesPane, ChecklistsPane, IdeaDetail, IdeasPane, ImportNotes, PRIORITY, PriorityPane, QuickCapture, SortMode } from './ideas.tsx'
 import { SettingsPage } from './settings.tsx'
+import { RoleView, TeamPane } from './team.tsx'
 import { FullTerminal } from './terminal.tsx'
 import './styles.css'
 
-// #/ · #/folder/ID · #/agent/NAME (what pushes open) · #/paused · #/ideas/LIST · #/idea/ID · #/checklists · #/history[/TOOL/ID] · #/more
-type View = 'all' | 'folder' | 'agent' | 'paused' | 'ideas' | 'idea' | 'history' | 'more' | 'jarvis' | 'settings' | 'prioritized' | 'everything' | 'checklists'
+// #/ · #/folder/ID · #/agent/NAME (what pushes open) · #/paused · #/ideas/LIST · #/idea/ID · #/checklists · #/team[/NAME] · #/history[/TOOL/ID] · #/more
+type View = 'all' | 'folder' | 'agent' | 'paused' | 'ideas' | 'idea' | 'history' | 'more' | 'jarvis' | 'settings' | 'prioritized' | 'everything' | 'checklists' | 'team'
 const parseRoute = () => {
   const [, view = '', a = '', b = ''] = location.hash.split('/')
-  const views: View[] = ['folder', 'agent', 'paused', 'ideas', 'idea', 'history', 'more', 'jarvis', 'settings', 'prioritized', 'everything', 'checklists']
+  const views: View[] = ['folder', 'agent', 'paused', 'ideas', 'idea', 'history', 'more', 'jarvis', 'settings', 'prioritized', 'everything', 'checklists', 'team']
   return { view: (views.includes(view as View) ? view : 'all') as View, a: decodeURIComponent(a), b: decodeURIComponent(b) }
 }
 const go = (hash: string) => (location.hash = hash)
@@ -54,6 +55,7 @@ function App() {
   const folders = usePoll<Folder[]>('/api/folders', 15000, fail)
   const lists = usePoll<List[]>('/api/lists', 5000, fail)
   const usage = usePoll<Usage[]>('/api/usage', 30000, fail)
+  const team = usePoll<Role[]>('/api/roles', route.view === 'team' ? 3000 : 20000, fail)
   const loadProfiles = useCallback(() => api.get<Profile[]>('/api/profiles').then(setProfiles).catch(fail), [fail])
 
   const allLists = lists.data ?? []
@@ -85,7 +87,7 @@ function App() {
     const on = () => {
       const r = parseRoute()
       setRoute(r)
-      if (['all', 'folder', 'paused', 'history', 'ideas', 'prioritized', 'everything', 'checklists'].includes(r.view)) lastListRoute.current = location.hash || '#/'
+      if (['all', 'folder', 'paused', 'history', 'ideas', 'prioritized', 'everything', 'checklists'].includes(r.view) || (r.view === 'team' && !r.a)) lastListRoute.current = location.hash || '#/'
       if (r.view === 'ideas' || r.view === 'prioritized' || r.view === 'everything') remember.set('ideaFrom', r.view)
     }
     addEventListener('hashchange', on)
@@ -108,6 +110,7 @@ function App() {
   }, [toast])
 
   const needs = all.filter(a => a.status === 'needs_you').length
+  const teamQuestions = (team.data ?? []).reduce((n, r) => n + r.questions, 0)
   // where you last were in Ideas (a list, All notes, Prioritized or a note), unless that note is gone
   const ideasTab = () => {
     const r = remember.get('ideasRoute'), id = r.match(/^#\/idea\/(\d+)/)?.[1]
@@ -326,8 +329,10 @@ function App() {
       onHeaderMenu={(x, y) => listMenu(listShown, x, y)} />
   } else if (middleView.view === 'checklists') {
     middle = <ChecklistsPane lists={allLists} onNew={newChecklist} />
+  } else if (middleView.view === 'team') {
+    middle = <TeamPane roles={team.data ?? []} selected={route.a} />
   } else if (middleView.view === 'more') {
-    middle = <MorePane usage={usage.data ?? []} push={push} />
+    middle = <MorePane usage={usage.data ?? []} push={push} questions={teamQuestions} />
   } else {
     const fid = middleView.view === 'folder' ? Number(middleView.a) : null
     const folder = folderList.find(f => f.id === fid)
@@ -342,6 +347,8 @@ function App() {
   let detail
   if (route.view === 'settings') {
     detail = <SettingsPage usage={usage.data ?? []} push={push} onBack={() => go(isPhone() ? '#/more' : lastListRoute.current)} onError={fail} />
+  } else if (route.view === 'team' && route.a) {
+    detail = <RoleView key={route.a} name={route.a} onBack={() => go('#/team')} onError={fail} onChanged={team.refresh} />
   } else if (route.view === 'jarvis') {
     detail = <main className="det jarvis-host"><Jarvis asPage autoTalk={route.a === 'talk'} onClose={() => go(lastListRoute.current)} onChanged={refreshAll} /></main>
   } else if (agentFromRoute) {
@@ -364,13 +371,13 @@ function App() {
     detail = <main className="det placeholder"><div className="empty big">{msg}<div className="hint">⌘K to jump anywhere · N new agent · J Jarvis</div></div></main>
   }
 
-  const hasDetail = !!(agentFromRoute || (route.view === 'idea' && ideaItem) || conversation || route.view === 'settings' || route.view === 'jarvis')
-  const tab = route.view === 'jarvis' ? 'jarvis' : onChecklist ? 'checklists' : ['ideas', 'idea', 'prioritized', 'everything'].includes(route.view) ? 'ideas' : ['more', 'settings', 'history'].includes(route.view) ? 'more' : 'agents'
+  const hasDetail = !!(agentFromRoute || (route.view === 'idea' && ideaItem) || conversation || route.view === 'settings' || route.view === 'jarvis' || (route.view === 'team' && route.a))
+  const tab = route.view === 'jarvis' ? 'jarvis' : onChecklist ? 'checklists' : ['ideas', 'idea', 'prioritized', 'everything'].includes(route.view) ? 'ideas' : ['more', 'settings', 'history', 'team'].includes(route.view) ? 'more' : 'agents'
   const brainDump = allLists.find(l => l.name === 'Brain Dump')
 
   return (
     <div className="app" data-view={hasDetail ? 'detail' : 'list'} data-jarvis={route.view === 'jarvis' || undefined}>
-      <Sidebar route={sideRoute} needs={needs} paused={paused.data?.length ?? 0} folders={folderList} counts={counts} lists={allLists}
+      <Sidebar route={sideRoute} needs={needs} questions={teamQuestions} paused={paused.data?.length ?? 0} folders={folderList} counts={counts} lists={allLists}
         usage={usage.data ?? []} newButton={newButton} push={push} onJarvis={() => setJarvisOpen(true)} onNewFolder={() => newFolder()} onFolderMenu={folderMenu}
         onNewList={() => setModal({ kind: 'name', title: 'New list', color: COLORS[6], action: 'Create', submit: (name, color) => { setModal(null); act(api.post('/api/lists', { name, color }), () => go(`#/ideas/${enc(name)}`)) } })}
         onNewChecklist={newChecklist}
@@ -383,7 +390,7 @@ function App() {
         <a href={ideasTab()} className={tab === 'ideas' ? 'on' : ''}>Ideas{(brainDump?.unsorted ?? 0) > 0 && <span className="badge gray">{brainDump!.unsorted}</span>}</a>
         <button className="tab-mic" onClick={() => go('#/jarvis')} aria-label="Jarvis"><MicIcon /></button>
         <a href="#/checklists" className={tab === 'checklists' ? 'on' : ''}>Checklists</a>
-        <a href="#/more" className={tab === 'more' ? 'on' : ''}>More</a>
+        <a href="#/more" className={tab === 'more' ? 'on' : ''}>More{teamQuestions > 0 && <span className="badge">{teamQuestions}</span>}</a>
       </nav>
       {['ideas', 'idea', 'prioritized', 'everything'].includes(route.view) && <IdeasListPicker lists={allLists} checklists={onChecklist} onNewChecklist={newChecklist} current={route.view === 'prioritized' ? '★' : route.view === 'everything' ? '*' : currentListName}
         onNew={() => setModal({ kind: 'name', title: 'New list', color: COLORS[6], action: 'Create', submit: (name, color) => { setModal(null); act(api.post('/api/lists', { name, color }), () => go(`#/ideas/${enc(name)}`)) } })} />}
@@ -478,11 +485,12 @@ function IdeasListPicker({ lists, current, onNew, checklists, onNewChecklist }: 
   )
 }
 
-function MorePane({ usage, push }: { usage: Usage[]; push: React.ReactNode }) {
+function MorePane({ usage, push, questions }: { usage: Usage[]; push: React.ReactNode; questions: number }) {
   return (
     <section className="list more">
       <div className="lh"><h4>More</h4></div>
       <div className="scroll">
+        <a className="it plain" href="#/team"><span className="nm">Team</span><span className="tm">{questions ? `${questions} question${questions > 1 ? 's' : ''} for you ›` : 'Scheduled roles ›'}</span></a>
         <a className="it plain" href="#/history"><span className="nm">History</span><span className="tm">Past conversations ›</span></a>
         <a className="it plain" href="#/settings"><span className="nm">Settings</span><span className="tm">Voice, budget, defaults ›</span></a>
         <div className="grp">Usage</div>

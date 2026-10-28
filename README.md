@@ -140,6 +140,21 @@ sessions, folders and ideas live in `~/.fleet/` (readable only by you). None of 
 **History.** Every past Claude and Codex conversation: search, read as chat, resume, file into
 folders.
 
+**Team.** Roles are assistants that run on a schedule, such as a daily chief of staff or a weekly clerk.
+Each run is a headless `claude -p` on your subscription. Each role's page has its questions for you
+(answer in place), its tasks for you (check off or dismiss), a box to tell it something, every run's
+summary and cost, and its settings:
+- instructions
+- schedule (day, week, month, every N days or hours, or manual only)
+- model and a dollar cap per run
+- what it sees: your open ideas (optionally only some areas) and running agents
+- what it can use: read files, the web, writing to one folder with an optional git commit
+- its memory, which it rewrites each run and you can edit
+
+A role only answers in JSON. The server writes its items and memory and sends a push, so a role
+never edits your ideas. Fleet's server runs the schedule, and a run missed while the Mac slept
+happens on wake.
+
 **Usage.** 5-hour and weekly limits:
 - Claude: from Claude Code's status line. Its `statusline.sh` writes `~/.fleet/claude-usage.json`.
 - Codex: from its session logs.

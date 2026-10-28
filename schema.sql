@@ -103,3 +103,52 @@ CREATE TABLE IF NOT EXISTS queued (
   text TEXT NOT NULL,
   at INTEGER NOT NULL
 );
+
+-- Team: roles are scheduled headless Claude runs (a chief of staff, a clerk…) that report back here.
+-- schedule uses the ideas repeat rules plus "hours:<n>"; '' means only when you press Run now.
+CREATE TABLE IF NOT EXISTS roles (
+  name TEXT PRIMARY KEY,
+  title TEXT NOT NULL,
+  prompt TEXT NOT NULL DEFAULT '',
+  schedule TEXT NOT NULL DEFAULT '',
+  at TEXT NOT NULL DEFAULT '07:00',
+  model TEXT NOT NULL DEFAULT 'sonnet',
+  budget REAL NOT NULL DEFAULT 1,
+  see TEXT NOT NULL DEFAULT 'ideas,agents', -- ideas, agents
+  areas TEXT NOT NULL DEFAULT '',          -- comma list; with any set, only ideas in those areas plus checklists
+  tools TEXT NOT NULL DEFAULT '',          -- read, web, write
+  cwd TEXT NOT NULL DEFAULT '',
+  write_dir TEXT NOT NULL DEFAULT '',      -- with the write tool: the only folder (inside cwd) it may change
+  git_commit INTEGER NOT NULL DEFAULT 0,   -- commit write_dir after each run
+  memory TEXT NOT NULL DEFAULT '',         -- the role's own notes, carried from run to run
+  enabled INTEGER NOT NULL DEFAULT 1,
+  next_run INTEGER,
+  created_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS role_runs (
+  id INTEGER PRIMARY KEY,
+  role TEXT NOT NULL,
+  started_at INTEGER NOT NULL,
+  finished_at INTEGER,
+  status TEXT NOT NULL DEFAULT 'running', -- running, ok, error
+  brief TEXT NOT NULL DEFAULT '',
+  error TEXT NOT NULL DEFAULT '',
+  cost REAL NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS role_runs_role ON role_runs (role, started_at);
+-- kind: task (for you to do), question (for you to answer), message (you → the role)
+-- status: open, done, dismissed, answered; seen = the role has read your answer, message or check-off
+CREATE TABLE IF NOT EXISTS role_items (
+  id INTEGER PRIMARY KEY,
+  role TEXT NOT NULL,
+  run_id INTEGER,
+  kind TEXT NOT NULL,
+  text TEXT NOT NULL,
+  detail TEXT NOT NULL DEFAULT '',
+  answer TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'open',
+  seen INTEGER NOT NULL DEFAULT 0,
+  created_at INTEGER NOT NULL,
+  closed_at INTEGER
+);
+CREATE INDEX IF NOT EXISTS role_items_role ON role_items (role, status);
