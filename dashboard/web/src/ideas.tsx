@@ -410,6 +410,30 @@ export function AllNotesPane({ items, lists, selected, onChange, onError, onMenu
   )
 }
 
+/** Checklists on their own: each one with how far along it is, the ones still going first and finished ones under Done. */
+export function ChecklistsPane({ lists, onNew }: { lists: List[]; onNew: () => void }) {
+  const all = lists.filter(l => l.kind === 'checklist')
+  const finished = (l: List) => l.open === 0 && l.done > 0
+  const row = (l: List) => (
+    <a key={l.id} className="it plain checklist-row" href={`#/ideas/${encodeURIComponent(l.name)}`}>
+      <span className="nm"><span className="sq round" style={{ background: l.color }} />{l.name}</span>
+      <span className="tm">{l.done}/{l.open + l.done}</span>
+      <span className="meter"><span style={{ width: `${l.open + l.done ? (100 * l.done) / (l.open + l.done) : 0}%` }} /></span>
+    </a>
+  )
+  return (
+    <section className="list ideas">
+      <div className="lh"><h4>Checklists</h4><button className="btn small" onClick={onNew}>+ New</button></div>
+      <div className="scroll">
+        {all.filter(l => !finished(l)).map(row)}
+        {all.some(finished) && <div className="grp">Done</div>}
+        {all.filter(finished).map(row)}
+        {!all.length && <div className="empty">No checklists yet. Agents make them with <code>fleet checklist</code>, or tap + New.</div>}
+      </div>
+    </section>
+  )
+}
+
 /** Every open idea that has a priority, across all lists, most important first. */
 export function PriorityPane({ items, selected, onChange, onError, onMenu }: {
   items: Idea[]; selected: number | null; onChange: () => void; onError: (e: Error) => void; onMenu: (i: Idea, x: number, y: number) => void

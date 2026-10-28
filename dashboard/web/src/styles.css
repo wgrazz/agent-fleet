@@ -279,6 +279,8 @@ details.ai-note { display: block; }
 .chip-f.add { background: none; border: 1px dashed var(--line); color: var(--faint); }
 .ideas-chips { display: none; }
 .it.plain { grid-template-columns: 1fr auto; }
+.checklist-row .nm { display: flex; gap: 8px; align-items: center; }
+.checklist-row .meter { grid-column: 1 / -1; margin-top: 6px; }
 
 /* agent view tabs */
 .tabs-row { display: flex; gap: 2px; padding: 8px 14px 0; }

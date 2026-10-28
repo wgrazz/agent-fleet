@@ -8,16 +8,16 @@ import {
 } from './components.tsx'
 import { ConversationView, HistoryPane, Jarvis, Palette, speak, spokenAlerts } from './extras.tsx'
 import { AREAS, notePrompt } from './areas.ts'
-import { AllNotesPane, IdeaDetail, IdeasPane, ImportNotes, PRIORITY, PriorityPane, QuickCapture, SortMode } from './ideas.tsx'
+import { AllNotesPane, ChecklistsPane, IdeaDetail, IdeasPane, ImportNotes, PRIORITY, PriorityPane, QuickCapture, SortMode } from './ideas.tsx'
 import { SettingsPage } from './settings.tsx'
 import { FullTerminal } from './terminal.tsx'
 import './styles.css'
 
-// #/ · #/folder/ID · #/agent/NAME (what pushes open) · #/paused · #/ideas/LIST · #/idea/ID · #/history[/TOOL/ID] · #/more
-type View = 'all' | 'folder' | 'agent' | 'paused' | 'ideas' | 'idea' | 'history' | 'more' | 'jarvis' | 'settings' | 'prioritized' | 'everything'
+// #/ · #/folder/ID · #/agent/NAME (what pushes open) · #/paused · #/ideas/LIST · #/idea/ID · #/checklists · #/history[/TOOL/ID] · #/more
+type View = 'all' | 'folder' | 'agent' | 'paused' | 'ideas' | 'idea' | 'history' | 'more' | 'jarvis' | 'settings' | 'prioritized' | 'everything' | 'checklists'
 const parseRoute = () => {
   const [, view = '', a = '', b = ''] = location.hash.split('/')
-  const views: View[] = ['folder', 'agent', 'paused', 'ideas', 'idea', 'history', 'more', 'jarvis', 'settings', 'prioritized', 'everything']
+  const views: View[] = ['folder', 'agent', 'paused', 'ideas', 'idea', 'history', 'more', 'jarvis', 'settings', 'prioritized', 'everything', 'checklists']
   return { view: (views.includes(view as View) ? view : 'all') as View, a: decodeURIComponent(a), b: decodeURIComponent(b) }
 }
 const go = (hash: string) => (location.hash = hash)
@@ -75,14 +75,18 @@ function App() {
     if (found) setIdeaItem(found)
     else api.get<Idea[]>('/api/ideas').then(xs => setIdeaItem(xs.find(i => i.id === Number(route.a)) ?? null)).catch(fail)
   }, [route.view, route.a, ideas.data]) // eslint-disable-line react-hooks/exhaustive-deps
+  // checklists are their own tab: the overview, or a checklist (or one of its steps) is on screen
+  const onChecklist = route.view === 'checklists' || allLists.find(l => l.name === currentListName)?.kind === 'checklist'
+  useEffect(() => { // the Ideas tab comes back here; a step waits until its note has loaded so we know which tab it's in
+    if (['ideas', 'idea', 'prioritized', 'everything'].includes(route.view) && !onChecklist && (route.view !== 'idea' || ideaItem?.id === Number(route.a))) remember.set('ideasRoute', location.hash)
+  }, [route, onChecklist, ideaItem])
 
   useEffect(() => {
     const on = () => {
       const r = parseRoute()
       setRoute(r)
-      if (['all', 'folder', 'paused', 'history', 'ideas', 'prioritized', 'everything'].includes(r.view)) lastListRoute.current = location.hash || '#/'
+      if (['all', 'folder', 'paused', 'history', 'ideas', 'prioritized', 'everything', 'checklists'].includes(r.view)) lastListRoute.current = location.hash || '#/'
       if (r.view === 'ideas' || r.view === 'prioritized' || r.view === 'everything') remember.set('ideaFrom', r.view)
-      if (['ideas', 'idea', 'prioritized', 'everything'].includes(r.view)) remember.set('ideasRoute', location.hash) // the Ideas tab comes back here
     }
     addEventListener('hashchange', on)
     loadProfiles()
@@ -199,6 +203,7 @@ function App() {
       yes: () => act(api.del(`/api/folders/${f.id}`), () => route.view === 'folder' && Number(route.a) === f.id && go('#/')) }) },
   ], f.name)
 
+  const newChecklist = () => setModal({ kind: 'name', title: 'New checklist', color: COLORS[6], action: 'Create', submit: (name, color) => { setModal(null); act(api.post('/api/lists', { name, color, kind: 'checklist' }), () => go(`#/ideas/${enc(name)}`)) } })
   const pinned = (l: List) => l.name === 'Brain Dump'
   const listMenu = (l: List, x: number, y: number) => openMenu(x, y, [
     ...(!pinned(l) ? [{ label: 'Rename…', onClick: () => setModal({ kind: 'name', title: 'Rename list', initial: l.name, color: l.color, submit: (name: string, color: string) => {
@@ -213,7 +218,7 @@ function App() {
     { label: 'Import from Apple Notes…', onClick: () => setModal({ kind: 'import' }) },
     ...(!pinned(l) ? ['sep' as const, { label: 'Delete list…', danger: true, onClick: () => setModal({ kind: 'confirm', title: `Delete ${l.name}?`, action: 'Delete',
       text: `Open items move to Brain Dump; the ${l.done} done item${l.done === 1 ? '' : 's'} go with the list.`,
-      yes: () => act(api.del(`/api/lists/${l.id}`), () => go('#/ideas/Brain%20Dump')) }) }] : []),
+      yes: () => act(api.del(`/api/lists/${l.id}`), () => go(l.kind === 'checklist' ? '#/checklists' : '#/ideas/Brain%20Dump')) }) }] : []),
   ], l.name)
 
   // a list passes its own Copy items (so its Undo covers Copy & check off); other views get these
@@ -319,6 +324,8 @@ function App() {
     middle = <IdeasPane list={listShown} items={ideas.data ?? []} selected={route.view === 'idea' ? Number(route.a) : null}
       onChange={() => { ideas.refresh(); lists.refresh() }} onError={fail} onSort={runSort} onMenu={ideaMenu}
       onHeaderMenu={(x, y) => listMenu(listShown, x, y)} />
+  } else if (middleView.view === 'checklists') {
+    middle = <ChecklistsPane lists={allLists} onNew={newChecklist} />
   } else if (middleView.view === 'more') {
     middle = <MorePane usage={usage.data ?? []} push={push} />
   } else {
@@ -358,7 +365,7 @@ function App() {
   }
 
   const hasDetail = !!(agentFromRoute || (route.view === 'idea' && ideaItem) || conversation || route.view === 'settings' || route.view === 'jarvis')
-  const tab = route.view === 'jarvis' ? 'jarvis' : ['ideas', 'idea', 'prioritized', 'everything'].includes(route.view) ? 'ideas' : route.view === 'history' ? 'history' : ['more', 'settings'].includes(route.view) ? 'more' : 'agents'
+  const tab = route.view === 'jarvis' ? 'jarvis' : onChecklist ? 'checklists' : ['ideas', 'idea', 'prioritized', 'everything'].includes(route.view) ? 'ideas' : ['more', 'settings', 'history'].includes(route.view) ? 'more' : 'agents'
   const brainDump = allLists.find(l => l.name === 'Brain Dump')
 
   return (
@@ -366,7 +373,7 @@ function App() {
       <Sidebar route={sideRoute} needs={needs} paused={paused.data?.length ?? 0} folders={folderList} counts={counts} lists={allLists}
         usage={usage.data ?? []} newButton={newButton} push={push} onJarvis={() => setJarvisOpen(true)} onNewFolder={() => newFolder()} onFolderMenu={folderMenu}
         onNewList={() => setModal({ kind: 'name', title: 'New list', color: COLORS[6], action: 'Create', submit: (name, color) => { setModal(null); act(api.post('/api/lists', { name, color }), () => go(`#/ideas/${enc(name)}`)) } })}
-        onNewChecklist={() => setModal({ kind: 'name', title: 'New checklist', color: COLORS[6], action: 'Create', submit: (name, color) => { setModal(null); act(api.post('/api/lists', { name, color, kind: 'checklist' }), () => go(`#/ideas/${enc(name)}`)) } })}
+        onNewChecklist={newChecklist}
         onListMenu={listMenu} onDrop={(fid, key) => key && act(api.put('/api/placements', { key, folder_id: fid }))} />
       {middle}
       {detail}
@@ -375,10 +382,10 @@ function App() {
         <a href={lastListRoute.current.startsWith('#/folder') ? lastListRoute.current : '#/'} className={tab === 'agents' ? 'on' : ''}>Agents{needs > 0 && <span className="badge">{needs}</span>}</a>
         <a href={ideasTab()} className={tab === 'ideas' ? 'on' : ''}>Ideas{(brainDump?.unsorted ?? 0) > 0 && <span className="badge gray">{brainDump!.unsorted}</span>}</a>
         <button className="tab-mic" onClick={() => go('#/jarvis')} aria-label="Jarvis"><MicIcon /></button>
-        <a href="#/history" className={tab === 'history' ? 'on' : ''}>History</a>
+        <a href="#/checklists" className={tab === 'checklists' ? 'on' : ''}>Checklists</a>
         <a href="#/more" className={tab === 'more' ? 'on' : ''}>More</a>
       </nav>
-      {['ideas', 'idea', 'prioritized', 'everything'].includes(route.view) && <IdeasListPicker lists={allLists} current={route.view === 'prioritized' ? '★' : route.view === 'everything' ? '*' : currentListName}
+      {['ideas', 'idea', 'prioritized', 'everything'].includes(route.view) && <IdeasListPicker lists={allLists} checklists={onChecklist} onNewChecklist={newChecklist} current={route.view === 'prioritized' ? '★' : route.view === 'everything' ? '*' : currentListName}
         onNew={() => setModal({ kind: 'name', title: 'New list', color: COLORS[6], action: 'Create', submit: (name, color) => { setModal(null); act(api.post('/api/lists', { name, color }), () => go(`#/ideas/${enc(name)}`)) } })} />}
 
       {jarvisOpen && route.view !== 'jarvis' && <Jarvis onClose={() => setJarvisOpen(false)} onChanged={refreshAll} />}
@@ -439,20 +446,27 @@ function FolderChip({ f, on, onMenu }: { f: Folder; on: boolean; onMenu: (x: num
   return <a className={`chip-f ${on ? 'on' : ''}`} href={`#/folder/${f.id}`} {...hold}><span className="sq" style={{ background: f.color }} />{f.name}</a>
 }
 
-function IdeasListPicker({ lists, current, onNew }: { lists: List[]; current: string; onNew: () => void }) {
-  useEffect(() => { if (current && current !== '★' && current !== '*') remember.set('lastList', current) }, [current])
+/** On a checklist it lists only checklists, so checklists never mix into Ideas. */
+function IdeasListPicker({ lists, current, onNew, checklists, onNewChecklist }: { lists: List[]; current: string; onNew: () => void; checklists: boolean; onNewChecklist: () => void }) {
+  useEffect(() => { if (current && current !== '★' && current !== '*' && !checklists) remember.set('lastList', current) }, [current, checklists])
   const cur = lists.find(l => l.name === current)
-  const pick = (e: React.MouseEvent) => openMenu(e.clientX, e.clientY, [
+  const pick = (e: React.MouseEvent) => openMenu(e.clientX, e.clientY, checklists ? [
+    { label: 'All checklists', onClick: () => { location.hash = '#/checklists' } },
+    'sep',
+    ...lists.filter(l => l.kind === 'checklist').map(l => ({ label: l.name, swatch: l.color, checked: l.name === current, onClick: () => { location.hash = `#/ideas/${enc(l.name)}` } })),
+    'sep',
+    { label: '+ New checklist', onClick: onNewChecklist },
+  ] : [
     { label: 'Prioritized', checked: current === '★', onClick: () => { location.hash = '#/prioritized' } },
     { label: 'All notes', checked: current === '*', onClick: () => { location.hash = '#/everything' } },
     'sep',
-    ...listGroups(lists).filter(g => g.length).flatMap((g, n) => [...(n ? ['sep' as const] : []), ...g.map(l => ({
-      label: l.name + (l.name === 'Brain Dump' && l.unsorted > 0 ? ` · ${l.unsorted} to sort` : '') + (l.kind === 'checklist' ? ' · checklist' : '') + (l.section ? ` · ${l.section}` : ''),
+    ...listGroups(lists.filter(l => l.kind !== 'checklist')).filter(g => g.length).flatMap((g, n) => [...(n ? ['sep' as const] : []), ...g.map(l => ({
+      label: l.name + (l.name === 'Brain Dump' && l.unsorted > 0 ? ` · ${l.unsorted} to sort` : '') + (l.section ? ` · ${l.section}` : ''),
       swatch: l.color, checked: l.name === current, onClick: () => { location.hash = `#/ideas/${enc(l.name)}` },
     }))]),
     'sep',
     { label: '+ New list', onClick: onNew },
-  ], 'Lists')
+  ], checklists ? 'Checklists' : 'Lists')
   return (
     <div className="ideas-chips">
       <button className="list-pick" onClick={pick}>
@@ -469,6 +483,7 @@ function MorePane({ usage, push }: { usage: Usage[]; push: React.ReactNode }) {
     <section className="list more">
       <div className="lh"><h4>More</h4></div>
       <div className="scroll">
+        <a className="it plain" href="#/history"><span className="nm">History</span><span className="tm">Past conversations ›</span></a>
         <a className="it plain" href="#/settings"><span className="nm">Settings</span><span className="tm">Voice, budget, defaults ›</span></a>
         <div className="grp">Usage</div>
         <UsageMeters usage={usage} />
