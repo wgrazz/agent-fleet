@@ -655,23 +655,65 @@ html.holding, html.holding *, .it, .it *, .idea-body, .idea-body *, .chip-f, .ni
 .queued.left .queued-text { cursor: pointer; }
 .grp-toggle { display: flex; width: 100%; text-align: left; }
 
-/* Team: roles and their pages */
+/* Team: roles and their desks */
 .role-row .pv { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
 .role-row .badge { grid-row: 1; grid-column: 3; }
-.role-row .tm { grid-column: 2; }
-.role-row .nm { grid-column: 2; }
+.role-row .tm, .role-row .nm { grid-column: 2; }
 .team .role-row { grid-template-columns: 0 minmax(0, 1fr) auto; column-gap: 0; }
 .role .set-sec { max-width: 720px; }
-.role-q { display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; border-radius: 10px; background: var(--chip); }
-.role-q .hint, .role-task .hint { margin: 2px 0 0; line-height: 1.45; }
+.role .set-sec:last-child { border-bottom: 0; }
+.sec-head { display: flex; align-items: center; gap: 8px; justify-content: space-between; }
+.brief { max-width: 720px; margin: 10px 0 4px; padding: 14px 16px; border-radius: 14px; background: var(--chip); }
+.brief-when { font-size: 11.5px; font-weight: 600; color: var(--faint); text-transform: uppercase; letter-spacing: .04em; }
+.brief-text { font-size: 16px; line-height: 1.45; margin-top: 4px; font-weight: 500; }
+.brief.error .brief-text { color: var(--dead); }
+.card { display: flex; flex-direction: column; gap: 8px; padding: 12px; border-radius: 12px; border: 1px solid var(--line); background: var(--bg); }
+.card.pick { border-color: var(--accent); }
+.card-kicker { font-size: 11px; font-weight: 600; color: var(--faint); text-transform: uppercase; letter-spacing: .04em; }
+.card-title { font-weight: 600; line-height: 1.4; }
+.card-why { color: var(--dim); font-size: 13px; line-height: 1.45; }
+.card-acts { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; }
+.card-acts .btn { padding: 6px 14px; font-size: 13px; }
+.note { display: flex; flex-direction: column; gap: 3px; padding: 9px 11px; border-radius: 9px; background: var(--chip); color: var(--text); text-decoration: none; flex: 1; min-width: 0; }
+.note:hover { background: var(--hover); }
+.note-text { font-size: 14.5px; font-weight: 500; line-height: 1.4; }
+.note-list { display: flex; gap: 6px; align-items: center; font-size: 11.5px; color: var(--faint); }
+.note.done .note-text { text-decoration: line-through; color: var(--faint); }
+.note.gone { color: var(--faint); font-style: italic; }
+.set-body label.merge-row { display: flex; flex-direction: row; gap: 8px; align-items: center; cursor: pointer; font-weight: 400; }
+.merge-row input { flex: none; }
+.merge-row:not(.keep) .note { opacity: .75; }
+.merge-text { display: flex; flex-direction: column; gap: 4px; font-size: 12px; font-weight: 500; color: var(--dim); }
+.merge-text textarea, .role-comp textarea, textarea.role-prompt { border: 1px solid var(--line); background: var(--bg); border-radius: 8px; padding: 7px 9px; font-size: 13.5px; resize: vertical; width: 100%; box-sizing: border-box; color: var(--text); }
+textarea.role-prompt { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px; line-height: 1.5; }
+.prompt-peek { text-align: left; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; line-height: 1.5; color: var(--dim); padding: 8px 10px; border-radius: 8px; background: var(--chip);
+  display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; white-space: pre-wrap; }
+.handled { display: flex; gap: 8px; align-items: center; justify-content: space-between; font-size: 13px; color: var(--dim); }
 .role-text { min-width: 0; flex: 1; line-height: 1.4; }
 .role-task { display: flex; gap: 10px; align-items: flex-start; }
+.role-task .hint { margin: 2px 0 0; line-height: 1.45; }
 .role-comp { display: flex; flex-direction: column; gap: 6px; }
 .role-comp .set-row { justify-content: flex-end; }
-.role-comp textarea, textarea.role-prompt { border: 1px solid var(--line); background: var(--bg); border-radius: 8px; padding: 7px 9px; font-size: 13.5px; resize: vertical; width: 100%; box-sizing: border-box; }
-textarea.role-prompt { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px; line-height: 1.5; }
 .role-run { padding: 6px 0; border-top: 1px solid var(--line); line-height: 1.45; }
-.role-run:first-child { border-top: 0; }
 .role-run.error > div:last-child { color: var(--dead); }
 .role-closed summary { cursor: pointer; padding: 6px 0; }
-@media (max-width: 700px) { .role-comp textarea, textarea.role-prompt { font-size: 16px; } }
+.deadline { display: flex; gap: 12px; align-items: center; padding: 10px 12px; border-radius: 12px; border: 1px solid var(--line); }
+.deadline.soon { border-color: var(--need); }
+.deadline.done { opacity: .6; }
+.countdown { width: 64px; flex: none; text-align: center; font-size: 22px; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1.1; }
+.countdown span { display: block; font-size: 10.5px; font-weight: 600; color: var(--faint); text-transform: uppercase; letter-spacing: .03em; }
+.deadline.needs_info .countdown, .deadline.soon .countdown { color: var(--need-text); }
+.deadline-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.deadline-body a { color: var(--accent); }
+.waiting { align-self: flex-start; }
+.answer { font-size: 13.5px; line-height: 1.45; }
+.file-row { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; padding: 9px 12px; border-radius: 10px; background: var(--chip); text-align: left; }
+.file-row:hover { background: var(--hover); }
+.fact { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.fact .hint { min-width: 150px; }
+.fact input { border: 1px solid var(--line); background: var(--bg); border-radius: 8px; padding: 5px 8px; color: var(--text); }
+@media (max-width: 700px) {
+  .merge-text textarea, .role-comp textarea, textarea.role-prompt, .fact input { font-size: 16px; }
+  .countdown { width: 48px; font-size: 19px; }
+  .deadline { flex-wrap: wrap; }
+}

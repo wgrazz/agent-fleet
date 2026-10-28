@@ -1,12 +1,17 @@
-// Team: your scheduled roles. Each one's page has its questions for you, its tasks for you, a box to tell it
-// something, what it did on each run, and its settings. A role reads your answers and messages on its next run.
+// Team: your scheduled roles, each with a desk built for its job. The chief of staff's desk is cards you accept or
+// reject (today's picks, notes to merge or close, work to hand to an agent); the clerk's is the company's deadline
+// calendar, paperwork in flight, drafts, questions for a CPA or lawyer and what it knows. Every role reads what you
+// do here on its next run.
 import { useState, type ReactNode } from 'react'
-import { api, usePoll, type Role, type RoleItem, type RoleRun } from './api.ts'
+import { api, usePoll, type ClerkBoard, type Proposal, type Role, type RoleItem, type RoleNote, type RoleRun } from './api.ts'
 import { AREAS } from './areas.ts'
+import { FileViewer } from './files.tsx'
 
 const enc = encodeURIComponent
 const when = (s: number) => new Date(s * 1000).toLocaleString([], { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
 const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
+const DESK_NAMES: Record<Role['kind'], string> = { chief: 'Chief of staff desk', clerk: 'Company clerk desk', custom: 'General' }
+const data = (i: RoleItem) => JSON.parse(i.data || '{}') as Proposal
 
 /** "Every Monday at 07:00", in words. */
 export function scheduleText(r: Pick<Role, 'schedule' | 'at' | 'enabled'>) {
@@ -24,25 +29,29 @@ export function TeamPane({ roles, selected }: { roles: Role[]; selected: string 
     <section className="list team">
       <div className="lh"><h4>Team</h4><a className="btn small" href="#/team/new">+ New</a></div>
       <div className="scroll">
-        {roles.map(r => (
-          <a key={r.name} className={`it plain role-row ${selected === r.name ? 'on' : ''}`} href={`#/team/${enc(r.name)}`}>
-            <span className="nm">{r.title}</span>
-            <span className="tm">{r.running ? 'Running…' : scheduleText(r)}</span>
-            {r.questions > 0 && <span className="badge">{r.questions}</span>}
-            <span className="pv">{r.last?.status === 'error' ? `Last run failed: ${r.last.error}` : r.last?.brief || 'Not run yet'}</span>
-          </a>
-        ))}
-        {!roles.length && <div className="empty">No roles yet. A role is an assistant that runs on a schedule and reports back here. Tap + New.</div>}
+        {roles.map(r => {
+          const waiting = r.questions + r.cards
+          return (
+            <a key={r.name} className={`it plain role-row ${selected === r.name ? 'on' : ''}`} href={`#/team/${enc(r.name)}`}>
+              <span className="nm">{r.title}</span>
+              <span className="tm">{r.running ? 'Working…' : scheduleText(r)}</span>
+              {waiting > 0 && <span className="badge">{waiting}</span>}
+              <span className="pv">{r.last?.status === 'error' ? `Last run failed: ${r.last.error}` : r.last?.brief || 'Not run yet'}</span>
+            </a>
+          )
+        })}
+        {!roles.length && <div className="empty">No roles yet. A role is an assistant that works on a schedule and reports back here. Tap + New.</div>}
       </div>
     </section>
   )
 }
 
-function Sec({ title, hint, children }: { title: string; hint?: ReactNode; children: ReactNode }) {
-  return <section className="set-sec"><h3>{title}</h3>{hint && <p className="hint">{hint}</p>}<div className="set-body">{children}</div></section>
+function Sec({ title, hint, children, right }: { title: string; hint?: ReactNode; children: ReactNode; right?: ReactNode }) {
+  return <section className="set-sec"><div className="sec-head"><h3>{title}</h3>{right}</div>{hint && <p className="hint">{hint}</p>}<div className="set-body">{children}</div></section>
 }
 
-type Page = { role: Role; items: RoleItem[]; runs: RoleRun[] }
+type Page = { role: Role; items: RoleItem[]; runs: RoleRun[]; notes: Record<number, RoleNote> }
+type Ctx = Page & { name: string; act: (p: Promise<unknown>) => Promise<void>; onError: (e: Error) => void }
 
 export function RoleView({ name, onBack, onError, onChanged }: { name: string; onBack: () => void; onError: (e: Error) => void; onChanged: () => void }) {
   const page = usePoll<Page>(`/api/roles/${enc(name)}`, 3000, onError)
@@ -50,81 +59,307 @@ export function RoleView({ name, onBack, onError, onChanged }: { name: string; o
   const act = (p: Promise<unknown>) => p.then(() => { page.refresh(); onChanged() }).catch(onError)
   if (name === 'new') return <main className="det settings"><RoleSettings onBack={onBack} onError={onError} onSaved={r => { onChanged(); location.hash = `#/team/${enc(r.name)}` }} /></main>
   if (!page.data) return <main className="det settings"><div className="empty">{page.error || 'Loading…'}</div></main>
-  const { role: r, items, runs } = page.data
+  const { role: r, runs } = page.data
   if (settings) return <main className="det settings"><RoleSettings role={r} onBack={() => setSettings(false)} onError={onError} onSaved={() => { setSettings(false); act(Promise.resolve()) }} /></main>
-  const open = (kind: string) => items.filter(i => i.kind === kind && i.status === 'open')
-  const closed = items.filter(i => i.status !== 'open' || i.kind === 'message')
+  const ctx: Ctx = { ...page.data, name, act, onError }
+  const last = runs.find(x => x.status !== 'running')
   return (
-    <main className="det settings role">
+    <main className={`det settings role desk-${r.kind}`}>
       <header className="dh">
         <button className="back" onClick={onBack} aria-label="Back">‹</button>
         <div className="dh-text"><div className="t">{r.title}</div>
           <div className="meta">{scheduleText(r)}{r.enabled && r.next_run ? ` · next ${when(r.next_run)}` : ''}</div></div>
         <button className="btn small" onClick={() => setSettings(true)}>Settings</button>
-        <button className="btn small primary" disabled={r.running} onClick={() => act(api.post(`/api/roles/${enc(name)}/run`))}>{r.running ? 'Running…' : 'Run now'}</button>
+        <button className="btn small primary" disabled={r.running} onClick={() => act(api.post(`/api/roles/${enc(name)}/run`))}>{r.running ? 'Working…' : 'Run now'}</button>
       </header>
       <div className="set-scroll">
-        <Sec title={`Questions for you${open('question').length ? ` · ${open('question').length}` : ''}`} hint={open('question').length ? `${r.title} reads your answers on its next run.` : undefined}>
-          {open('question').map(q => <QuestionCard key={q.id} q={q} onAnswer={answer => act(api.patch(`/api/role-items/${q.id}`, { answer }))}
-            onSkip={() => act(api.patch(`/api/role-items/${q.id}`, { status: 'dismissed' }))} />)}
-          {!open('question').length && <p className="hint">Nothing to answer.</p>}
-        </Sec>
-        <Sec title={`For you to do${open('task').length ? ` · ${open('task').length}` : ''}`}>
-          {open('task').map(t => (
-            <div key={t.id} className="role-task">
-              <button className="check" role="checkbox" aria-checked={false} aria-label="Done" onClick={() => act(api.patch(`/api/role-items/${t.id}`, { status: 'done' }))} />
-              <div className="role-text"><div>{t.text}</div>{t.detail && <div className="hint">{t.detail}</div>}</div>
-              <button className="btn small ghost" aria-label="Not needed" title="Not needed" onClick={() => act(api.patch(`/api/role-items/${t.id}`, { status: 'dismissed' }))}>✕</button>
-            </div>
-          ))}
-          {!open('task').length && <p className="hint">Nothing waiting on you.</p>}
-        </Sec>
+        <div className={`brief ${last?.status === 'error' ? 'error' : ''}`}>
+          <div className="brief-when">{r.running ? `${r.title} is working on it…` : last ? when(last.finished_at ?? last.started_at) : 'Not run yet'}</div>
+          <div className="brief-text">{last ? (last.status === 'error' ? `Didn't finish: ${last.error}` : last.brief) : `Press Run now to see what ${r.title} does.`}</div>
+        </div>
+        {r.kind === 'chief' ? <ChiefDesk {...ctx} /> : r.kind === 'clerk' ? <ClerkDesk {...ctx} /> : <Questions {...ctx} />}
+        <Tasks {...ctx} />
         <Sec title={`Tell ${r.title} something`} hint="A correction, a fact it needs, or something to look into. It reads this on its next run; Run now to have it read it right away.">
-          <Composer placeholder="e.g. My CPA is Jane at Smith & Co; ask before drafting tax forms" button="Send"
-            onSend={text => act(api.post(`/api/roles/${enc(name)}/messages`, { text }))} />
+          <Composer placeholder="e.g. Ignore the Someday list" button="Send" onSend={text => act(api.post(`/api/roles/${enc(name)}/messages`, { text }))} />
         </Sec>
-        <Sec title="Activity">
-          {runs.map(run => (
-            <div key={run.id} className={`role-run ${run.status}`}>
-              <div className="tm">{when(run.started_at)}{run.status === 'running' ? ' · running…' : run.cost ? ` · $${run.cost.toFixed(2)}` : ''}</div>
-              <div>{run.status === 'error' ? `Didn't finish: ${run.error}` : run.brief}</div>
-            </div>
-          ))}
-          {!runs.length && <p className="hint">Not run yet. Run now to try it.</p>}
-          {closed.length > 0 && (
-            <details className="role-closed"><summary className="hint">Answered, done and sent · {closed.length}</summary>
-              {closed.map(i => (
-                <div key={i.id} className="role-run">
-                  <div className="tm">{i.kind === 'message' ? 'You said' : i.status === 'answered' ? 'You answered' : i.status === 'done' ? 'Done' : 'Not needed'}{i.seen ? '' : ' · not read yet'}</div>
-                  <div>{i.text}{i.answer && <><br /><b>{i.answer}</b></>}</div>
-                  {i.kind !== 'message' && <button className="btn small ghost" onClick={() => act(api.patch(`/api/role-items/${i.id}`, { status: 'open', answer: '' }))}>Reopen</button>}
-                </div>
-              ))}
-            </details>
-          )}
-        </Sec>
+        <Activity {...ctx} />
       </div>
     </main>
   )
 }
 
-function QuestionCard({ q, onAnswer, onSkip }: { q: RoleItem; onAnswer: (a: string) => void; onSkip: () => void }) {
+// ---------- pieces every desk has ----------
+
+function Questions({ items, act, role, title = 'Questions for you', hint }: Ctx & { title?: string; hint?: string }) {
+  const qs = items.filter(i => i.kind === 'question' && i.status === 'open')
+  if (!qs.length && role.kind !== 'custom') return null
   return (
-    <div className="role-q">
-      <div className="role-text"><b>{q.text}</b>{q.detail && <div className="hint">{q.detail}</div>}</div>
-      <Composer placeholder="Your answer" button="Answer" onSend={onAnswer} extra={<button className="btn small ghost" onClick={onSkip}>Skip</button>} />
+    <Sec title={`${title}${qs.length ? ` · ${qs.length}` : ''}`} hint={qs.length ? hint ?? `${role.title} reads your answers on its next run.` : undefined}>
+      {qs.map(q => (
+        <div key={q.id} className="card">
+          <div className="card-title">{q.text}</div>
+          {q.detail && <div className="card-why">{q.detail}</div>}
+          <Composer placeholder="Your answer" button="Answer" onSend={answer => act(api.patch(`/api/role-items/${q.id}`, { answer }))}
+            extra={<button className="btn small ghost" onClick={() => act(api.patch(`/api/role-items/${q.id}`, { status: 'dismissed' }))}>Skip</button>} />
+        </div>
+      ))}
+      {!qs.length && <p className="hint">Nothing to answer.</p>}
+    </Sec>
+  )
+}
+
+function Tasks({ items, act, role }: Ctx) {
+  const ts = items.filter(i => i.kind === 'task' && i.status === 'open')
+  if (!ts.length && role.kind !== 'custom') return null
+  return (
+    <Sec title={`For you to do${ts.length ? ` · ${ts.length}` : ''}`}>
+      {ts.map(t => (
+        <div key={t.id} className="role-task">
+          <button className="check" role="checkbox" aria-checked={false} aria-label="Done" onClick={() => act(api.patch(`/api/role-items/${t.id}`, { status: 'done' }))} />
+          <div className="role-text"><div>{t.text}</div>{t.detail && <div className="hint">{t.detail}</div>}</div>
+          <button className="btn small ghost" aria-label="Not needed" title="Not needed" onClick={() => act(api.patch(`/api/role-items/${t.id}`, { status: 'dismissed' }))}>✕</button>
+        </div>
+      ))}
+      {!ts.length && <p className="hint">Nothing waiting on you.</p>}
+    </Sec>
+  )
+}
+
+function Activity({ items, runs, act }: Ctx) {
+  const closed = items.filter(i => (i.status !== 'open' && i.status !== 'expired') || i.kind === 'message')
+  return (
+    <Sec title="History">
+      <details className="role-closed"><summary className="hint">Runs · {runs.length}</summary>
+        {runs.map(run => (
+          <div key={run.id} className={`role-run ${run.status}`}>
+            <div className="tm">{when(run.started_at)}{run.status === 'running' ? ' · working…' : run.cost ? ` · $${run.cost.toFixed(2)}` : ''}</div>
+            <div>{run.status === 'error' ? `Didn't finish: ${run.error}` : run.brief}</div>
+          </div>
+        ))}
+      </details>
+      {closed.length > 0 && (
+        <details className="role-closed"><summary className="hint">What you've answered, done and sent · {closed.length}</summary>
+          {closed.map(i => (
+            <div key={i.id} className="role-run">
+              <div className="tm">{i.kind === 'message' ? 'You said' : i.status === 'answered' ? 'You answered' : i.status === 'done' ? (i.kind === 'proposal' ? 'Accepted' : 'Done') : i.kind === 'proposal' ? 'Rejected' : 'Not needed'}{i.seen ? '' : ' · not read yet'}</div>
+              <div>{i.text}{i.answer && <><br /><b>{i.answer}</b></>}</div>
+              {i.kind === 'proposal' ? <button className="btn small ghost" onClick={() => act(api.post(`/api/role-items/${i.id}/act`, { action: 'undo' }))}>Undo</button>
+                : i.kind !== 'message' && <button className="btn small ghost" onClick={() => act(api.patch(`/api/role-items/${i.id}`, { status: 'open', answer: '' }))}>Reopen</button>}
+            </div>
+          ))}
+        </details>
+      )}
+    </Sec>
+  )
+}
+
+function Composer({ placeholder, button, onSend, extra, initial = '', rows = 2 }: { placeholder: string; button: string; onSend: (text: string) => void; extra?: ReactNode; initial?: string; rows?: number }) {
+  const [text, setText] = useState(initial)
+  const send = () => { if (text.trim()) { onSend(text.trim()); setText('') } }
+  return (
+    <div className="role-comp">
+      <textarea value={text} rows={rows} placeholder={placeholder} onChange={e => setText(e.target.value)}
+        onKeyDown={e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) send() }} />
+      <div className="set-row">{extra}<button className="btn small primary" disabled={!text.trim()} onClick={send}>{button}</button></div>
     </div>
   )
 }
 
-function Composer({ placeholder, button, onSend, extra }: { placeholder: string; button: string; onSend: (text: string) => void; extra?: ReactNode }) {
-  const [text, setText] = useState('')
-  const send = () => { if (text.trim()) { onSend(text.trim()); setText('') } }
+// ---------- chief of staff ----------
+
+function Note({ n, id }: { n?: RoleNote; id: number }) {
+  if (!n) return <div className="note gone">That note is gone</div>
   return (
-    <div className="role-comp">
-      <textarea value={text} rows={2} placeholder={placeholder} onChange={e => setText(e.target.value)}
-        onKeyDown={e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) send() }} />
-      <div className="set-row">{extra}<button className="btn small primary" disabled={!text.trim()} onClick={send}>{button}</button></div>
+    <a className={`note ${n.done ? 'done' : ''}`} href={`#/idea/${id}`} title="Open the note">
+      <span className="note-text">{n.text}</span>
+      <span className="note-list"><span className="sq round" style={{ background: AREAS.find(a => a.name === n.area)?.color ?? 'var(--faint)' }} />{n.list}</span>
+    </a>
+  )
+}
+
+function ChiefDesk(ctx: Ctx) {
+  const cards = ctx.items.filter(i => i.kind === 'proposal' && i.status === 'open')
+  const of = (t: Proposal['type'][]) => cards.filter(c => t.includes(data(c).type))
+  const today = of(['today']), tidy = of(['merge', 'close']), hand = of(['handoff'])
+  const handled = ctx.items.filter(i => i.kind === 'proposal' && (i.status === 'done' || i.status === 'dismissed') && (i.closed_at ?? 0) > Date.now() / 1000 - 86400)
+  const post = (c: RoleItem, body: object) => ctx.act(api.post(`/api/role-items/${c.id}/act`, body))
+  return (
+    <>
+      <Sec title="Today" hint={today.length ? 'The chief\'s picks for today. Done checks the note off.' : undefined}>
+        {today.map(c => (
+          <div key={c.id} className="card pick">
+            <Note n={ctx.notes[data(c).ids[0]]} id={data(c).ids[0]} />
+            <div className="card-why">{c.detail}</div>
+            <div className="card-acts">
+              <button className="btn small ghost" onClick={() => post(c, { action: 'reject' })}>Not today</button>
+              <button className="btn small primary" onClick={() => post(c, { action: 'accept' })}>Done</button>
+            </div>
+          </div>
+        ))}
+        {!today.length && <p className="hint">No picks right now. The chief chooses again on its next run.</p>}
+      </Sec>
+      {hand.length > 0 && <Sec title="Hand to an agent" hint="Work an agent can finish without you. Check the prompt, then start it.">
+        {hand.map(c => <HandoffCard key={c.id} c={c} ctx={ctx} />)}
+      </Sec>}
+      <Sec title="Tidy up" hint={tidy.length ? 'Notes that say the same thing, or look finished. Undo puts them back exactly.' : undefined}>
+        {tidy.map(c => data(c).type === 'merge' ? <MergeCard key={c.id} c={c} ctx={ctx} /> : (
+          <div key={c.id} className="card">
+            <div className="card-kicker">Looks finished</div>
+            <Note n={ctx.notes[data(c).ids[0]]} id={data(c).ids[0]} />
+            <div className="card-why">{c.detail}</div>
+            <div className="card-acts">
+              <button className="btn small ghost" onClick={() => post(c, { action: 'reject' })}>Keep it</button>
+              <button className="btn small primary" onClick={() => post(c, { action: 'accept' })}>Check it off</button>
+            </div>
+          </div>
+        ))}
+        {!tidy.length && <p className="hint">Your lists look tidy.</p>}
+      </Sec>
+      {handled.length > 0 && <Sec title="Handled today">
+        {handled.map(c => (
+          <div key={c.id} className="handled">
+            <span>{c.status === 'done' ? '✓' : '–'} {c.text}{data(c).agent ? ` · ${data(c).agent}` : ''}</span>
+            {data(c).agent ? <a className="btn small ghost" href={`#/agent/${enc(data(c).agent!)}`}>Open agent</a>
+              : <button className="btn small ghost" onClick={() => post(c, { action: 'undo' })}>Undo</button>}
+          </div>
+        ))}
+      </Sec>}
+      <Questions {...ctx} />
+    </>
+  )
+}
+
+function MergeCard({ c, ctx }: { c: RoleItem; ctx: Ctx }) {
+  const p = data(c)
+  const [keep, setKeep] = useState(p.keep ?? p.ids[0])
+  const [text, setText] = useState(p.text || ctx.notes[keep]?.text || '')
+  return (
+    <div className="card">
+      <div className="card-kicker">Same thing, {p.ids.length} notes</div>
+      {p.ids.map(id => (
+        <label key={id} className={`merge-row ${keep === id ? 'keep' : ''}`}>
+          <input type="radio" name={`keep-${c.id}`} checked={keep === id} onChange={() => setKeep(id)} />
+          <Note n={ctx.notes[id]} id={id} />
+          {keep === id && <span className="chip ok">keep</span>}
+        </label>
+      ))}
+      <div className="card-why">{c.detail}</div>
+      <label className="merge-text">Merged note<textarea value={text} rows={2} onChange={e => setText(e.target.value)} /></label>
+      <div className="card-acts">
+        <button className="btn small ghost" onClick={() => ctx.act(api.post(`/api/role-items/${c.id}/act`, { action: 'reject' }))}>Keep separate</button>
+        <button className="btn small primary" onClick={() => ctx.act(api.post(`/api/role-items/${c.id}/act`, { action: 'accept', keep, text }))}>Merge</button>
+      </div>
+    </div>
+  )
+}
+
+function HandoffCard({ c, ctx }: { c: RoleItem; ctx: Ctx }) {
+  const p = data(c)
+  const [prompt, setPrompt] = useState(p.prompt ?? '')
+  const [edit, setEdit] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const start = () => {
+    setBusy(true)
+    api.post<{ name: string }>(`/api/ideas/${p.ids[0]}/start`, { prompt })
+      .then(({ name }) => ctx.act(api.post(`/api/role-items/${c.id}/act`, { action: 'started', agent: name })).then(() => { location.hash = `#/agent/${enc(name)}` }))
+      .catch(ctx.onError).finally(() => setBusy(false))
+  }
+  return (
+    <div className="card">
+      <Note n={ctx.notes[p.ids[0]]} id={p.ids[0]} />
+      <div className="card-why">{c.detail}</div>
+      {edit ? <textarea className="role-prompt" value={prompt} rows={8} onChange={e => setPrompt(e.target.value)} />
+        : <button className="prompt-peek" onClick={() => setEdit(true)} title="Edit the prompt">{prompt}</button>}
+      <div className="card-acts">
+        <button className="btn small ghost" onClick={() => ctx.act(api.post(`/api/role-items/${c.id}/act`, { action: 'reject' }))}>Not now</button>
+        <button className="btn small primary" disabled={busy || !prompt.trim()} onClick={start}>{busy ? 'Starting…' : 'Start agent'}</button>
+      </div>
+    </div>
+  )
+}
+
+// ---------- clerk ----------
+
+// irs-name-change-letter.md → IRS name change letter
+const SMALL = new Set(['and', 'the', 'for', 'of', 'to', 'a', 'an', 'on', 'in'])
+const fileTitle = (path: string) => {
+  const words = path.split('/').pop()!.replace(/\.\w+$/, '').split(/[-_ ]+/)
+  const out = words.map(w => (w.length <= 3 && !SMALL.has(w.toLowerCase()) && /^[a-z]+$/i.test(w) ? w.toUpperCase() : w.toLowerCase())).join(' ')
+  return out[0].toUpperCase() + out.slice(1)
+}
+const daysTo = (due: string) => Math.round((new Date(`${due}T12:00:00`).getTime() - Date.now()) / 86400_000)
+const dueText = (due: string) => new Date(`${due}T12:00:00`).toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' })
+
+function ClerkDesk(ctx: Ctx) {
+  const { role: r, name } = ctx
+  const b: ClerkBoard = { deadlines: [], inflight: [], cpa: [], facts: [], ...JSON.parse(r.board || '{}') }
+  const files = usePoll<{ path: string; mtime: number }[]>(`/api/roles/${enc(name)}/files`, 30_000, ctx.onError)
+  const [open, setOpen] = useState('')
+  const board = (section: string, index: number, body: object) => ctx.act(api.post(`/api/roles/${enc(name)}/board`, { section, index, ...body }))
+  const order = (d: ClerkBoard['deadlines'][number]) => (d.status === 'done' ? 3 : !d.due ? 1 : 0) * 1e6 + (d.due ? daysTo(d.due) : 0)
+  const deadlines = b.deadlines.map((d, i) => ({ ...d, i })).sort((x, y) => order(x) - order(y))
+  const copyCpa = () => navigator.clipboard.writeText(b.cpa.map((q, n) => `${n + 1}. ${q.question}${q.why ? `\n   (${q.why})` : ''}`).join('\n\n')).catch(ctx.onError)
+  return (
+    <>
+      <Questions {...ctx} title="The clerk needs to know" hint="Facts only you have. Each answer fixes a date on the calendar below." />
+      <Sec title="Deadlines" hint={b.deadlines.length ? undefined : 'The clerk builds this calendar on its first run.'}>
+        {deadlines.map(d => {
+          const n = d.due ? daysTo(d.due) : null
+          return (
+            <div key={d.i} className={`deadline ${d.status} ${n !== null && n <= 30 && d.status !== 'done' ? 'soon' : ''}`}>
+              <div className="countdown">{d.status === 'done' ? '✓' : n === null ? '?' : n < 0 ? 'late' : n}<span>{d.status === 'done' ? 'done' : n === null ? 'needs a date' : n < 0 ? `${-n} days` : n === 1 ? 'day' : 'days'}</span></div>
+              <div className="deadline-body">
+                <div className="card-title">{d.title}</div>
+                <div className="hint">{[d.form, d.due && dueText(d.due)].filter(Boolean).join(' · ')}{d.source && <> · <a href={d.source} target="_blank" rel="noreferrer">source ↗</a></>}</div>
+                {d.note && <div className="card-why">{d.note}</div>}
+              </div>
+              <button className="btn small ghost" onClick={() => board('deadlines', d.i, { status: d.status === 'done' ? 'upcoming' : 'done' })}>{d.status === 'done' ? 'Not done' : 'Mark done'}</button>
+            </div>
+          )
+        })}
+      </Sec>
+      {b.inflight.length > 0 && <Sec title="In progress">
+        {b.inflight.map((f, i) => (
+          <div key={i} className="card">
+            <div className="card-title">{f.title}</div>
+            <div><span className="hint">Next:</span> {f.next_step}</div>
+            {f.waiting_on && <div className="chip warn waiting">Waiting on {f.waiting_on}</div>}
+          </div>
+        ))}
+      </Sec>}
+      <Sec title="Drafts and files" hint={files.data?.length ? 'Drafts are for you to review, never signed or filed by the clerk.' : 'Nothing written yet.'}>
+        {files.data?.map(f => (
+          <button key={f.path} className="file-row" onClick={() => setOpen(f.path)}>
+            <b>{fileTitle(f.path)}</b><span className="hint">updated {when(f.mtime)}</span>
+          </button>
+        ))}
+        {open && <FileViewer cwd={r.cwd} path={open} onClose={() => setOpen('')} />}
+      </Sec>
+      {b.cpa.length > 0 && <Sec title="For your CPA or lawyer" right={<button className="btn small" onClick={copyCpa}>Copy for email</button>}
+        hint="Questions the clerk won't answer itself. Record what they tell you and the clerk files it.">
+        {b.cpa.map((q, i) => (
+          <div key={i} className="card">
+            <div className="card-title">{q.question}</div>
+            {q.why && <div className="card-why">{q.why}</div>}
+            {q.answer ? <div className="answer"><span className="hint">Their answer:</span> {q.answer}</div>
+              : <Composer placeholder="What they said" button="Save answer" rows={1} onSend={answer => board('cpa', i, { answer })} />}
+          </div>
+        ))}
+      </Sec>}
+      {b.facts.length > 0 && <Sec title="What the clerk knows" hint="From your answers. Fix one if it's wrong.">
+        {b.facts.map((f, i) => <Fact key={i} f={f} onFix={value => board('facts', i, { value })} />)}
+      </Sec>}
+    </>
+  )
+}
+
+function Fact({ f, onFix }: { f: { fact: string; value: string }; onFix: (v: string) => void }) {
+  const [v, setV] = useState<string | null>(null)
+  return (
+    <div className="fact">
+      <span className="hint">{f.fact}</span>
+      {v === null ? <><b>{f.value}</b><button className="btn small ghost" onClick={() => setV(f.value)}>Fix</button></>
+        : <><input value={v} onChange={e => setV(e.target.value)} autoFocus /><button className="btn small primary" onClick={() => { if (v.trim() && v !== f.value) onFix(v); setV(null) }}>Save</button></>}
     </div>
   )
 }
@@ -134,7 +369,7 @@ function Composer({ placeholder, button, onSend, extra }: { placeholder: string;
 const KINDS = [['', 'Only when I run it'], ['daily', 'Every day'], ['weekly', 'Every week'], ['monthly', 'Every month'], ['every', 'Every few days'], ['hours', 'Every few hours']] as const
 const has = (csv: string, x: string) => csv.split(',').includes(x)
 const toggle = (csv: string, x: string, on: boolean) => [...csv.split(',').filter(v => v && v !== x), ...(on ? [x] : [])].join(',')
-const BLANK: Partial<Role> = { title: '', prompt: '', schedule: 'daily', at: '07:00', model: 'sonnet', budget: 1, see: 'ideas,agents', areas: '', tools: '', cwd: '', write_dir: '', git_commit: 0, memory: '', enabled: 1 }
+const BLANK: Partial<Role> = { kind: 'custom', title: '', prompt: '', schedule: 'daily', at: '07:00', model: 'sonnet', budget: 1, see: 'ideas,agents', areas: '', tools: '', cwd: '', write_dir: '', git_commit: 0, memory: '', enabled: 1 }
 
 function RoleSettings({ role, onBack, onSaved, onError }: { role?: Role; onBack: () => void; onSaved: (r: Role) => void; onError: (e: Error) => void }) {
   const [r, setR] = useState<Partial<Role>>(role ?? BLANK)
@@ -154,6 +389,9 @@ function RoleSettings({ role, onBack, onSaved, onError }: { role?: Role; onBack:
       <div className="set-scroll">
         <Sec title="Role">
           <label>Name<input value={r.title} onChange={e => set({ title: e.target.value })} placeholder="Chief of staff" maxLength={60} /></label>
+          <label>Desk<select value={r.kind} onChange={e => set({ kind: e.target.value as Role['kind'] })}>
+            {(Object.keys(DESK_NAMES) as Role['kind'][]).map(k => <option key={k} value={k}>{DESK_NAMES[k]}</option>)}</select></label>
+          <p className="hint">The desk decides what its page shows and what its buttons do. General: a summary, questions and tasks.</p>
           <label>Instructions<textarea className="role-prompt" value={r.prompt} onChange={e => set({ prompt: e.target.value })} rows={12}
             placeholder="What this role is for, what to look at each run, and what it should never do." /></label>
         </Sec>
@@ -183,7 +421,7 @@ function RoleSettings({ role, onBack, onSaved, onError }: { role?: Role; onBack:
             ))}</div>
           </>}
         </Sec>
-        <Sec title="What it can use" hint="With none of these it only reads what Fleet hands it. It never edits or deletes your ideas either way.">
+        <Sec title="What it can use" hint="With none of these it only reads what Fleet hands it. Notes change only when you press a button on its desk.">
           <label className="check"><input type="checkbox" checked={has(r.tools ?? '', 'read')} onChange={e => set({ tools: toggle(r.tools ?? '', 'read', e.target.checked) })} />Read files in its working folder (never .env files)</label>
           <label className="check"><input type="checkbox" checked={has(r.tools ?? '', 'web')} onChange={e => set({ tools: toggle(r.tools ?? '', 'web', e.target.checked) })} />Search and read the web</label>
           <label className="check"><input type="checkbox" checked={has(r.tools ?? '', 'write')} onChange={e => set({ tools: toggle(r.tools ?? '', 'write', e.target.checked) })} />Write files, only in one folder</label>

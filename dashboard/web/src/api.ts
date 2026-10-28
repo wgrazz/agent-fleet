@@ -46,11 +46,17 @@ export type Improved = { prompt: string; changes: string[]; questions: string[] 
 export type Paused = { id: number; name: string; tool: string; session_id: string; cwd: string; paused_at: number; resume_at: number | null }
 export type Profile = { name: string; tool: string; model: string | null; effort: string | null; args: string | null; cwd: string | null; is_default: number }
 export type RoleRun = { id: number; role: string; started_at: number; finished_at: number | null; status: 'running' | 'ok' | 'error'; brief: string; error: string; cost: number }
-export type RoleItem = { id: number; role: string; run_id: number | null; kind: 'task' | 'question' | 'message'; text: string; detail: string; answer: string; status: 'open' | 'done' | 'dismissed' | 'answered'; seen: number; created_at: number; closed_at: number | null }
+export type RoleItem = { id: number; role: string; run_id: number | null; kind: 'task' | 'question' | 'message' | 'proposal'; text: string; detail: string; answer: string; data: string; status: 'open' | 'done' | 'dismissed' | 'answered' | 'expired'; seen: number; created_at: number; closed_at: number | null }
 export type Role = {
   name: string; title: string; prompt: string; schedule: string; at: string; model: string; budget: number; see: string; areas: string
   tools: string; cwd: string; write_dir: string; git_commit: number; memory: string; enabled: number; next_run: number | null; created_at: number
-  questions: number; tasks: number; running: boolean; last: RoleRun | null
+  kind: 'chief' | 'clerk' | 'custom'; board: string; questions: number; tasks: number; cards: number; running: boolean; last: RoleRun | null
+}
+export type Proposal = { type: 'today' | 'merge' | 'close' | 'handoff'; ids: number[]; keep?: number; text?: string; why: string; prompt?: string; turn?: number; agent?: string }
+export type RoleNote = { id: number; text: string; notes: string; list: string; area: string | null; done: number }
+export type ClerkBoard = {
+  deadlines: { title: string; due: string; form: string; source: string; status: 'upcoming' | 'needs_info' | 'done'; note: string }[]
+  inflight: { title: string; next_step: string; waiting_on: string }[]; cpa: { question: string; why: string; answer: string }[]; facts: { fact: string; value: string }[]
 }
 
 export class Unauthorized extends Error {}

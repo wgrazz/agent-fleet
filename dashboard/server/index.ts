@@ -10,6 +10,7 @@ import { changes } from './git.ts'
 import { conversations, transcript } from './history.ts'
 import * as ideas from './ideas.ts'
 import * as team from './roles.ts'
+import * as desks from './desks.ts'
 import { notify, publicKey, pushAll, subscribe } from './push.ts'
 import { alerts, answerAsk, ingestHook, list, openAsk, poll, pollAsk, startPolling } from './state.ts'
 import { config, dailyBackup, db, FLEET_BIN, FLEET_DIR, saveConfig } from './store.ts'
@@ -671,7 +672,7 @@ const routes: [string, RegExp, Route][] = [
     const flag = (k: string) => (typeof b[k] === 'boolean' ? { [k]: b[k] ? 1 : 0 } : {})
     try {
       return team.saveRole(name, {
-        ...text('title', 60), ...text('prompt', 20_000), ...text('schedule', 20), ...text('at', 5), ...text('model', 20), ...text('see', 40),
+        ...text('kind', 20), ...text('title', 60), ...text('prompt', 20_000), ...text('schedule', 20), ...text('at', 5), ...text('model', 20), ...text('see', 40),
         ...text('areas', 400), ...text('tools', 40), ...text('cwd', 1000), ...text('write_dir', 300), ...text('memory', 4000),
         ...(typeof b.budget === 'number' ? { budget: b.budget } : {}), ...flag('enabled'), ...flag('git_commit'),
       })
@@ -690,6 +691,23 @@ const routes: [string, RegExp, Route][] = [
     const text = str((await body(req)).text, 5000).trim()
     if (!text) throw new HttpError(400, 'empty message')
     return { id: team.message(name, text) }
+  }],
+  ['GET', /^\/api\/roles\/([^/]+)\/files$/, async (_req, [name]) => team.files(name)],
+  // a desk's buttons: accept, reject or undo a card; mark a deadline done, record a CPA's answer, fix a fact
+  ['POST', /^\/api\/role-items\/(\d+)\/act$/, async (req, [id]) => {
+    const b = await body(req)
+    try {
+      desks.act(int(id), str(b.action, 20), { text: typeof b.text === 'string' ? b.text.slice(0, 2000) : undefined, keep: typeof b.keep === 'number' ? b.keep : undefined, agent: str(b.agent, 80) || undefined })
+    } catch (e) { throw new HttpError(400, (e as Error).message) }
+    return { ok: true }
+  }],
+  ['POST', /^\/api\/roles\/([^/]+)\/board$/, async (req, [name]) => {
+    const b = await body(req)
+    try {
+      desks.boardAct(name, str(b.section, 20), typeof b.index === 'number' ? b.index : -1, {
+        status: str(b.status, 20) || undefined, answer: typeof b.answer === 'string' ? b.answer.slice(0, 5000) : undefined, value: typeof b.value === 'string' ? b.value.slice(0, 1000) : undefined })
+    } catch (e) { throw new HttpError(400, (e as Error).message) }
+    return { ok: true }
   }],
   ['PATCH', /^\/api\/role-items\/(\d+)$/, async (req, [id]) => {
     const b = await body(req)

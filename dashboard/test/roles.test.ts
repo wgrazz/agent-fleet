@@ -63,3 +63,46 @@ it('a failed run is recorded and pushed, not thrown', async () => {
   expect(m.page('clerk')!.runs[0].status).toBe('error')
   expect(pushes.at(-1)).toBeTruthy()
 })
+
+it('the chief desk turns ids into cards; merging and closing change notes, and Undo puts them back', async () => {
+  const ideas = await import('../server/ideas.ts')
+  const desks = await import('../server/desks.ts')
+  const a = ideas.addIdea('Sign up for Twilio', 'Do'), b = ideas.addIdea('Find out why Twilio rejected me', 'Do'), c = ideas.addIdea('Old thing', 'Do')
+  m.saveRole('chief', { kind: 'chief', title: 'Chief of staff', see: '' })
+  reply = { brief: 'Twilio first.', tasks: [], questions: [], memory: '', today: [{ id: b, why: 'blocks a' }, { id: 99999, why: 'made up' }],
+    tidy: [{ type: 'merge', ids: [a, b], keep: b, text: 'Get Twilio approved and set up', why: 'same thing' }, { type: 'close', ids: [c], keep: 0, text: '', why: 'done' }],
+    handoffs: [] }
+  await m.runRole('chief')
+  const page = m.page('chief')!
+  const cards = page.items.filter(i => i.kind === 'proposal')
+  expect(cards.map(i => JSON.parse(i.data).type)).toEqual(['today', 'merge', 'close']) // the made-up id is dropped
+  expect(page.notes[a].text).toBe('Sign up for Twilio')
+  const merge = cards[1]
+  desks.act(merge.id, 'accept')
+  expect([ideas.idea(b)!.text, ideas.idea(a)!.done]).toEqual(['Get Twilio approved and set up', 1])
+  expect(ideas.idea(b)!.notes).toContain('Merged in: Sign up for Twilio')
+  desks.act(merge.id, 'undo')
+  expect([ideas.idea(b)!.text, ideas.idea(a)!.done]).toEqual(['Find out why Twilio rejected me', 0])
+  desks.act(cards[2].id, 'reject')
+  await m.runRole('chief') // the same merge again isn't filed twice; yesterday's pick expires
+  expect(inputs.at(-1)).toContain('- Undid: Merge 2 notes')
+  expect(inputs.at(-1)).toContain("- Rejected (don't suggest again): Close \"Old thing\"")
+  const open = m.page('chief')!.items.filter(i => i.kind === 'proposal' && i.status === 'open').map(i => JSON.parse(i.data).type)
+  expect(open.sort()).toEqual(['merge', 'today'])
+})
+
+it('the clerk desk keeps its board; marking a deadline done tells the clerk', async () => {
+  const desks = await import('../server/desks.ts')
+  m.saveRole('desk', { kind: 'clerk', title: 'Clerk', see: '' })
+  const board = { deadlines: [{ title: 'S corp return', due: '2027-03-15', form: '1120-S', source: 'https://irs.gov', status: 'upcoming', note: '' }], inflight: [], cpa: [{ question: 'Gift tax?', why: '', answer: '' }], facts: [] }
+  reply = { brief: 'ok', tasks: [], questions: [], memory: '', ...board }
+  await m.runRole('desk')
+  expect(JSON.parse(m.role('desk')!.board)).toEqual(board)
+  desks.boardAct('desk', 'deadlines', 0, { status: 'done' })
+  desks.boardAct('desk', 'cpa', 0, { answer: 'No, under the exclusion' })
+  expect(JSON.parse(m.role('desk')!.board).deadlines[0].status).toBe('done')
+  await m.runRole('desk')
+  expect(inputs.at(-1)).toContain('- Message: Done (filed or paid): S corp return')
+  expect(inputs.at(-1)).toContain('answer to "Gift tax?": No, under the exclusion')
+  expect(inputs.at(-1)).toContain('Your board from last run')
+})

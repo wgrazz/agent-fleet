@@ -108,6 +108,7 @@ CREATE TABLE IF NOT EXISTS queued (
 -- schedule uses the ideas repeat rules plus "hours:<n>"; '' means only when you press Run now.
 CREATE TABLE IF NOT EXISTS roles (
   name TEXT PRIMARY KEY,
+  kind TEXT NOT NULL DEFAULT 'custom',     -- which desk its page shows: chief, clerk or custom
   title TEXT NOT NULL,
   prompt TEXT NOT NULL DEFAULT '',
   schedule TEXT NOT NULL DEFAULT '',
@@ -121,6 +122,7 @@ CREATE TABLE IF NOT EXISTS roles (
   write_dir TEXT NOT NULL DEFAULT '',      -- with the write tool: the only folder (inside cwd) it may change
   git_commit INTEGER NOT NULL DEFAULT 0,   -- commit write_dir after each run
   memory TEXT NOT NULL DEFAULT '',         -- the role's own notes, carried from run to run
+  board TEXT NOT NULL DEFAULT '',          -- a desk's latest board as JSON (the clerk's deadlines, paperwork…)
   enabled INTEGER NOT NULL DEFAULT 1,
   next_run INTEGER,
   created_at INTEGER NOT NULL
@@ -136,7 +138,8 @@ CREATE TABLE IF NOT EXISTS role_runs (
   cost REAL NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS role_runs_role ON role_runs (role, started_at);
--- kind: task (for you to do), question (for you to answer), message (you → the role)
+-- kind: task (for you to do), question (for you to answer), message (you → the role), proposal (a desk's card;
+-- data says what accepting it does)
 -- status: open, done, dismissed, answered; seen = the role has read your answer, message or check-off
 CREATE TABLE IF NOT EXISTS role_items (
   id INTEGER PRIMARY KEY,
@@ -146,6 +149,7 @@ CREATE TABLE IF NOT EXISTS role_items (
   text TEXT NOT NULL,
   detail TEXT NOT NULL DEFAULT '',
   answer TEXT NOT NULL DEFAULT '',
+  data TEXT NOT NULL DEFAULT '',
   status TEXT NOT NULL DEFAULT 'open',
   seen INTEGER NOT NULL DEFAULT 0,
   created_at INTEGER NOT NULL,
