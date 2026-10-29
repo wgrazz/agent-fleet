@@ -11,6 +11,7 @@ import { conversations, transcript } from './history.ts'
 import * as ideas from './ideas.ts'
 import * as team from './roles.ts'
 import * as desks from './desks.ts'
+import * as shares from './shares.ts'
 import { notify, publicKey, pushAll, subscribe } from './push.ts'
 import { alerts, answerAsk, ingestHook, list, openAsk, poll, pollAsk, startPolling } from './state.ts'
 import { config, dailyBackup, db, FLEET_BIN, FLEET_DIR, saveConfig } from './store.ts'
@@ -630,9 +631,17 @@ const routes: [string, RegExp, Route][] = [
     const b = await body(req)
     const text = str(b.text, 10_000).trim()
     if (!text) throw new HttpError(400, 'empty idea')
+    // a link sent to the inbox (the share sheet) goes to Shared and gets broken down in the background
+    const list = str(b.list, 60).trim() || (shares.link(text) ? shares.LIST : 'Brain Dump')
     try {
-      return { id: ideas.addIdea(text, str(b.list, 60).trim() || 'Brain Dump', { area: str(b.area, 40) || undefined }) }
+      const id = ideas.addIdea(text, list, { area: str(b.area, 40) || undefined })
+      if (list === shares.LIST) shares.breakDown(id).catch(e => console.error(`share ${id}:`, e))
+      return { id }
     } catch (e) { throw new HttpError(400, (e as Error).message) }
+  }],
+  ['POST', /^\/api\/ideas\/(\d+)\/breakdown$/, async (_req, [id]) => {
+    shares.breakDown(ideaOr404(id).id).catch(e => console.error(`share ${id}:`, e))
+    return { started: true }
   }],
   // steps picked out of an agent's reply ("Add to-dos" under a chat message)
   ['POST', /^\/api\/ideas\/many$/, async req => {

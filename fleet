@@ -34,7 +34,7 @@ DASHBOARD
   fleet mac …            what Jarvis can do on this Mac: music, calendar, reminders, draft, apps, open, window, screen
   fleet ask TEXT         ask Jarvis (the dashboard's assistant) from any terminal or script
   fleet dash siri [FILE] make the "Hey Siri, Jarvis" shortcut for your iPhone (default ~/Desktop/Jarvis.shortcut)
-  fleet dash share [FILE] make the "Save to Fleet" share-sheet shortcut: share a reel or link from any app into Brain Dump
+  fleet dash share [FILE] make the "Save to Fleet" share-sheet shortcut: share a reel or link from any app; it lands in Shared, broken down
   fleet dash install     run the dashboard at login and put it on your tailnet for your phone (--local: Mac only)
   fleet dash update      after changing the dashboard's code: rebuild the page and restart the server
   fleet dash uninstall   stop it and remove it from login items
@@ -1274,7 +1274,8 @@ def siri_shortcut(path, host=''):
 
 def share_shortcut(path, host=''):
     """A signed "Save to Fleet" shortcut for the iPhone's share sheet: share a link (an Instagram reel, a TikTok, a page) or
-    some text from any app and it lands in Brain Dump. Run on its own (widget, Action Button) it saves what's on the clipboard.
+    some text from any app and it lands in Fleet: links go to Shared, where an agent breaks each one down (what it is,
+    is it worth doing, notes), and plain text goes to Brain Dump. Run on its own (widget, Action Button) it saves what's on the clipboard.
     It holds your access key, so it's made on demand and never saved in the repo."""
     host = host or ts_host()
     if not host:
@@ -1285,7 +1286,7 @@ def share_shortcut(path, host=''):
             sc_step('downloadurl', WFURL=f'https://{host}/api/ideas', WFHTTPMethod='POST', ShowHeaders=True,
                     WFHTTPHeaders=sc_fields(('X-Fleet-Key', sc_text(config()['key']))), WFHTTPBodyType='JSON',
                     WFJSONValues=sc_fields(('text', shared))),
-            sc_step('notification', WFNotificationActionBody='Saved to Brain Dump', WFNotificationActionSound=False),
+            sc_step('notification', WFNotificationActionBody='Saved to Fleet', WFNotificationActionSound=False),
         ],
         'WFWorkflowIcon': {'WFWorkflowIconStartColor': 463140863, 'WFWorkflowIconGlyphNumber': 59446},
         'WFWorkflowTypes': ['ActionExtension'], 'WFWorkflowHasShortcutInputVariables': True,
