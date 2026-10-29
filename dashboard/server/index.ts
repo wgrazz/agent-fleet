@@ -639,9 +639,18 @@ const routes: [string, RegExp, Route][] = [
       return { id }
     } catch (e) { throw new HttpError(400, (e as Error).message) }
   }],
-  ['POST', /^\/api\/ideas\/(\d+)\/breakdown$/, async (_req, [id]) => {
+  // Team → Shared: one agent per shared link, each its own conversation
+  ['GET', /^\/api\/shares$/, async () => shares.shares()],
+  ['GET', /^\/api\/shares\/(\d+)$/, async (_req, [id]) => shares.page(int(id)) ?? (() => { throw new HttpError(404, 'no such share') })()],
+  ['POST', /^\/api\/shares\/(\d+)\/watch$/, async (_req, [id]) => {
     shares.breakDown(ideaOr404(id).id).catch(e => console.error(`share ${id}:`, e))
-    return { started: true }
+  }],
+  ['POST', /^\/api\/shares\/(\d+)\/messages$/, async (req, [id]) => {
+    const text = str((await body(req)).text, 10_000).trim()
+    const s = shares.share(int(id))
+    if (!text || !s) throw new HttpError(400, 'nothing to send')
+    if (s.status === 'watching' || s.status === 'thinking') throw new HttpError(409, 'it’s still working on the last one')
+    shares.chat(s.id, text).catch(e => console.error(`share ${id}:`, e))
   }],
   // steps picked out of an agent's reply ("Add to-dos" under a chat message)
   ['POST', /^\/api\/ideas\/many$/, async req => {
@@ -932,6 +941,20 @@ export const server = createServer(async (req, res) => {
       if (!existsSync(file)) throw new HttpError(404, 'no such photo')
       res.writeHead(200, { 'Content-Type': 'image/jpeg', 'Cache-Control': 'private, max-age=86400' })
       return createReadStream(file).pipe(res)
+    }
+    // a shared post's video; Safari won't play one without byte ranges
+    const clip = url.pathname.match(/^\/api\/shares\/(\d+)\/video$/)
+    if (clip && req.method === 'GET') {
+      const file = shares.video(Number(clip[1]))
+      if (!existsSync(file)) throw new HttpError(404, 'no video')
+      const size = statSync(file).size
+      const r = /^bytes=(\d*)-(\d*)$/.exec(String(req.headers.range ?? ''))
+      const start = !r ? 0 : r[1] ? Number(r[1]) : Math.max(0, size - Number(r[2]))
+      const end = r && r[1] && r[2] ? Math.min(Number(r[2]), size - 1) : size - 1
+      if (start > end) { res.writeHead(416, { 'Content-Range': `bytes */${size}` }); return res.end() }
+      res.writeHead(r ? 206 : 200, { 'Content-Type': 'video/mp4', 'Accept-Ranges': 'bytes', 'Content-Length': end - start + 1, 'Cache-Control': 'private, max-age=86400',
+        ...(r ? { 'Content-Range': `bytes ${start}-${end}/${size}` } : {}) })
+      return createReadStream(file, { start, end }).pipe(res)
     }
     for (const [method, pattern, handler] of routes) {
       const m = url.pathname.match(pattern)

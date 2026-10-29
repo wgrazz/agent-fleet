@@ -2,8 +2,9 @@
 // reject (today's picks, notes to merge or close, work to hand to an agent); the clerk's is the company's deadline
 // calendar, paperwork in flight, drafts, questions for a CPA or lawyer and what it knows. Every role reads what you
 // do here on its next run.
-import { useState, type ReactNode } from 'react'
-import { api, usePoll, type ClerkBoard, type Proposal, type Role, type RoleItem, type RoleNote, type RoleRun } from './api.ts'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { api, usePoll, type ClerkBoard, type Idea, type Proposal, type Role, type RoleItem, type RoleNote, type RoleRun, type Share, type ShareMessage } from './api.ts'
+import { Markdown } from './agents.tsx'
 import { AREAS } from './areas.ts'
 import { FileViewer } from './files.tsx'
 
@@ -41,8 +42,67 @@ export function TeamPane({ roles, selected }: { roles: Role[]; selected: string 
           )
         })}
         {!roles.length && <div className="empty">No roles yet. A role is an assistant that works on a schedule and reports back here. Tap + New.</div>}
+        <SharedList selected={selected} />
       </div>
     </section>
+  )
+}
+
+// ---------- Shared: one agent per reel or link you send to Fleet ----------
+
+const VERDICT: Record<string, string> = { 'worth doing': '✅', maybe: '🤔', skip: '⛔', 'just a note': '📝' }
+const shareState = (s: Share) => s.status === 'watching' ? 'Watching…' : s.status === 'thinking' ? 'Thinking…' : s.status === 'error' ? `Didn't finish: ${s.error}` : `${VERDICT[s.verdict] ?? ''} ${s.verdict}`
+
+function SharedList({ selected }: { selected: string }) {
+  const list = usePoll<Share[]>('/api/shares', 5000, () => {})
+  if (!list.data?.length) return null
+  return (
+    <>
+      <div className="lh"><h4>Shared</h4></div>
+      {list.data.map(s => (
+        <a key={s.id} className={`it plain role-row ${selected === `shared/${s.id}` ? 'on' : ''}`} href={`#/team/shared/${s.id}`}>
+          <span className="nm">{s.title || s.url.replace(/^https?:\/\/(www\.)?/, '').slice(0, 50)}</span>
+          <span className="tm">{when(s.created_at)}</span>
+          <span className="pv">{shareState(s)}</span>
+        </a>
+      ))}
+    </>
+  )
+}
+
+/** One shared post: the video at the top, then a conversation with the agent that watched it. */
+export function ShareView({ id, onBack, onError }: { id: number; onBack: () => void; onError: (e: Error) => void }) {
+  const page = usePoll<{ share: Share & { video: boolean; note: Idea | null }; messages: ShareMessage[] }>(`/api/shares/${id}`, 2500, onError)
+  const box = useRef<HTMLDivElement>(null)
+  // opens at the top (the video), then follows the conversation as new replies come in
+  const count = page.data?.messages.length ?? 0, seen = useRef(-1)
+  useEffect(() => {
+    if (seen.current >= 0 && count > seen.current) box.current?.scrollTo({ top: box.current.scrollHeight, behavior: 'smooth' })
+    if (page.data) seen.current = count
+  }, [count, page.data])
+  if (!page.data) return <main className="det settings"><div className="empty">{page.error || 'Loading…'}</div></main>
+  const { share: s, messages } = page.data
+  const busy = s.status === 'watching' || s.status === 'thinking'
+  const act = (p: Promise<unknown>) => p.then(page.refresh).catch(onError)
+  return (
+    <main className="det settings share">
+      <header className="dh">
+        <button className="back" onClick={onBack} aria-label="Back">‹</button>
+        <div className="dh-text"><div className="t">{s.title || 'Shared'}</div><div className="meta">{when(s.created_at)}</div></div>
+        <a className="btn small" href={s.url} target="_blank" rel="noreferrer">Original</a>
+        {s.note && <a className="btn small" href={`#/idea/${s.id}`}>Note</a>}
+      </header>
+      <div className="set-scroll" ref={box}>
+        {s.video ? <video className="share-video" src={`/api/shares/${s.id}/video#t=0.1`} controls playsInline preload="metadata" />
+          : !busy && <p className="hint">No video to show here; Open original has it.</p>}
+        <div className="chat share-chat">
+          {messages.map(m => <div key={m.id} className={`bubble ${m.who === 'you' ? 'user' : 'assistant'}`}>{m.who === 'you' ? m.text : <Markdown text={m.text} />}</div>)}
+          {busy && <div className="bubble working"><span className="dots"><i /><i /><i /></span>{s.status === 'watching' ? 'Watching it…' : 'Thinking…'}</div>}
+          {s.status === 'error' && <div className="bubble waiting">Didn't finish: {s.error} <button className="btn small" onClick={() => act(api.post(`/api/shares/${s.id}/watch`))}>Watch again</button></div>}
+        </div>
+        {!busy && s.status !== 'error' && <Composer placeholder="Ask about it, or tell it what to do with it" button="Send" onSend={text => act(api.post(`/api/shares/${s.id}/messages`, { text }))} />}
+      </div>
+    </main>
   )
 }
 

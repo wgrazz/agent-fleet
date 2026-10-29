@@ -10,7 +10,7 @@ import { ConversationView, HistoryPane, Jarvis, Palette, speak, spokenAlerts } f
 import { AREAS, notePrompt } from './areas.ts'
 import { AllNotesPane, ChecklistsPane, IdeaDetail, IdeasPane, ImportNotes, PRIORITY, PriorityPane, QuickCapture, SortMode } from './ideas.tsx'
 import { SettingsPage } from './settings.tsx'
-import { RoleView, TeamPane } from './team.tsx'
+import { RoleView, ShareView, TeamPane } from './team.tsx'
 import { FullTerminal } from './terminal.tsx'
 import './styles.css'
 
@@ -330,7 +330,7 @@ function App() {
   } else if (middleView.view === 'checklists') {
     middle = <ChecklistsPane lists={allLists} onNew={newChecklist} />
   } else if (middleView.view === 'team') {
-    middle = <TeamPane roles={team.data ?? []} selected={route.a} />
+    middle = <TeamPane roles={team.data ?? []} selected={route.a === 'shared' ? `shared/${route.b}` : route.a} />
   } else if (middleView.view === 'more') {
     middle = <MorePane usage={usage.data ?? []} push={push} questions={teamQuestions} />
   } else {
@@ -347,6 +347,8 @@ function App() {
   let detail
   if (route.view === 'settings') {
     detail = <SettingsPage usage={usage.data ?? []} push={push} onBack={() => go(isPhone() ? '#/more' : lastListRoute.current)} onError={fail} />
+  } else if (route.view === 'team' && route.a === 'shared' && route.b) {
+    detail = <ShareView key={route.b} id={Number(route.b)} onBack={() => go('#/team')} onError={fail} />
   } else if (route.view === 'team' && route.a) {
     detail = <RoleView key={route.a} name={route.a} onBack={() => go('#/team')} onError={fail} onChanged={team.refresh} />
   } else if (route.view === 'jarvis') {

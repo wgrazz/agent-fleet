@@ -91,6 +91,7 @@ export function files(name: string) {
 
 export function saveRole(name: string, p: Partial<Role>) {
   if (!NAME.test(name)) throw new Error('name: lowercase letters, digits and dashes, up to 40')
+  if (['new', 'shared'].includes(name)) throw new Error(`name: ${name} is taken by the Team tab`)
   const cur = role(name)
   const r = { ...(cur ?? { kind: 'custom', board: '', title: name, prompt: '', schedule: '', at: '07:00', model: 'sonnet', budget: 1, see: 'ideas,agents', areas: '', tools: '', cwd: '', write_dir: '', git_commit: 0, memory: '', enabled: 1 }), ...p }
   if (!r.title.trim()) throw new Error('title: required')

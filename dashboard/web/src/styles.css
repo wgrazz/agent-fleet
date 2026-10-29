@@ -717,3 +717,10 @@ textarea.role-prompt { font-family: ui-monospace, SFMono-Regular, Menlo, monospa
   .countdown { width: 48px; font-size: 19px; }
   .deadline { flex-wrap: wrap; }
 }
+
+/* Team → Shared: a shared post's video, then its conversation */
+.share-video { display: block; width: 100%; max-width: 360px; max-height: 60vh; margin: 12px 0; border-radius: 14px; background: #000; }
+.share-chat { flex: none; overflow: visible; padding: 4px 0 12px; max-width: 720px; min-width: 0; }
+.share-chat .bubble { max-width: 100%; box-sizing: border-box; }
+.share-chat .bubble.user { max-width: 88%; }
+.share-chat .bubble.waiting .btn { margin-left: 8px; }

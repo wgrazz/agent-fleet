@@ -220,11 +220,12 @@ same memory, cost cap and actions, from any terminal or script. That makes it ea
   Then say "Hey Siri, Jarvis". Tailscale must be on.
 - **Share to Fleet from any app.** On the phone, open Settings → **Share to Fleet** → **Add the Save
   to Fleet shortcut** (or `fleet dash share` on the Mac and AirDrop it). Then in Instagram, TikTok,
-  Safari or anything else: Share → **Save to Fleet**, and the link lands in the **Shared** list. Claude
-  breaks each one down in the background (a reel's caption via `yt-dlp`, what's said in it via
-  `whisper-cli` with `~/.cache/whisper-cpp/ggml-small.bin` if present, claims checked on the web): a
-  verdict (worth doing, maybe, skip, just a note), a summary, an answer to anything you typed with it, and
-  notes, written into the note and pushed to your phone. About 6¢ each. Run on its own it saves your
+  Safari or anything else: Share → **Save to Fleet**, and the link lands in the **Shared** list and gets
+  its own agent, under **Team → Shared**. It watches the post (the video and caption via `yt-dlp`, frames via
+  `ffmpeg`, what's said via `whisper-cli` with `~/.cache/whisper-cpp/ggml-small.bin` if present, claims
+  checked on the web) and gives its take: a verdict (worth doing, maybe, skip, just a note), what the post
+  says and shows, and an answer to anything you typed with it. Its page has the video at the top and the
+  conversation below, so you can keep asking it about that one post. A few cents a post. Run on its own it saves your
   clipboard. Tailscale must be on.
 
 **Keys:**

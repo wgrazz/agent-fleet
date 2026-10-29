@@ -52,6 +52,8 @@ export type Role = {
   tools: string; cwd: string; write_dir: string; git_commit: number; memory: string; enabled: number; next_run: number | null; created_at: number
   kind: 'chief' | 'clerk' | 'custom'; board: string; questions: number; tasks: number; cards: number; running: boolean; last: RoleRun | null
 }
+export type Share = { id: number; url: string; status: 'watching' | 'thinking' | 'ready' | 'error'; error: string; title: string; verdict: string; created_at: number; updated_at: number }
+export type ShareMessage = { id: number; who: 'you' | 'bot'; text: string; at: number }
 export type Proposal = { type: 'today' | 'merge' | 'close' | 'handoff'; ids: number[]; keep?: number; text?: string; why: string; prompt?: string; turn?: number; agent?: string }
 export type RoleNote = { id: number; text: string; notes: string; list: string; area: string | null; done: number }
 export type ClerkBoard = {
