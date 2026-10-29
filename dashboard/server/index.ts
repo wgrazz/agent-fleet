@@ -186,7 +186,11 @@ const teamAgents = () => list().map(a => `- ${a.name} (${a.tool}, ${a.status.rep
 function jarvisContext() {
   const agents = list().map(a => `- ${a.name} (${a.tool}, ${a.status === 'waiting' ? 'turn done, waiting on its own background job, not on you' : a.status.replace('_', ' ')})${a.message ? `: asking "${a.message}"` : a.task ? `: ${a.task.replace(/^\[[a-z]+\]\s*/, '')}` : ''}${a.quick_replies.length ? ` options: ${a.quick_replies.map(q => `${q.key}=${q.label}`).join(', ')}` : ''}${a.controllable ? '' : ' (read-only)'}`)
   const lists = ideas.lists().map(l => `${l.name} (${l.open} open)`).join(', ')
-  return `Agents:\n${agents.join('\n') || '- none running'}\nIdea lists: ${lists}\nTime: ${new Date().toLocaleString()}`
+  const roles = team.roles().map(r => {
+    const qs = (team.page(r.name)?.items ?? []).filter(i => i.kind === 'question' && i.status === 'open')
+    return `- ${r.name} (${r.title}${r.running ? ', running now' : ''}): ${r.tasks} tasks, ${r.cards} desk cards for the developer${qs.map(q => `\n  question ${q.id}: ${q.text}`).join('')}`
+  })
+  return `Agents:\n${agents.join('\n') || '- none running'}\nIdea lists: ${lists}\nTeam (scheduled roles):\n${roles.join('\n') || '- none'}\nTime: ${new Date().toLocaleString()}`
 }
 
 const budget = () => aiBudget(config.jarvis_warn_pct ?? 5, config.jarvis_max_pct ?? 10)
@@ -215,6 +219,20 @@ async function doAction(a: JarvisAction, turn = Date.now()): Promise<string> {
     return `${e.done === 'done' ? 'checked off' : 'updated'} “${(e.text.trim() || cur.text).slice(0, 60)}”${e.list.trim() && e.list.trim() !== cur.list ? ` → ${e.list.trim()}` : ''}`
   }
   if (a.type === 'remember') J.remember(a.text)
+  if (a.type === 'role') {
+    const r = a.role && team.role(a.role.name)
+    if (!r) throw new Error(`no role named ${a.role?.name}`)
+    if (a.role!.do === 'run') {
+      if (team.roles().find(x => x.name === r.name)?.running) return `${r.title} is already running`
+      team.runRole(r.name, teamAgents).catch(e => console.error(`role ${r.name}:`, e))
+      return `running ${r.title}`
+    }
+    if (a.role!.do === 'tell') { team.message(r.name, a.role!.text.trim().slice(0, 5000)); return `told ${r.title}` }
+    const q = team.page(r.name)!.items.find(i => i.id === a.role!.question && i.kind === 'question' && i.status === 'open')
+    if (!q) throw new Error(`${r.title} has no open question ${a.role!.question}`)
+    team.updateItem(q.id, { answer: a.role!.text.slice(0, 5000) })
+    return `answered ${r.title}: “${q.text.slice(0, 60)}”`
+  }
   if (a.type === 'mac' && a.mac) return (await fleet(['mac', ...J.macArgv(a.mac)])).trim()
   return `${a.type === 'remember' ? 'remembered' : a.type}${a.agent ? ` ${a.agent}` : ''}${a.key ? ` ${a.key}` : ''}`
 }

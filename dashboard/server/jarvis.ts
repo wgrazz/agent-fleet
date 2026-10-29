@@ -70,7 +70,7 @@ export type Proposal = { id: number; thread_id: number; action: string; summary:
 const MAC_NEEDS_OK = new Set(['event', 'remind', 'draft'])
 /** Mac actions that write something (calendar, reminders, an email draft) wait for your OK; music and windows don't. */
 export const needsApproval = (a: JarvisAction) =>
-  a.type === 'mac' ? MAC_NEEDS_OK.has(a.mac?.command ?? '') : a.type === 'idea_edit' ? a.edit?.done === 'delete' : !['idea', 'remember'].includes(a.type)
+  a.type === 'mac' ? MAC_NEEDS_OK.has(a.mac?.command ?? '') : a.type === 'idea_edit' ? a.edit?.done === 'delete' : !['idea', 'remember', 'role'].includes(a.type)
 
 /** `fleet mac …` argv for a Mac action. Only known commands; values go in as separate arguments. */
 export function macArgv(m: MacAction): string[] {
@@ -154,18 +154,28 @@ export function summary(agents: Agent[]): string {
   const working = agents.filter(a => a.status === 'working')
   const waiting = agents.filter(a => a.status === 'waiting')
   const crashed = agents.filter(a => a.status === 'crashed')
+  const asks = db.prepare("SELECT r.title, count(*) AS n FROM role_items i JOIN roles r ON r.name = i.role WHERE i.status = 'open' AND i.kind = 'question' GROUP BY r.name").all() as { title: string; n: number }[]
   const parts: string[] = []
-  if (needs.length === 0) parts.push('Nothing needs you right now.')
+  if (needs.length === 0) parts.push(asks.length ? 'No agent needs you.' : 'Nothing needs you right now.')
   else parts.push(`${needs.length === 1 ? 'One agent needs' : `${needs.length} agents need`} you: ${needs.map(a => `${a.name}${a.message ? `, asking ${a.message.replace(/[?.]+$/, '')}` : ''}`).join('; ')}.`)
   if (working.length) parts.push(`${working.length} working${working.length <= 3 ? `: ${working.map(a => a.name).join(', ')}` : ''}.`)
   if (waiting.length) parts.push(`${waiting.map(a => a.name).join(' and ')} ${waiting.length === 1 ? 'is' : 'are'} waiting on a background job.`)
   if (crashed.length) parts.push(`${crashed.map(a => a.name).join(' and ')} crashed.`)
+  if (asks.length) parts.push(`${asks.map(q => `${q.title} has ${q.n === 1 ? 'a question' : `${q.n} questions`}`).join(' and ')} for you.`)
   return parts.join(' ')
 }
 
 /** Common requests answered instantly without a model call. Anything it doesn't recognise goes to Claude. */
 export function instant(said: string, agents: Agent[]): JarvisReply | null {
   const t = said.trim().replace(/[.!]+$/, '')
+  // "what does the clerk need from me?": read its open questions out, no model needed
+  const asked = /^(what|which|any|does|has)\b.*\b(needs?|wants?|ask(ing|ed)?|questions?)\b/i.test(t) && (db.prepare('SELECT name, title FROM roles').all() as { name: string; title: string }[])
+    .find(r => new RegExp(`\\b(${[r.name, r.title].map(s => s.replace(/[^\w ]/g, '')).join('|')})\\b`, 'i').test(t))
+  if (asked) {
+    const qs = db.prepare("SELECT text FROM role_items WHERE role = ? AND kind = 'question' AND status = 'open' ORDER BY id").all(asked.name) as { text: string }[]
+    const cards = (db.prepare("SELECT count(*) AS n FROM role_items WHERE role = ? AND kind = 'proposal' AND status = 'open'").get(asked.name) as { n: number }).n
+    return { say: `${qs.length ? `${asked.title} has ${qs.length === 1 ? 'one question' : `${qs.length} questions`}. ${qs.map((q, n) => `${qs.length > 1 ? `${n + 1}: ` : ''}${q.text.replace(/[?.]*$/, '?')}`).join(' ')} You can answer me here.` : `${asked.title} has no questions for you right now.`}${cards ? ` ${cards === 1 ? 'One card waits' : `${cards} cards wait`} on its desk in the Team tab.` : ''}`, actions: [] }
+  }
   if (/^(status|what'?s (going on|happening|up)|(what|who|which agents?)\b.*\b(needs?|waiting)\b.*\bme\b|anything need(s)? me)\??$/i.test(t))
     return { say: summary(agents), actions: [] }
 

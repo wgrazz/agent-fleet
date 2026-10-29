@@ -155,6 +155,10 @@ A role only answers in JSON. The server writes its items and memory and sends a 
 never edits your ideas. Fleet's server runs the schedule, and a run missed while the Mac slept
 happens on wake.
 
+Ask Jarvis "what does the clerk need from me?" and it reads the questions out. Answer it, tell a role
+something, or say "run the clerk now". From a terminal: `fleet role` lists roles, `fleet role NAME`
+shows what it needs, and `fleet role NAME answer N TEXT`, `tell TEXT` and `run` do the same.
+
 **Usage.** 5-hour and weekly limits:
 - Claude: from Claude Code's status line. Its `statusline.sh` writes `~/.fleet/claude-usage.json`.
 - Codex: from its session logs.

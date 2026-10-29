@@ -106,3 +106,16 @@ it('the clerk desk keeps its board; marking a deadline done tells the clerk', as
   expect(inputs.at(-1)).toContain('answer to "Gift tax?": No, under the exclusion')
   expect(inputs.at(-1)).toContain('Your board from last run')
 })
+
+it("Jarvis's status says which roles have questions for you", async () => {
+  const { summary } = await import('../server/jarvis.ts')
+  reply = { brief: 'ok', tasks: [], questions: [{ text: 'What tax year?', detail: '' }], memory: '', deadlines: [], inflight: [], cpa: [], facts: [] }
+  await m.runRole('desk')
+  expect(summary([])).toBe('No agent needs you. Clerk has a question for you.')
+})
+
+it('asking Jarvis what a role needs reads its questions out', async () => {
+  const { instant } = await import('../server/jarvis.ts')
+  expect(instant('What does desk need from me?', [])!.say).toBe('Clerk has one question. What tax year? You can answer me here.')
+  expect(instant('does chief of staff want anything', [])!.say).toMatch(/^Chief of staff has no questions for you right now\. 2 cards wait on its desk/)
+})

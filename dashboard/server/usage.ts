@@ -105,8 +105,12 @@ function messageCost(model: string, u: any) {
 type FileCost = { offset: number; msgs: Map<string, { at: number; cost: number }> }
 const fileCosts = new Map<string, FileCost>()
 
-async function transcriptCost(sinceS: number) {
-  const { openSync, readSync, closeSync } = await import('node:fs')
+// one scan at a time: scans share each file's read position
+let scanning: Promise<unknown> = Promise.resolve()
+const transcriptCost = (sinceS: number) => { const r = scanning.then(() => scanTranscripts(sinceS)); scanning = r.catch(() => 0); return r }
+
+async function scanTranscripts(sinceS: number) {
+  const { open } = await import('node:fs/promises')
   let total = 0
   const files: string[] = []
   for (const pattern of ['*/*.jsonl', '*/*/subagents/*.jsonl'])
@@ -117,24 +121,27 @@ async function transcriptCost(sinceS: number) {
     if (st.mtimeMs / 1000 < sinceS) continue
     const fc = fileCosts.get(f) ?? { offset: 0, msgs: new Map() }
     if (st.size > fc.offset) {
-      // read only what was appended since last time, up to the last complete line
-      const fd = openSync(f, 'r')
-      const buf = Buffer.alloc(st.size - fc.offset)
-      readSync(fd, buf, 0, buf.length, fc.offset)
-      closeSync(fd)
-      const text = buf.toString('utf8')
-      const end = text.lastIndexOf('\n') + 1
-      for (const line of text.slice(0, end).split('\n')) {
-        if (!line.includes('"usage"')) continue
-        try {
-          const d = JSON.parse(line)
-          const m = d.message
-          if (d.type !== 'assistant' || !m?.usage) continue
-          // one reply is logged once per content block with the same usage: count it once
-          fc.msgs.set(m.id ?? d.uuid, { at: Date.parse(d.timestamp) / 1000, cost: messageCost(String(m.model ?? ''), m.usage) })
-        } catch {}
+      // read only what was appended since last time, in 64 MB pieces (one read can't pass 2 GB, and some logs are bigger)
+      const fh = await open(f, 'r')
+      const buf = Buffer.alloc(Math.min(st.size - fc.offset, 64 << 20))
+      while (fc.offset < st.size) {
+        const { bytesRead } = await fh.read(buf, 0, Math.min(buf.length, st.size - fc.offset), fc.offset)
+        const end = buf.subarray(0, bytesRead).lastIndexOf(10) + 1
+        // ponytail: a single line longer than 64 MB is skipped; it's never a usage line in practice
+        if (!end) { if (bytesRead < buf.length) break; fc.offset += bytesRead; continue }
+        for (const line of buf.toString('utf8', 0, end).split('\n')) {
+          if (!line.includes('"usage"')) continue
+          try {
+            const d = JSON.parse(line)
+            const m = d.message
+            if (d.type !== 'assistant' || !m?.usage) continue
+            // one reply is logged once per content block with the same usage: count it once
+            fc.msgs.set(m.id ?? d.uuid, { at: Date.parse(d.timestamp) / 1000, cost: messageCost(String(m.model ?? ''), m.usage) })
+          } catch {}
+        }
+        fc.offset += end
       }
-      fc.offset += Buffer.byteLength(text.slice(0, end))
+      await fh.close()
       fileCosts.set(f, fc)
     }
     for (const { at, cost } of fc.msgs.values()) if (at >= sinceS) total += cost

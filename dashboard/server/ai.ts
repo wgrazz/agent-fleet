@@ -155,12 +155,14 @@ Actions:
 - idea: add an idea (text; optional list, default "Brain Dump")
 - idea_edit: change one idea (edit.id from fleet read '/api/ideas?list=NAME'; fill only what changes, leave the rest empty: text = new wording, notes, list = move it there, done = "done" / "open" / "delete", priority)
 - remember: save a lasting note about the developer or project for future conversations (text)
+- role: the scheduled roles in Fleet's Team tab (fill "role": name, do, question, text). do = "answer" to answer one of its open questions (question = its id from "What's going on", text = the answer in the developer's words), "tell" to pass it a message for its next run (text), or "run" to run it now. These happen right away. The open questions are listed under Team below; for a role's brief, desk cards or deadline board, \`fleet read '/api/roles/NAME'\`. When the developer answers several questions at once, return one answer action per question.
 - mac: do something on the Mac (fill "mac"): music_play, music_pause, music_next, music_previous, music_volume (value 0-100), music_search (value), open_app (app), window (app, where = left|right|full|center), and, which the developer approves first: event (title, when "YYYY-MM-DD HH:MM", minutes, calendar), remind (title, when optional, calendar = list name), draft (to, subject, body: an email draft saved in Mail, never sent). Write emails in the developer's voice: short, plain, friendly.
 Only propose actions when they'd clearly help or were asked for; for questions just answer. Never kill agents (they can do that from the dashboard). If an agent name is ambiguous or missing, ask instead of guessing.`
 
 export type MacAction = { command: string; title: string; when: string; minutes: string; calendar: string; to: string; subject: string; body: string; app: string; where: string; value: string }
 export type IdeaEdit = { id: number; text: string; notes: string; list: string; done: '' | 'done' | 'open' | 'delete'; priority: '' | 'none' | 'low' | 'medium' | 'high' }
-export type JarvisAction = { type: 'reply' | 'key' | 'pause' | 'start' | 'idea' | 'idea_edit' | 'remember' | 'mac'; agent: string; text: string; key: string; tool: string; model: string; effort: string; list: string; name: string; mac?: MacAction; edit?: IdeaEdit }
+export type RoleAction = { name: string; do: 'answer' | 'tell' | 'run'; question: number; text: string }
+export type JarvisAction = { type: 'reply' | 'key' | 'pause' | 'start' | 'idea' | 'idea_edit' | 'remember' | 'mac' | 'role'; agent: string; text: string; key: string; tool: string; model: string; effort: string; list: string; name: string; mac?: MacAction; edit?: IdeaEdit; role?: RoleAction }
 export type JarvisReply = { say: string; end?: boolean; actions: JarvisAction[] }
 
 export const jarvisBrain = (said: string, context: string, memory: string, opts: { cwd: string; resume?: string }) =>
@@ -169,7 +171,7 @@ export const jarvisBrain = (said: string, context: string, memory: string, opts:
       say: str,
       end: { type: 'boolean' },
       actions: { type: 'array', items: obj({
-        type: { type: 'string', enum: ['reply', 'key', 'pause', 'start', 'idea', 'idea_edit', 'remember', 'mac'] }, agent: str, text: str, key: str, tool: str, model: str, effort: str, list: str, name: str,
+        type: { type: 'string', enum: ['reply', 'key', 'pause', 'start', 'idea', 'idea_edit', 'remember', 'mac', 'role'] }, agent: str, text: str, key: str, tool: str, model: str, effort: str, list: str, name: str,
         mac: obj({
           command: { type: 'string', enum: ['', 'music_play', 'music_pause', 'music_next', 'music_previous', 'music_volume', 'music_search', 'open_app', 'window', 'event', 'remind', 'draft'] },
           title: str, when: str, minutes: str, calendar: str, to: str, subject: str, body: str, app: str, where: str, value: str,
@@ -178,6 +180,7 @@ export const jarvisBrain = (said: string, context: string, memory: string, opts:
           id: { type: 'integer' }, text: str, notes: str, list: str,
           done: { type: 'string', enum: ['', 'done', 'open', 'delete'] }, priority: { type: 'string', enum: ['', 'none', 'low', 'medium', 'high'] },
         }),
+        role: obj({ name: str, do: { type: 'string', enum: ['answer', 'tell', 'run'] }, question: { type: 'integer' }, text: str }),
       }, ['type', 'agent', 'text', 'key', 'tool', 'model', 'effort', 'list', 'name', 'mac']) },
     }), {
       tools: ['Read', 'Glob', 'Grep', 'WebSearch', 'WebFetch', 'Bash'],

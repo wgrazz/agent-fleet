@@ -23,6 +23,8 @@ LATER
   fleet unpause ID|NAME  bring a paused agent back in a new session with its conversation
   fleet idea [-l LIST] [-p low|medium|high] TEXT   jot an idea (lands in Brain Dump unless you name a list)
   fleet checklist TITLE < STEPS   a checklist for the owner from STEPS on stdin: one step per line, '## ' lines are headings
+  fleet role [NAME]      your scheduled roles (the dashboard's Team tab), or what NAME needs from you
+  fleet role NAME answer N TEXT | tell TEXT | run   answer its question N, tell it something, or run it now
   fleet restore [DATE]   list the daily backups of your ideas, or put ideas and lists back as they were on DATE
   fleet import-notes [--dry-run]   copy your numbered Apple Notes checklists into Ideas (needs Full Disk Access)
 
@@ -654,6 +656,72 @@ def idea(args):
         else:
             con.execute('INSERT INTO ideas (list, text, created_at) VALUES (?, ?, ?)', (lst, text, int(time.time())))
     print(f'Added to {lst}' + (f', {[k for k, v in PRIORITIES.items() if v == prio][0]} priority.' if prio else '.'))
+
+
+def role(args):
+    """The Team tab from a terminal: list roles, see what one needs from you, answer it, tell it something, run it."""
+    def call(method, path, body=None):
+        try:
+            return api(method, path, body, timeout=15)
+        except urllib.error.HTTPError as e:
+            sys.exit(json.loads(e.read() or '{}').get('error') or f'error {e.code}')
+        except OSError:
+            sys.exit('The dashboard is not running (fleet dash install).')
+    when = lambda s: time.strftime('%a %b %-d %H:%M', time.localtime(s)) if s else 'not scheduled'
+    if not args:
+        rs = call('GET', '/api/roles')
+        if not rs:
+            return print('No roles yet. Add one in the dashboard: Team → New role.')
+        for r in rs:
+            waiting = ', '.join(f'{r[k]} {k if r[k] != 1 else k[:-1]}' for k in ('questions', 'tasks', 'cards') if r[k])
+            state = 'running now' if r['running'] else f'next {when(r["next_run"])}' if r['enabled'] else 'off'
+            print(f'{r["name"]:<12}{r["title"]:<20}{state:<24}{waiting or "nothing for you"}')
+        return print('\nfleet role NAME shows what it needs.')
+    name, verb, rest = args[0], args[1] if len(args) > 1 else '', args[2:]
+    p = call('GET', f'/api/roles/{urllib.parse.quote(name)}')
+    r, items = p['role'], [i for i in p['items'] if i['status'] == 'open']
+    questions = [i for i in items if i['kind'] == 'question']
+    if verb == 'answer' and len(rest) >= 2 and rest[0].isdigit():
+        n = int(rest[0])
+        if not 1 <= n <= len(questions):
+            sys.exit(f'{r["title"]} has {len(questions)} open question{"s" * (len(questions) != 1)}; fleet role {name} lists them.')
+        call('PATCH', f'/api/role-items/{questions[n - 1]["id"]}', {'answer': ' '.join(rest[1:])})
+        return print(f'Answered. {r["title"]} reads it on its next run (fleet role {name} run to run it now).')
+    if verb == 'tell' and rest:
+        call('POST', f'/api/roles/{urllib.parse.quote(name)}/messages', {'text': ' '.join(rest)})
+        return print(f'Told {r["title"]}. It reads it on its next run.')
+    if verb == 'run' and not rest:
+        call('POST', f'/api/roles/{urllib.parse.quote(name)}/run')
+        return print(f'{r["title"]} is running; you get a push when it is done.')
+    if verb:
+        sys.exit(f'fleet role {name} [answer N TEXT | tell TEXT | run]')
+    last = p['runs'][0] if p['runs'] else None
+    print(f'{r["title"]}: next run {when(r["next_run"]) if r["enabled"] else "off"}'
+          + (f', last {when(last["started_at"])} (${last["cost"] or 0:.2f}, {last["status"]})' if last else ''))
+    if last and last['brief']:
+        print(f'\n{last["brief"]}')
+    if questions:
+        print('\nQuestions for you:')
+        for n, q in enumerate(questions, 1):
+            print(f'  {n}. {q["text"]}' + (f'\n     {q["detail"]}' if q['detail'] else ''))
+    tasks = [i for i in items if i['kind'] == 'task']
+    if tasks:
+        print('\nFor you to do:')
+        for t in tasks:
+            print(f'  - {t["text"]}')
+    cards = [i for i in items if i['kind'] == 'proposal']
+    if cards:
+        print('\nOn its desk (accept or reject in the Team tab):')
+        for c in cards:
+            print(f'  - {c["text"]}')
+    board = json.loads(r.get('board') or '{}')
+    soon = sorted((d for d in board.get('deadlines', []) if d['status'] != 'done'), key=lambda d: d['due'] or '9999')
+    if soon:
+        print('\nDeadlines:')
+        for d in soon[:5]:
+            print(f'  {d["due"] or "needs a date":<12}  {d["title"]}' + (f' ({d["form"]})' if d['form'] else ''))
+    if questions:
+        print(f'\nfleet role {name} answer N TEXT answers one.')
 
 
 def checklist(args):
@@ -1394,6 +1462,8 @@ def main(args):
         return idea(rest)
     if cmd == 'checklist':
         return checklist(rest)
+    if cmd == 'role':
+        return role(rest)
     if cmd == 'restore' and len(rest) <= 1:
         return restore(rest)
     if cmd == 'read' and rest:
