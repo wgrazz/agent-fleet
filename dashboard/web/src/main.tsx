@@ -348,7 +348,8 @@ function App() {
   if (route.view === 'settings') {
     detail = <SettingsPage usage={usage.data ?? []} push={push} onBack={() => go(isPhone() ? '#/more' : lastListRoute.current)} onError={fail} />
   } else if (route.view === 'team' && route.a === 'shared' && route.b) {
-    detail = <ShareView key={route.b} id={Number(route.b)} onBack={() => go('#/team')} onError={fail} />
+    detail = <ShareView key={route.b} id={Number(route.b)} onBack={() => go('#/team')} onError={fail} onStart={s => api.get<{ prompt: string }>(`/api/shares/${s.id}/brief`)
+      .then(({ prompt }) => setModal({ kind: 'custom', title: 'Start an agent on this share', ideaId: s.note ? s.id : undefined, initial: { prompt } })).catch(fail)} />
   } else if (route.view === 'team' && route.a) {
     detail = <RoleView key={route.a} name={route.a} onBack={() => go('#/team')} onError={fail} onChanged={team.refresh} />
   } else if (route.view === 'jarvis') {

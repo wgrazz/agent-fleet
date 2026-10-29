@@ -4,7 +4,7 @@
 // doing, an answer to whatever you typed with it). That session stays open, so its page in Team → Shared is a
 // conversation about that one post, with the video at the top.
 import { execFile } from 'node:child_process'
-import { existsSync, mkdirSync, readdirSync, rmSync } from 'node:fs'
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
@@ -66,6 +66,9 @@ async function watch(id: number, url: string) {
       rmSync(join(d, 'audio.wav'), { force: true })
     }
   } catch {} // whatever we got is enough; with nothing, the agent reads the link itself
+  // kept for an agent started from this share later (Start agent), which doesn't share this session
+  writeFileSync(join(d, 'post.md'), [post.by && `Posted by: ${post.by}`, post.title && `Title: ${post.title}`,
+    post.caption && `Caption:\n${post.caption}`, post.said && `Transcript:\n${post.said}`].filter(Boolean).join('\n\n'))
   return post
 }
 
@@ -141,4 +144,17 @@ export async function chat(id: number, text: string) {
   } catch (e) {
     set(id, { status: s.session_id ? 'ready' : 'error', error: (e as Error).message.slice(0, 500) })
   }
+}
+
+/** Everything about a share for a new coding agent: what was sent, the post, and the whole conversation about it. */
+export function brief(id: number) {
+  const s = share(id)
+  if (!s) return
+  const d = dir(id), post = join(d, 'post.md')
+  const talk = (db.prepare('SELECT who, text FROM share_messages WHERE share_id = ? ORDER BY id').all(id) as { who: string; text: string }[])
+    .map(m => `${m.who === 'you' ? 'Me' : 'Fleet'}: ${m.text}`).join('\n\n')
+  return ['Do what we landed on in the conversation below.', `---\nI shared this to Fleet: ${s.sent}`, `Link: ${s.url}`,
+    existsSync(post) && readFileSync(post, 'utf8').slice(0, 30_000),
+    existsSync(join(d, 'frames')) && `Frames from the video (look at them if what's on screen matters): ${join(d, 'frames')}`,
+    talk && `Our conversation about it:\n\n${talk}`].filter(Boolean).join('\n\n')
 }

@@ -642,6 +642,7 @@ const routes: [string, RegExp, Route][] = [
   // Team → Shared: one agent per shared link, each its own conversation
   ['GET', /^\/api\/shares$/, async () => shares.shares()],
   ['GET', /^\/api\/shares\/(\d+)$/, async (_req, [id]) => shares.page(int(id)) ?? (() => { throw new HttpError(404, 'no such share') })()],
+  ['GET', /^\/api\/shares\/(\d+)\/brief$/, async (_req, [id]) => ({ prompt: shares.brief(int(id)) ?? (() => { throw new HttpError(404, 'no such share') })() })],
   ['POST', /^\/api\/shares\/(\d+)\/watch$/, async (_req, [id]) => {
     shares.breakDown(ideaOr404(id).id).catch(e => console.error(`share ${id}:`, e))
   }],

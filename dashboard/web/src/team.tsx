@@ -71,7 +71,7 @@ function SharedList({ selected }: { selected: string }) {
 }
 
 /** One shared post: the video at the top, then a conversation with the agent that watched it. */
-export function ShareView({ id, onBack, onError }: { id: number; onBack: () => void; onError: (e: Error) => void }) {
+export function ShareView({ id, onBack, onError, onStart }: { id: number; onBack: () => void; onError: (e: Error) => void; onStart: (s: Share & { note: Idea | null }) => void }) {
   const page = usePoll<{ share: Share & { video: boolean; note: Idea | null }; messages: ShareMessage[] }>(`/api/shares/${id}`, 2500, onError)
   const box = useRef<HTMLDivElement>(null)
   // opens at the top (the video), then follows the conversation as new replies come in
@@ -91,6 +91,7 @@ export function ShareView({ id, onBack, onError }: { id: number; onBack: () => v
         <div className="dh-text"><div className="t">{s.title || 'Shared'}</div><div className="meta">{when(s.created_at)}</div></div>
         <a className="btn small" href={s.url} target="_blank" rel="noreferrer">Original</a>
         {s.note && <a className="btn small" href={`#/idea/${s.id}`}>Note</a>}
+        <button className="btn small" disabled={busy} onClick={() => onStart(s)}>Start agent</button>
       </header>
       <div className="set-scroll" ref={box}>
         {s.video ? <video className="share-video" src={`/api/shares/${s.id}/video#t=0.1`} controls playsInline preload="metadata" />
