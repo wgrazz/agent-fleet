@@ -904,14 +904,16 @@ export const server = createServer(async (req, res) => {
       res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' })
       return res.end(say)
     }
-    // the "Hey Siri, Jarvis" shortcut, signed by macOS, with this dashboard's address and key inside
-    if (url.pathname === '/api/siri/shortcut' && req.method === 'GET') {
-      const file = join(FLEET_DIR, 'Jarvis.shortcut')
+    // the "Hey Siri, Jarvis" and "Save to Fleet" (share sheet) shortcuts, signed by macOS, with this dashboard's address and key inside
+    const shortcut = url.pathname.match(/^\/api\/(siri|share)\/shortcut$/)?.[1]
+    if (shortcut && req.method === 'GET') {
+      const name = shortcut === 'siri' ? 'Jarvis.shortcut' : 'Save to Fleet.shortcut'
+      const file = join(FLEET_DIR, name)
       // the address the phone used to get here (Tailscale serve's name), so the shortcut calls back the same way
       const host = String(req.headers['x-forwarded-host'] ?? req.headers.host ?? '').split(',')[0].trim()
-      if (!/\.ts\.net$/.test(host.replace(/:\d+$/, ''))) throw new HttpError(400, 'open the dashboard through your tailnet address (on your phone) to make the Siri shortcut')
-      await run(FLEET_BIN, ['dash', 'siri', file, host]).catch(e => { throw new HttpError(500, String(e.stderr || e.message).trim().slice(0, 300)) })
-      res.writeHead(200, { 'Content-Type': 'application/octet-stream', 'Content-Disposition': 'attachment; filename="Jarvis.shortcut"', 'Cache-Control': 'no-store' })
+      if (!/\.ts\.net$/.test(host.replace(/:\d+$/, ''))) throw new HttpError(400, 'open the dashboard through your tailnet address (on your phone) to make the shortcut')
+      await run(FLEET_BIN, ['dash', shortcut, file, host]).catch(e => { throw new HttpError(500, String(e.stderr || e.message).trim().slice(0, 300)) })
+      res.writeHead(200, { 'Content-Type': 'application/octet-stream', 'Content-Disposition': `attachment; filename="${name}"`, 'Cache-Control': 'no-store' })
       return res.end(readFile(file))
     }
     if (url.pathname === '/api/uploads' && req.method === 'POST') return send(res, 200, { path: await upload(req) })

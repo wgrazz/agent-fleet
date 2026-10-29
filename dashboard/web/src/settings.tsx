@@ -157,6 +157,12 @@ export function SettingsPage({ usage, push, onBack, onError }: { usage: Usage[];
           </div>
         </Section>
 
+        <Section title="Share to Fleet" hint="A share-sheet shortcut: in Instagram, TikTok, Safari or any app, tap Share → Save to Fleet and the link lands in Brain Dump. Run on its own, it saves your clipboard. It holds your access key, so keep it to yourself. Tailscale must be on.">
+          <div className="set-row">
+            <a className="btn primary" href="/api/share/shortcut" download="Save to Fleet.shortcut">Add the Save to Fleet shortcut</a>
+          </div>
+        </Section>
+
         <MacAccess />
 
         <Section title="Jarvis's budget" hint="Jarvis's share of your weekly Claude limit, worked out from what all your Claude sessions cost this week.">

@@ -34,6 +34,7 @@ DASHBOARD
   fleet mac …            what Jarvis can do on this Mac: music, calendar, reminders, draft, apps, open, window, screen
   fleet ask TEXT         ask Jarvis (the dashboard's assistant) from any terminal or script
   fleet dash siri [FILE] make the "Hey Siri, Jarvis" shortcut for your iPhone (default ~/Desktop/Jarvis.shortcut)
+  fleet dash share [FILE] make the "Save to Fleet" share-sheet shortcut: share a reel or link from any app into Brain Dump
   fleet dash install     run the dashboard at login and put it on your tailnet for your phone (--local: Mac only)
   fleet dash update      after changing the dashboard's code: rebuild the page and restart the server
   fleet dash uninstall   stop it and remove it from login items
@@ -1234,21 +1235,14 @@ def siri_shortcut(path, host=''):
     nothing, or after 100 turns as a backstop.
     ponytail: Shortcuts can't tell whether music was playing, so it always resumes; nothing playing before means it starts the last song.
     It holds your access key, so it's made on demand and never saved in the repo."""
-    import plistlib
-    import tempfile
     import uuid
     host = host or ts_host()
     if not host:
         sys.exit('Siri needs the dashboard on your tailnet: install Tailscale, then fleet dash install.')
     said, answer, voice, loop, done = (str(uuid.uuid4()).upper() for _ in range(5))
-    text = lambda s: {'Value': {'string': s}, 'WFSerializationType': 'WFTextTokenString'}
-    fields = lambda *kv: {'Value': {'WFDictionaryFieldValueItems': [{'WFItemType': 0, 'WFKey': text(k), 'WFValue': v} for k, v in kv]},
-                          'WFSerializationType': 'WFDictionaryFieldValue'}
-    output = lambda uid, name: {'Value': {'string': '\ufffc', 'attachmentsByRange': {'{0, 1}': {'Type': 'ActionOutput', 'OutputUUID': uid, 'OutputName': name}}},
-                                'WFSerializationType': 'WFTextTokenString'}
-    key = fields(('X-Fleet-Key', text(config()['key'])))
-    step = lambda ident, **p: {'WFWorkflowActionIdentifier': f'is.workflow.actions.{ident}', 'WFWorkflowActionParameters': p}
-    workflow = {
+    output = lambda uid, name: sc_token({'Type': 'ActionOutput', 'OutputUUID': uid, 'OutputName': name})
+    text, fields, step, key = sc_text, sc_fields, sc_step, sc_fields(('X-Fleet-Key', sc_text(config()['key'])))
+    sign_shortcut(path, {
         'WFWorkflowActions': [
             step('pausemusic', WFPlayPauseBehavior='Pause'),  # so the mic can hear you
             step('repeat.count', GroupingIdentifier=loop, WFControlFlowMode=0, WFRepeatCount=100),
@@ -1273,11 +1267,47 @@ def siri_shortcut(path, host=''):
             step('repeat.count', GroupingIdentifier=loop, WFControlFlowMode=2),
             step('pausemusic', WFPlayPauseBehavior='Play'),  # the 100-turn backstop
         ],
-        'WFWorkflowClientVersion': '2302.0.4', 'WFWorkflowMinimumClientVersion': 900, 'WFWorkflowMinimumClientVersionString': '900',
         'WFWorkflowIcon': {'WFWorkflowIconStartColor': 463140863, 'WFWorkflowIconGlyphNumber': 59511},
-        'WFWorkflowImportQuestions': [], 'WFWorkflowTypes': [], 'WFWorkflowInputContentItemClasses': ['WFStringContentItem'],
-        'WFWorkflowOutputContentItemClasses': [], 'WFQuickActionSurfaces': [], 'WFWorkflowHasShortcutInputVariables': False,
-    }
+        'WFWorkflowTypes': [], 'WFWorkflowInputContentItemClasses': ['WFStringContentItem'], 'WFWorkflowHasShortcutInputVariables': False,
+    })
+
+
+def share_shortcut(path, host=''):
+    """A signed "Save to Fleet" shortcut for the iPhone's share sheet: share a link (an Instagram reel, a TikTok, a page) or
+    some text from any app and it lands in Brain Dump. Run on its own (widget, Action Button) it saves what's on the clipboard.
+    It holds your access key, so it's made on demand and never saved in the repo."""
+    host = host or ts_host()
+    if not host:
+        sys.exit('Sharing to Fleet needs the dashboard on your tailnet: install Tailscale, then fleet dash install.')
+    shared = sc_token({'Type': 'ExtensionInput'})
+    sign_shortcut(path, {
+        'WFWorkflowActions': [
+            sc_step('downloadurl', WFURL=f'https://{host}/api/ideas', WFHTTPMethod='POST', ShowHeaders=True,
+                    WFHTTPHeaders=sc_fields(('X-Fleet-Key', sc_text(config()['key']))), WFHTTPBodyType='JSON',
+                    WFJSONValues=sc_fields(('text', shared))),
+            sc_step('notification', WFNotificationActionBody='Saved to Brain Dump', WFNotificationActionSound=False),
+        ],
+        'WFWorkflowIcon': {'WFWorkflowIconStartColor': 463140863, 'WFWorkflowIconGlyphNumber': 59446},
+        'WFWorkflowTypes': ['ActionExtension'], 'WFWorkflowHasShortcutInputVariables': True,
+        'WFWorkflowInputContentItemClasses': ['WFURLContentItem', 'WFStringContentItem'],
+        'WFWorkflowNoInputBehavior': {'Name': 'WFWorkflowNoInputBehaviorGetClipboard', 'Parameters': {}},
+    })
+
+
+# Shortcuts' plist pieces, shared by the shortcuts above
+sc_text = lambda s: {'Value': {'string': s}, 'WFSerializationType': 'WFTextTokenString'}
+sc_token = lambda attachment: {'Value': {'string': '\ufffc', 'attachmentsByRange': {'{0, 1}': attachment}}, 'WFSerializationType': 'WFTextTokenString'}
+sc_fields = lambda *kv: {'Value': {'WFDictionaryFieldValueItems': [{'WFItemType': 0, 'WFKey': sc_text(k), 'WFValue': v} for k, v in kv]},
+                         'WFSerializationType': 'WFDictionaryFieldValue'}
+sc_step = lambda ident, **p: {'WFWorkflowActionIdentifier': f'is.workflow.actions.{ident}', 'WFWorkflowActionParameters': p}
+
+
+def sign_shortcut(path, workflow):
+    """Write WORKFLOW as a shortcut file anyone can import, signed by macOS, readable only by you."""
+    import plistlib
+    import tempfile
+    workflow = {'WFWorkflowClientVersion': '2302.0.4', 'WFWorkflowMinimumClientVersion': 900, 'WFWorkflowMinimumClientVersionString': '900',
+                'WFWorkflowImportQuestions': [], 'WFWorkflowOutputContentItemClasses': [], 'WFQuickActionSurfaces': [], **workflow}
     with tempfile.NamedTemporaryFile(suffix='.shortcut') as raw:
         plistlib.dump(workflow, raw, fmt=plistlib.FMT_BINARY)
         raw.flush()
@@ -1486,6 +1516,8 @@ def main(args):
         return dash_update()
     if cmd == 'dash' and rest[:1] == ['siri'] and len(rest) <= 3:  # siri [FILE] [HOST]
         return siri_shortcut(rest[1] if len(rest) > 1 else os.path.expanduser('~/Desktop/Jarvis.shortcut'), rest[2] if len(rest) > 2 else '')
+    if cmd == 'dash' and rest[:1] == ['share'] and len(rest) <= 3:  # share [FILE] [HOST]
+        return share_shortcut(rest[1] if len(rest) > 1 else os.path.expanduser('~/Desktop/Save to Fleet.shortcut'), rest[2] if len(rest) > 2 else '')
     if cmd == 'tts' and rest == ['install']:
         return tts_install()
     if cmd == 'dash' and rest == ['uninstall']:

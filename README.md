@@ -218,6 +218,10 @@ same memory, cost cap and actions, from any terminal or script. That makes it ea
   4. **Speak Text.**
 
   Then say "Hey Siri, Jarvis". Tailscale must be on.
+- **Share to Fleet from any app.** On the phone, open Settings → **Share to Fleet** → **Add the Save
+  to Fleet shortcut** (or `fleet dash share` on the Mac and AirDrop it). Then in Instagram, TikTok,
+  Safari or anything else: Share → **Save to Fleet**, and the link lands in Brain Dump. Run on its
+  own it saves your clipboard. Tailscale must be on.
 
 **Keys:**
 
