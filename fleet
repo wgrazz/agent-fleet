@@ -1239,7 +1239,7 @@ def siri_shortcut(path, host=''):
     host = host or ts_host()
     if not host:
         sys.exit('Siri needs the dashboard on your tailnet: install Tailscale, then fleet dash install.')
-    said, answer, voice, loop, done = (str(uuid.uuid4()).upper() for _ in range(5))
+    said, answer, voice, loop, done, plain = (str(uuid.uuid4()).upper() for _ in range(6))
     output = lambda uid, name: sc_token({'Type': 'ActionOutput', 'OutputUUID': uid, 'OutputName': name})
     text, fields, step, key = sc_text, sc_fields, sc_step, sc_fields(('X-Fleet-Key', sc_text(config()['key'])))
     sign_shortcut(path, {
@@ -1251,14 +1251,16 @@ def siri_shortcut(path, host=''):
             step('downloadurl', UUID=answer, WFURL=f'https://{host}/api/jarvis/say', WFHTTPMethod='POST', ShowHeaders=True,
                  WFHTTPHeaders=key, WFHTTPBodyType='JSON', WFJSONValues=fields(('text', output(said, 'Dictated Text')))),
             # in Jarvis's own voice (made on the Mac, like in the app), or Siri's if you chose the device voice
-            *([step('speaktext', WFText=output(answer, 'Contents of URL'))] if config().get('voice_engine') == 'device' else [
+            *([step('text.replace', UUID=plain, WFInput=output(answer, 'Contents of URL'), WFReplaceTextFind='[end]'),
+               step('speaktext', WFText=output(plain, 'Updated Text'))] if config().get('voice_engine') == 'device' else [
                 step('downloadurl', UUID=voice, WFURL=f'https://{host}/api/tts', WFHTTPMethod='POST', ShowHeaders=True,
                      WFHTTPHeaders=key, WFHTTPBodyType='JSON', WFJSONValues=fields(('text', output(answer, 'Contents of URL')))),
                 step('playsound', WFInput={'Value': {'Type': 'ActionOutput', 'OutputUUID': voice, 'OutputName': 'Contents of URL'},
                                            'WFSerializationType': 'WFTextTokenAttachment'}),
             ]),
-            # Jarvis ends a goodbye with U+2063 (unspoken): stop listening
-            step('conditional', GroupingIdentifier=done, WFControlFlowMode=0, WFCondition=99, WFConditionalActionString='\u2063',
+            # Jarvis ends a goodbye with [end] (never spoken): stop listening. Not an invisible character: iOS counts that as
+            # an empty value and the If stops the shortcut with "choose a value for each parameter" after the first answer.
+            step('conditional', GroupingIdentifier=done, WFControlFlowMode=0, WFCondition=99, WFConditionalActionString='[end]',
                  WFInput={'Type': 'Variable', 'Variable': {'Value': {'Type': 'ActionOutput', 'OutputUUID': answer, 'OutputName': 'Contents of URL'},
                                                            'WFSerializationType': 'WFTextTokenAttachment'}}),
             step('pausemusic', WFPlayPauseBehavior='Play'),

@@ -917,6 +917,7 @@ export const server = createServer(async (req, res) => {
       return serveStatic(req, res, url.pathname)
     }
     // the Siri shortcut's two calls are logged, so a run that goes quiet on the phone shows where it stopped
+    const END = '[end]'
     const siri = url.pathname === '/api/jarvis/say' || url.pathname === '/api/tts'
     if (!authorized(req)) {
       if (siri) console.log(`${url.pathname}: refused, wrong or missing key (an old shortcut? add it again from Settings)`)
@@ -924,7 +925,7 @@ export const server = createServer(async (req, res) => {
     }
     if (url.pathname === '/api/tts' && req.method === 'POST') {
       const b = await body(req)
-      const text = str(b.text, 2000).replace(/\u2063/g, '').trim() // (the Siri shortcut's end-of-conversation mark)
+      const text = str(b.text, 2000).replaceAll(END, '').trim() // (the Siri shortcut's end-of-conversation mark)
       if (!text) { console.log('/api/tts: nothing to say'); throw new HttpError(400, 'nothing to say') }
       const engine = ['kokoro', 'mac'].includes(b.engine) ? b.engine : config.voice_engine === 'mac' ? 'mac' : 'kokoro'
       if (engine === 'kokoro' && !kokoroInstalled()) throw new HttpError(409, 'natural voice not installed: run fleet tts install')
@@ -933,14 +934,13 @@ export const server = createServer(async (req, res) => {
       res.writeHead(200, { 'Content-Type': 'audio/mp4', 'Cache-Control': 'private, max-age=3600' })
       return res.end(readFile(file))
     }
-    const END = '\u2063'
 // Siri's shortcut: plain text in, plain text out, so Shortcuts can speak the reply with nothing in between.
     // Always 200: whatever comes back is what Siri says.
     if (url.pathname === '/api/jarvis/say' && req.method === 'POST') {
       const said = str((await body(req)).text, 2000).trim()
       console.log(`/api/jarvis/say: heard ${said.length} chars`)
       const say = !said ? `Okay.${END}` : await runJarvis(said) // silence ends the conversation (and the shortcut resumes your music)
-        // a trailing invisible separator (U+2063) tells the shortcut the conversation is over; Siri doesn't read it out
+        // a trailing [end] tells the shortcut the conversation is over; it's taken out before anything is spoken
         .then(r => r.say + ((r as { proposals?: unknown[] }).proposals?.length ? ' That needs your OK in Fleet.' : '') + ((r as { end?: boolean }).end ? END : ''))
         .catch(e => `Sorry, that didn't work: ${(e as Error).message}`)
       console.log(`/api/jarvis/say: answered ${say.length} chars in ${((Date.now() - t0) / 1000).toFixed(1)}s`)
