@@ -6,7 +6,7 @@ import { expect, it } from 'vitest'
 
 const home = realpathSync(mkdtempSync(join(tmpdir(), 'fleet-files-')))
 process.env.HOME = home
-const { findFiles, readText } = await import('../server/files.ts')
+const { fileAt, findFiles, INLINE, readText } = await import('../server/files.ts')
 const put = (p: string, text = 'hi') => { mkdirSync(join(home, p, '..'), { recursive: true }); writeFileSync(join(home, p), text) }
 put('repo/docs/specs/search-design.md', '# Search')
 put('repo/app/src/index.ts')
@@ -31,4 +31,12 @@ it('refuses secrets, missing files and anything outside home', () => {
 it('finds file names by every word, skipping node_modules and secrets', async () => {
   expect(await findFiles(join(home, 'repo'), 'search design')).toEqual(['docs/specs/search-design.md'])
   expect(await findFiles(join(home, 'repo'), 'env')).toEqual([])
+})
+
+it('hands over any file (a PDF to print) under the same rules, and only shows safe kinds in the page', () => {
+  put('repo/out/form.pdf', '%PDF-1.4')
+  expect(fileAt(app, 'out/form.pdf').real).toBe(join(home, 'repo/out/form.pdf'))
+  expect(() => fileAt(app, '../.env')).toThrow(/secret/)
+  expect(INLINE.pdf).toBe('application/pdf')
+  expect(INLINE.html ?? INLINE.svg).toBeUndefined() // these would run script as the dashboard: download only
 })

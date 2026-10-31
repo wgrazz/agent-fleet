@@ -44,11 +44,16 @@ export function FileViewer({ cwd, path: asked, onClose }: { cwd: string; path: s
   const [error, setError] = useState('')
   const [choices, setChoices] = useState<string[]>([]) // not where it said: files with that name, to pick from
   const [raw, setRaw] = useState(false)
+  const [binary, setBinary] = useState(false) // not text: preview (PDF, picture) or download it instead
+  const ext = path.replace(/:\d+(-\d+)?$/, '').split('.').pop()!.toLowerCase()
+  const shows = ['pdf', 'png', 'jpg', 'jpeg', 'gif', 'webp', 'heic'].includes(ext) // what /api/files/raw opens in the page
+  const src = `/api/files/raw?cwd=${encodeURIComponent(cwd)}&path=${encodeURIComponent(path)}`
   const at = useRef<HTMLDivElement>(null)
   const [from, to] = (path.match(/:(\d+)(?:-(\d+))?$/)?.slice(1) ?? []).map(Number)
   useEffect(() => {
-    setFile(null); setError(''); setChoices([])
-    api.get<typeof file>(`/api/files/read?cwd=${encodeURIComponent(cwd)}&path=${encodeURIComponent(path)}`).then(setFile).catch(async e => {
+    setFile(null); setError(''); setChoices([]); setBinary(false)
+    api.get<typeof file>(`/api/files/read?cwd=${encodeURIComponent(cwd)}&path=${encodeURIComponent(path)}`).then(f => (shows ? setBinary(true) : setFile(f))).catch(async e => {
+      if (/isn't a text file|is over 2 MB/.test(e.message)) return setBinary(true)
       const name = path.replace(/:\d+(-\d+)?$/, '').split('/').pop()!
       const found = /no such file/.test(e.message) ? await api.get<string[]>(`/api/files/search?cwd=${encodeURIComponent(cwd)}&q=${encodeURIComponent(name)}`).catch(() => []) : []
       const exact = found.filter(f => f.split('/').pop() === name)
@@ -61,7 +66,19 @@ export function FileViewer({ cwd, path: asked, onClose }: { cwd: string; path: s
   const md = !!file && /\.(md|markdown|mdx)$/i.test(file.path) && !from
   return (
     <Dialog title={file?.rel || path} onClose={onClose} wide>
-      {error ? (
+      {binary ? (
+        <>
+          <div className="file-acts">
+            <a className="btn small primary" href={`${src}&download=1`} download>Download</a>
+            <a className="btn small" href={src} target="_blank" rel="noreferrer">Open{shows ? ' to print' : ''}</a>
+            <button className="btn small" onClick={() => navigator.clipboard.writeText(path).catch(() => {})}>Copy path</button>
+            <button className="btn small" onClick={onClose}>Close</button>
+          </div>
+          {ext === 'pdf' ? <iframe className="file-frame" src={src} title={path} />
+            : shows ? <img className="file-img" src={src} alt={path} />
+            : <p className="dialog-text">This isn't a text file, so it can't be shown here. Download it to open it.</p>}
+        </>
+      ) : error ? (
         <>
           <p className="dialog-text">{choices.length ? `Which ${path.split('/').pop()}?` : error}</p>
           {choices.map(c => <button key={c} className="file-hit" onClick={() => setPath(c)}><b>{c.split('/').pop()}</b><span>{c.split('/').slice(0, -1).join('/')}</span></button>)}

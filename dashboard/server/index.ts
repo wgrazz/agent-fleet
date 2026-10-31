@@ -4,7 +4,7 @@ import { randomBytes, timingSafeEqual } from 'node:crypto'
 import { createReadStream, existsSync, mkdirSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import { homedir } from 'node:os'
-import { extname, join, normalize } from 'node:path'
+import { basename, extname, join, normalize } from 'node:path'
 import { improvePrompt, interviewPrompt, jarvisBrain, recommend, type JarvisAction } from './ai.ts'
 import { changes } from './git.ts'
 import { conversations, transcript } from './history.ts'
@@ -21,7 +21,7 @@ import { aiBudget, usage } from './usage.ts'
 import { kokoroInstalled, speech, voices } from './tts.ts'
 import { readFileSync as readFile } from 'node:fs'
 import * as J from './jarvis.ts'
-import { FileError, findFiles, readText } from './files.ts'
+import { FileError, fileAt, findFiles, INLINE, readText } from './files.ts'
 import * as docs from './docs.ts'
 import { behind, checkAll, updates, upgrade } from './updates.ts'
 import { AREAS, areaColor, notePrompt } from '../web/src/areas.ts'
@@ -976,6 +976,16 @@ export const server = createServer(async (req, res) => {
       if (!existsSync(file)) throw new HttpError(404, 'no such photo')
       res.writeHead(200, { 'Content-Type': 'image/jpeg', 'Cache-Control': 'private, max-age=86400' })
       return createReadStream(file).pipe(res)
+    }
+    // a file an agent mentions, as itself: PDFs and pictures open in the page, anything else downloads
+    if (url.pathname === '/api/files/raw' && req.method === 'GET') {
+      const sp = url.searchParams
+      let f: ReturnType<typeof fileAt>
+      try { f = fileAt(sp.get('cwd') ?? '', sp.get('path') ?? '') } catch (e) { throw e instanceof FileError ? new HttpError(e.status, e.message) : e }
+      const name = basename(f.real), type = INLINE[extname(name).slice(1).toLowerCase()]
+      res.writeHead(200, { 'Content-Type': type ?? 'application/octet-stream', 'Content-Length': f.st.size, 'X-Content-Type-Options': 'nosniff', 'Cache-Control': 'no-store',
+        'Content-Disposition': `${type && !sp.has('download') ? 'inline' : 'attachment'}; filename*=UTF-8''${encodeURIComponent(name)}` })
+      return createReadStream(f.real).pipe(res)
     }
     // a shared post's video; Safari won't play one without byte ranges
     const clip = url.pathname.match(/^\/api\/shares\/(\d+)\/video$/)

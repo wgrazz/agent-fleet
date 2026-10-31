@@ -34,13 +34,22 @@ export function resolve(cwd: string, path: string) {
   }
 }
 
-export function readText(cwd: string, path: string) {
+/** Where a file an agent mentions really is, after the same checks as everything else here. */
+export function fileAt(cwd: string, path: string) {
   const full = resolve(cwd, path)
   if (!existsSync(full)) throw new FileError(404, `no such file: ${path}`)
   const real = realpathSync(full) // a link can't lead out to a secret
   allowed(real)
   const st = statSync(real)
   if (!st.isFile()) throw new FileError(400, `${path} is a folder`)
+  return { real, st }
+}
+
+// shown in the page; any other file only downloads (an HTML or SVG file opened here could run script as the dashboard)
+export const INLINE: Record<string, string> = { pdf: 'application/pdf', png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp', heic: 'image/heic' }
+
+export function readText(cwd: string, path: string) {
+  const { real, st } = fileAt(cwd, path)
   if (st.size > 2 << 20) throw new FileError(413, `${path} is over 2 MB`)
   const buf = readFileSync(real)
   if (buf.subarray(0, 8000).includes(0)) throw new FileError(415, `${path} isn't a text file`)
