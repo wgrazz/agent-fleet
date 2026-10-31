@@ -330,7 +330,7 @@ function App() {
       onChange={() => { ideas.refresh(); lists.refresh() }} onError={fail} onSort={runSort} onMenu={ideaMenu}
       onHeaderMenu={(x, y) => listMenu(listShown, x, y)} />
   } else if (middleView.view === 'checklists') {
-    middle = <ChecklistsPane lists={allLists} onNew={newChecklist} />
+    middle = <ChecklistsPane lists={allLists} onNew={newChecklist} onMenu={listMenu} />
   } else if (middleView.view === 'docs') {
     middle = <DocsPane view={docView} selected={route.b} onError={fail} />
   } else if (middleView.view === 'team') {

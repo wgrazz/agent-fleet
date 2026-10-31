@@ -416,16 +416,10 @@ export function AllNotesPane({ items, lists, selected, onChange, onError, onMenu
 }
 
 /** Checklists on their own: each one with how far along it is, the ones still going first and finished ones under Done. */
-export function ChecklistsPane({ lists, onNew }: { lists: List[]; onNew: () => void }) {
+export function ChecklistsPane({ lists, onNew, onMenu }: { lists: List[]; onNew: () => void; onMenu: (l: List, x: number, y: number) => void }) {
   const all = lists.filter(l => l.kind === 'checklist')
   const finished = (l: List) => l.open === 0 && l.done > 0
-  const row = (l: List) => (
-    <a key={l.id} className="it plain checklist-row" href={`#/ideas/${encodeURIComponent(l.name)}`}>
-      <span className="nm"><span className="sq round" style={{ background: l.color }} />{l.name}</span>
-      <span className="tm">{l.done}/{l.open + l.done}</span>
-      <span className="meter"><span style={{ width: `${l.open + l.done ? (100 * l.done) / (l.open + l.done) : 0}%` }} /></span>
-    </a>
-  )
+  const row = (l: List) => <ChecklistRow key={l.id} l={l} onMenu={(x, y) => onMenu(l, x, y)} />
   return (
     <section className="list ideas">
       <div className="lh"><h4>Checklists</h4><button className="btn small" onClick={onNew}>+ New</button></div>
@@ -436,6 +430,18 @@ export function ChecklistsPane({ lists, onNew }: { lists: List[]; onNew: () => v
         {!all.length && <div className="empty">No checklists yet. Agents make them with <code>fleet checklist</code>, or tap + New.</div>}
       </div>
     </section>
+  )
+}
+
+/** Long-press (or right-click) opens the same menu as the sidebar row: rename, color, delete. */
+function ChecklistRow({ l, onMenu }: { l: List; onMenu: (x: number, y: number) => void }) {
+  const hold = useHold(onMenu)
+  return (
+    <a className="it plain checklist-row" href={`#/ideas/${encodeURIComponent(l.name)}`} {...hold}>
+      <span className="nm"><span className="sq round" style={{ background: l.color }} />{l.name}</span>
+      <span className="tm">{l.done}/{l.open + l.done}</span>
+      <span className="meter"><span style={{ width: `${l.open + l.done ? (100 * l.done) / (l.open + l.done) : 0}%` }} /></span>
+    </a>
   )
 }
 
