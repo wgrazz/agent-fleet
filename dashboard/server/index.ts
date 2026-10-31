@@ -713,7 +713,7 @@ const routes: [string, RegExp, Route][] = [
     const b = await body(req)
     const slug = item.text.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 28)
     const started = await startAgent({ ...b, folder_id: ideaFolder(b, item.area), name: str(b.name, 40) || slug, prompt: str(b.prompt, 100_000) || notePrompt(item) })
-    ideas.updateIdea(item.id, { agent: started.name })
+    ideas.updateIdea(item.id, { agent: started.name, done: true }) // handed off: the agent has it now
     return started
   }],
   ['POST', /^\/api\/ideas\/import$/, async () => {

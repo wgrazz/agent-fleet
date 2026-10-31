@@ -121,6 +121,7 @@ describe('fake agent through the API', () => {
     const started = (await api('POST', `/api/ideas/${id}/start`, { name: `${name}-n`, tool: 'fake', cwd: dir })).data
     const a = (await api('GET', '/api/agents')).data.find((x: any) => x.name === started.name)
     expect(a.folder_id).toBe(growth.id)
+    expect((await api('GET', '/api/ideas')).data.find((i: any) => i.id === id).done).toBe(1) // checked off once handed to an agent
     await api('DELETE', `/api/agents/${started.name}`)
   })
 })
