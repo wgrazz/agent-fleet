@@ -391,9 +391,9 @@ def attach(name):
 def start(name, cwd, argv=None):
     """New detached session NAME in CWD: a plain shell, or ARGV run through a login shell (for PATH).
     With ARGV the pane stays after the agent exits so the dashboard can read the exit code."""
-    # caffeinate keeps the Mac from idle/system sleep (system sleep only on AC power) while the session lives
+    # caffeinate -s keeps the Mac awake while the session lives, but only on AC power; on battery it sleeps normally
     shell = os.environ.get('SHELL', '/bin/zsh')
-    keepawake = ['caffeinate', '-ims'] if shutil.which('caffeinate') else []  # macOS only; Linux just gets the shell
+    keepawake = ['caffeinate', '-ms'] if shutil.which('caffeinate') else []  # macOS only; Linux just gets the shell
     cmd = [shell, '-lic', shlex.join(argv)] if argv else [shell]
     remain = [';', 'set-option', '-w', '-t', f'={name}:', 'remain-on-exit', 'on'] if argv else []
     subprocess.run(['tmux', 'new-session', '-d', '-s', name, '-c', cwd, *keepawake, *cmd, *remain], check=True)
@@ -1362,7 +1362,7 @@ def dash_uninstall():
 def selftest():
     procs = {
         10: dict(pid=10, ppid=1, age='1', tty='s0', cmd='tmux'),
-        11: dict(pid=11, ppid=10, age='1', tty='s1', cmd='caffeinate -ims /bin/zsh'),
+        11: dict(pid=11, ppid=10, age='1', tty='s1', cmd='caffeinate -ms /bin/zsh'),
         12: dict(pid=12, ppid=11, age='1', tty='s1', cmd='/bin/zsh'),
         20: dict(pid=20, ppid=12, age='1', tty='s1', cmd='claude'),
         21: dict(pid=21, ppid=20, age='1', tty='s1', cmd='/bin/zsh -c until done; do sleep 300; done'),
