@@ -1,6 +1,6 @@
 // End to end: a real server on a spare port, a fake agent in a real tmux session, driven through the HTTP API.
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process'
-import { copyFileSync, mkdtempSync, writeFileSync } from 'node:fs'
+import { copyFileSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
@@ -92,6 +92,15 @@ describe('fake agent through the API', () => {
     expect(got.headers.get('content-type')).toBe('image/jpeg')
     expect((await up(Buffer.from('not a photo'))).status).toBe(400)
     expect((await fetch(`http://127.0.0.1:${port}/api/uploads/x.jpg`)).status).toBe(401)
+  })
+
+  it('keeps any other file as it is, under its own name, and never outside uploads', async () => {
+    const up = (name: string) => fetch(`http://127.0.0.1:${port}/api/uploads`, { method: 'POST', body: '%PDF-1.4',
+      headers: { 'X-Fleet-Key': key, 'Content-Type': 'application/pdf', 'X-File-Name': encodeURIComponent(name) } }).then(r => r.json())
+    const { path } = await up('My Form.pdf')
+    expect(path).toMatch(/\/uploads\/[\w-]+-My-Form\.pdf$/)
+    expect(readFileSync(path, 'utf8')).toBe('%PDF-1.4')
+    expect((await up('../../evil.sh')).path).toMatch(/\/uploads\/[\w-]+-evil\.sh$/)
   })
 
   it('reports a crash with its exit code', async () => {

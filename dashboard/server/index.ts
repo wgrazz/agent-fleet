@@ -886,7 +886,8 @@ async function upload(req: IncomingMessage) {
   if (!size) throw new HttpError(400, 'empty file')
   mkdirSync(UPLOADS, { recursive: true, mode: 0o700 })
   const name = `${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}-${randomBytes(3).toString('hex')}`
-  if (!String(req.headers['content-type'] ?? '').startsWith('image/')) {
+  // the composer names every file it sends; anything unnamed is a photo, as before
+  if (req.headers['x-file-name'] && !String(req.headers['content-type'] ?? '').startsWith('image/')) {
     let given = ''
     try { given = decodeURIComponent(String(req.headers['x-file-name'] ?? '')) } catch {}
     const safe = given.split(/[\\/]/).pop()!.replace(/[^\w.-]+/g, '-').replace(/^[.-]+/, '').slice(-80) || 'file'
