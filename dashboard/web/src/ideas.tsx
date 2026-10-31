@@ -394,17 +394,22 @@ export function AllNotesPane({ items, lists, selected, onChange, onError, onMenu
 }) {
   const [sort, setSort] = useSort()
   const { area, setArea, agent, setAgent, keep } = useIdeaFilters('*all notes')
+  const [q, setQ] = useState('')
+  const words = q.toLowerCase().split(/\s+/).filter(Boolean)
+  const found = (i: Idea) => words.every(w => `${i.text}\n${i.notes}`.toLowerCase().includes(w))
   const checklists = new Set(lists.filter(l => l.kind === 'checklist').map(l => l.name))
-  const open = items.filter(i => !i.done && !checklists.has(i.list) && !isHeading(i.text) && keep(i))
+  // searching also finds finished notes: looking something up shouldn't depend on whether you checked it off
+  const open = items.filter(i => (!i.done || words.length > 0) && !checklists.has(i.list) && !isHeading(i.text) && keep(i) && found(i))
     .sort(sort === 'manual' ? (a, b) => a.list.localeCompare(b.list) || SORTS.manual.by(a, b) : SORTS[sort].by)
   const toggle = (i: Idea) => api.patch(`/api/ideas/${i.id}`, { done: !i.done }).then(onChange).catch(onError)
   return (
     <section className="list ideas">
       <div className="lh"><h4><LinesIcon />All notes</h4><span className="progress">{open.length}</span></div>
+      <div className="search"><input type="search" value={q} onChange={e => setQ(e.target.value)} placeholder="Search all notes…" aria-label="Search all notes" enterKeyHint="search" /></div>
       <IdeaTools sort={sort} setSort={setSort} area={area} setArea={setArea} agent={agent} setAgent={setAgent} />
       <div className="scroll">
         {open.map(i => <IdeaRow key={i.id} i={i} on={i.id === selected} showList onToggle={() => toggle(i)} onMenu={(x, y) => onMenu(i, x, y)} />)}
-        {!open.length && <div className="empty">{area ? `No open notes in ${area}.` : 'No open notes.'}</div>}
+        {!open.length && <div className="empty">{words.length ? `No notes contain “${q.trim()}”.` : area ? `No open notes in ${area}.` : 'No open notes.'}</div>}
       </div>
     </section>
   )
