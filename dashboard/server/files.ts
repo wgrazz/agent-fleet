@@ -6,9 +6,9 @@ import { homedir } from 'node:os'
 import { dirname, isAbsolute, join, relative, sep } from 'node:path'
 
 const HOME = homedir()
-const SECRET_DIRS = new Set(['.ssh', '.gnupg', '.aws', '.fleet', '.config', '.docker', '.kube', '.password-store', 'Keychains'])
-const SECRET_FILE = /^(\.env(\..*)?|\.netrc|\.npmrc|\.pypirc|id_[a-z0-9]+|.*\.(pem|key|p12|pfx|keystore))$/i
-const SKIP = new Set(['node_modules', '.git', '.next', 'dist', 'build', '.venv', 'venv', '__pycache__', '.turbo', '.expo', 'Library', '.Trash',
+export const SECRET_DIRS = new Set(['.ssh', '.gnupg', '.aws', '.fleet', '.config', '.docker', '.kube', '.password-store', 'Keychains'])
+export const SECRET_FILE = /^(\.env(\..*)?|\.netrc|\.npmrc|\.pypirc|id_[a-z0-9]+|.*\.(pem|key|p12|pfx|keystore))$/i
+export const SKIP = new Set(['node_modules', '.git', '.next', 'dist', 'build', '.venv', 'venv', '__pycache__', '.turbo', '.expo', 'Library', '.Trash',
   'Pods', 'DerivedData', '.gradle', 'target', 'coverage', 'vendor', 'google-cloud-sdk', 'site-packages', '.cache', '.pnpm-store'])
 
 export class FileError extends Error {
@@ -17,7 +17,7 @@ export class FileError extends Error {
 }
 
 /** Refuses paths outside home and anything that looks like a secret. */
-function allowed(path: string) {
+export function allowed(path: string) {
   const rel = relative(HOME, path)
   if (rel.startsWith('..') || isAbsolute(rel)) throw new FileError(403, 'only files in your home folder')
   const parts = rel.split(sep)
@@ -44,7 +44,7 @@ export function readText(cwd: string, path: string) {
   if (st.size > 2 << 20) throw new FileError(413, `${path} is over 2 MB`)
   const buf = readFileSync(real)
   if (buf.subarray(0, 8000).includes(0)) throw new FileError(415, `${path} isn't a text file`)
-  return { path: real, rel: relative(cwd || HOME, real), text: buf.toString('utf8') }
+  return { path: real, rel: relative(cwd || HOME, real), text: buf.toString('utf8'), mtime: st.mtimeMs }
 }
 
 /** File names under `cwd` containing every word of `q` (case-insensitive), best (shortest path) first. */

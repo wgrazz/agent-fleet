@@ -724,3 +724,24 @@ textarea.role-prompt { font-family: ui-monospace, SFMono-Regular, Menlo, monospa
 .share-chat .bubble { max-width: 100%; box-sizing: border-box; }
 .share-chat .bubble.user { max-width: 88%; }
 .share-chat .bubble.waiting .btn { margin-left: 8px; }
+
+/* Docs tab */
+.hint.warn { color: var(--need-text); }
+.docs .tabs-row { padding: 0 10px 8px; overflow-x: auto; }
+.docs .tabs-row button { padding: 5px 8px; flex: none; }
+.doc-row { text-decoration: none; color: inherit; }
+.doc-row:hover { background: var(--hover); }
+.doc-row.on { background: var(--accent); }
+.doc-row.on b, .doc-row.on span { color: #fff; }
+.doc-row span { font-size: 11.5px; color: var(--faint); }
+.doc-snip { color: var(--dim) !important; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+.note .note-md { max-height: none; overflow: visible; }
+.note-edit { width: 100%; min-height: 70vh; border: 1px solid var(--line); border-radius: 9px; padding: 10px 12px; background: var(--bg); color: var(--text);
+  font: 13px/1.55 var(--mono); resize: vertical; }
+.note .grp { padding-left: 0; }
+.docs-map .map-scroll { flex: 1; min-height: 0; overflow: auto; }
+.docs-map svg { display: block; min-width: 100%; min-height: 100%; }
+.docs-map .edge { stroke: var(--line); }
+.docs-map .edge.on { stroke: var(--accent); }
+.docs-map .map-label { fill: var(--text); paint-order: stroke; stroke: var(--bg); stroke-width: .25em; pointer-events: none; }
+@media (max-width: 700px) { .tabs a { padding: 6px 6px; font-size: 12.5px; } }

@@ -65,12 +65,14 @@ export function SettingsPage({ usage, push, onBack, onError }: { usage: Usage[];
   const [deviceVoices, setDeviceVoices] = useState(voices())
   const [budget, setBudget] = useState<AiBudget | null>(null)
   const [cwd, setCwd] = useState('')
+  const [docsFolders, setDocsFolders] = useState('')
+  const [docsSkip, setDocsSkip] = useState('')
   const [talk, setTalk] = useState(spokenReplies.get())
   const [alerts, setAlerts] = useState(spokenAlerts.get())
   const [saved, setSaved] = useState('')
 
   useEffect(() => {
-    api.get<Settings>('/api/settings').then(x => { setS(x); setCwd(x.cwd) }).catch(onError)
+    api.get<Settings>('/api/settings').then(x => { setS(x); setCwd(x.cwd); setDocsFolders(x.docs_folders.join('\n')); setDocsSkip(x.docs_skip.join('\n')) }).catch(onError)
     api.get<{ kokoro: string[] | null; mac: string[] }>('/api/tts/voices').then(setVoiceList).catch(() => {})
     api.get<{ budget: AiBudget }>('/api/jarvis/status').then(r => setBudget(r.budget)).catch(() => {})
     if (!('speechSynthesis' in window)) return
@@ -185,6 +187,15 @@ export function SettingsPage({ usage, push, onBack, onError }: { usage: Usage[];
           <form className="form-row" onSubmit={e => { e.preventDefault(); save({ cwd }) }}>
             <label>Default folder<input value={cwd} onChange={e => setCwd(e.target.value)} placeholder="/Users/you/project" /></label>
             <button className="btn" type="submit" disabled={cwd === s.cwd}>Save</button>
+          </form>
+        </Section>
+
+        <Section title="Docs folders" hint={<>Folders of notes for the Docs tab, one per line. Notes in a <code>plans/pending/</code> folder show under Plans.</>}>
+          <form className="form" onSubmit={e => { e.preventDefault(); save({ docs_folders: docsFolders.split('\n').map(l => l.trim()).filter(Boolean), docs_skip: docsSkip.split('\n').map(l => l.trim()).filter(Boolean), docs_missing: [] }) }}>
+            <label>Folders<textarea rows={3} value={docsFolders} onChange={e => setDocsFolders(e.target.value)} placeholder="/Users/you/project" /></label>
+            {s.docs_missing.length > 0 && <p className="hint warn">Missing now, so left out: {s.docs_missing.join(', ')}</p>}
+            <label>Leave out (folder names, or paths inside a folder)<textarea rows={3} value={docsSkip} onChange={e => setDocsSkip(e.target.value)} placeholder={'archive\nold/drafts'} /></label>
+            <button className="btn" type="submit" disabled={docsFolders === s.docs_folders.join('\n') && docsSkip === s.docs_skip.join('\n')}>Save</button>
           </form>
         </Section>
 

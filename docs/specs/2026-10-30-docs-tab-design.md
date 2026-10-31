@@ -1,6 +1,6 @@
 # Docs tab: design
 
-Date: 2026-10-30 · Status: approved design, not built
+Date: 2026-10-30 · Status: built
 
 ## What it is
 
@@ -10,10 +10,9 @@ waiting plans (each one can start an agent), what changed lately, a folder list,
 across every note. Opening a note shows which other notes link to it. Notes stay as files where
 they are, so there's no copy or sync to go stale.
 
-It borrows the useful parts of Obsidian (search, backlinks, browsing) and adds the thing
-Obsidian can't do: hand a plan straight to an agent. Editing stays out. Agents write the docs,
-and an editor that two writers share invites overwrites. Use Obsidian on the Mac for the rare
-hand edit.
+It covers what Obsidian was used for (search, backlinks, browsing, a map of linked notes, hand
+edits) and adds the thing Obsidian can't do: hand a plan straight to an agent. Editing is a plain
+text box; saving refuses if an agent changed the file since it was opened.
 
 ## Decisions
 
@@ -22,10 +21,10 @@ hand edit.
 | Which folders | A list in Settings (`docs_folders`), plus subfolders to leave out (`docs_skip`). Empty list: the tab says how to add one |
 | Which files | `.md` files, hidden folders included (agents keep docs in `.agents/`, `.plans/`), under Fleet's existing guards |
 | Plans | Any `.md` directly inside a `plans/pending/` or `.plans/pending/` folder. A convention, documented in the README, not a setting |
-| Placement | New `Docs` tab in the bottom bar: Agents · Ideas · 🎤 · Checklists · Docs · More |
+| Placement | New `Docs` tab in the bottom bar: Agents · Ideas · 🎤 · Checklists · Docs · More; Docs in the Mac sidebar |
 | Freshness | Read from disk on every request. No index |
-| Editing | No. Read only |
-| Graph view | Later, once notes link to each other enough to make a map worth seeing |
+| Editing | Plain text box. Save sends the `mtime` the note was read at; a newer file on disk is refused (409) |
+| Map | All linked notes, laid out by a small spring simulation in the page. No graph library |
 
 ## 1. Server: `dashboard/server/docs.ts`
 
@@ -40,24 +39,28 @@ hand edit.
 - **`searchDocs(folders, skip, q)`** returns the files that contain every word of `q`
   (case-insensitive), each with its first matching line as a snippet. Files over 2 MB or
   non-text are skipped. At most 50 results, the most recently changed first.
-- **`linksTo(folders, skip, root, rel)`** returns the notes that point at a note: their text
-  contains its path relative to the root, a relative link that resolves to it, or its bare
-  file name if no other note in that folder has the same name. That last rule keeps
-  `README.md` from matching everything.
+- **Links**: a note points at another when its text mentions a `.md` path that resolves to it,
+  relative to the note or to the docs folder, or a file name only one note in that folder has.
+  Several notes sharing a name (`README.md`) match only on the longest path that ends with one.
+  `note(path)` returns the note's text, `mtime`, and the notes linking to it. `graph()` returns
+  every linked note and the links between them.
+- **`saveDoc(folders, path, text, mtime)`** writes a hand edit. Only `.md` files inside a docs
+  folder, under the same secret guards, and only if the file's `mtime` still matches.
 
 Routes in `index.ts`:
 
 - `GET /api/docs` returns `listDocs(...)`.
 - `GET /api/docs/search?q=` returns `searchDocs(...)`.
-- `GET /api/docs/links?root=&rel=` returns `linksTo(...)`.
-- Reading a note uses the existing `GET /api/files/read` with `cwd=root`.
+- `GET /api/docs/note?path=` returns `note(...)`.
+- `GET /api/docs/graph` returns `graph(...)`.
+- `PUT /api/docs/file` with `{ path, text, mtime }` saves an edit.
 - Settings `GET`/`PATCH` gain `docs_folders` (each must be an existing folder, same check as
   `cwd`) and `docs_skip`. `Config` gains both fields.
 
 ## 2. Page: `dashboard/web/src/docs.tsx`
 
-Four views along the top of the tab. Plans, Recent and Folders come from the single
-`/api/docs` response.
+Five views along the top of the tab: Plans, Recent, Folders, Search, Map. Plans, Recent and
+Folders come from the single `/api/docs` response.
 
 - **Plans:** waiting plans, newest first, with their titles. Opening one shows a
   **Start agent** button. It opens the existing `CustomForm` with the folder set to the docs
@@ -70,8 +73,14 @@ Four views along the top of the tab. Plans, Recent and Folders come from the sin
   opens it.
 - **Search:** a box. Results show the title, path and snippet.
 
-Opening a note reuses `FileViewer` from `files.tsx` (markdown rendering, tappable file names).
-Below it, **Linked from** lists the notes from `/api/docs/links`, each tappable.
+A note opens on the right (full screen on the phone), formatted with the chat's Markdown. A
+file name in it opens that note in place, or Fleet's file viewer for anything that isn't a
+note. Below it, **Linked from** lists the notes linking here. **Edit** swaps in a text box with
+Save and Cancel.
+
+- **Map:** dots for notes (bigger for more links), lines for links, colored by top folder, the
+  eight busiest labelled, hovering a dot highlights its links. Tap a dot to open the note.
+  Zoom buttons, scrolls when zoomed.
 
 Settings gains a "Docs folders" section: one path per line, and a second box for subfolders
 to leave out. For Optimal: `optimal`, leaving out `on-hold` and `optimal-shopping/prev`.
@@ -94,10 +103,13 @@ files, and notes that link to each other by path, by relative link and by bare n
 - `listDocs` finds the right files, marks both plans, reads titles, and leaves out the
   skipped folder and the secret.
 - `searchDocs` needs every word and returns the snippet line.
-- `linksTo` finds all three kinds of link and doesn't match the duplicate `README.md`.
+- `note` finds all three kinds of link and doesn't match the duplicate `README.md`; `graph`
+  counts the same links.
+- `saveDoc` saves, refuses when the file changed since it was read, and refuses outside the
+  docs folders.
 
 The UI is checked by hand on the Mac and the phone.
 
 ## Not in this version
 
-Editing, graph view, tags and note properties, tables built from notes, templates.
+Tags and note properties, tables built from notes, templates, links across docs folders.

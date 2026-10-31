@@ -22,6 +22,7 @@ import { kokoroInstalled, speech, voices } from './tts.ts'
 import { readFileSync as readFile } from 'node:fs'
 import * as J from './jarvis.ts'
 import { FileError, findFiles, readText } from './files.ts'
+import * as docs from './docs.ts'
 import { behind, checkAll, updates, upgrade } from './updates.ts'
 import { AREAS, areaColor, notePrompt } from '../web/src/areas.ts'
 import { attach } from './ws.ts'
@@ -491,6 +492,19 @@ const routes: [string, RegExp, Route][] = [
     const sp = new URL(req.url ?? '', 'http://x').searchParams
     try { return await findFiles(sp.get('cwd') ?? '', str(sp.get('q'), 200)) } catch (e) { throw e instanceof FileError ? new HttpError(e.status, e.message) : e }
   }],
+  // ---------- Docs: notes in the folders picked in Settings ----------
+  ['GET', /^\/api\/docs$/, async () => docs.listDocs(config.docs_folders ?? [], config.docs_skip)],
+  ['GET', /^\/api\/docs\/search$/, async req => docs.searchDocs(config.docs_folders ?? [], config.docs_skip ?? [], str(new URL(req.url ?? '', 'http://x').searchParams.get('q'), 200))],
+  ['GET', /^\/api\/docs\/note$/, async req => {
+    try { return await docs.note(config.docs_folders ?? [], config.docs_skip ?? [], new URL(req.url ?? '', 'http://x').searchParams.get('path') ?? '') }
+    catch (e) { throw e instanceof FileError ? new HttpError(e.status, e.message) : e }
+  }],
+  ['GET', /^\/api\/docs\/graph$/, async () => docs.graph(config.docs_folders ?? [], config.docs_skip ?? [])],
+  ['PUT', /^\/api\/docs\/file$/, async req => {
+    const b = await body(req)
+    if (typeof b.text !== 'string' || typeof b.mtime !== 'number') throw new HttpError(400, 'text and mtime are required')
+    try { return docs.saveDoc(config.docs_folders ?? [], str(b.path, 1000), b.text, b.mtime) } catch (e) { throw e instanceof FileError ? new HttpError(e.status, e.message) : e }
+  }],
   ['GET', /^\/api\/transcript$/, async req => {
     const sp = new URL(req.url ?? '', 'http://x').searchParams
     const t = await transcript(sp.get('tool') ?? '', sp.get('id') ?? '')
@@ -513,7 +527,8 @@ const routes: [string, RegExp, Route][] = [
     const { key, port, ...rest } = config
     return { ...rest, cwd: config.cwd ?? '', ai_model: config.ai_model ?? 'sonnet', jarvis_warn_pct: config.jarvis_warn_pct ?? 5,
       jarvis_max_pct: config.jarvis_max_pct ?? 10, voice_engine: config.voice_engine ?? (kokoroInstalled() ? 'kokoro' : 'device'),
-      voice: config.voice ?? 'bm_george', voice_speed: config.voice_speed ?? 1, kokoro: kokoroInstalled() }
+      voice: config.voice ?? 'bm_george', voice_speed: config.voice_speed ?? 1, kokoro: kokoroInstalled(),
+      docs_folders: config.docs_folders ?? [], docs_skip: config.docs_skip ?? [], docs_missing: (config.docs_folders ?? []).filter(f => !existsSync(f)) }
   }],
   ['PATCH', /^\/api\/settings$/, async req => {
     const b = await body(req)
@@ -527,6 +542,15 @@ const routes: [string, RegExp, Route][] = [
     if (['kokoro', 'mac', 'device'].includes(b.voice_engine)) patch.voice_engine = b.voice_engine
     if (typeof b.voice === 'string' && b.voice.length <= 60) patch.voice = b.voice
     if (typeof b.voice_speed === 'number' && b.voice_speed >= 0.6 && b.voice_speed <= 1.6) patch.voice_speed = b.voice_speed
+    const paths = (v: unknown) => Array.isArray(v) && v.length <= 50 ? v.filter(x => typeof x === 'string' && x.trim() && x.length <= 1000).map(x => x.trim().replace(/^~(?=\/|$)/, homedir())) : null
+    const folders = paths(b.docs_folders)
+    if (folders) {
+      const bad = folders.find(f => !f.startsWith('/') || !existsSync(f) || !statSync(f).isDirectory())
+      if (bad) throw new HttpError(400, `no such folder: ${bad}`)
+      patch.docs_folders = folders
+    }
+    const skip = paths(b.docs_skip)
+    if (skip) patch.docs_skip = skip
     saveConfig(patch)
     return { ok: true }
   }],

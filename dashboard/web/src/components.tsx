@@ -331,6 +331,7 @@ export function Sidebar(props: {
       {more.length > 0 && <details className="nav-more" open={more.some(l => props.route === `ideas/${l.name}`) || undefined}><summary className="sec">More</summary>{more.map(row)}</details>}
       <div className="sec">Library</div>
       <a className={`ni ${props.route === 'team' ? 'on' : ''}`} href="#/team"><TeamIcon />Team{props.questions > 0 && <span className="badge">{props.questions}</span>}</a>
+      <a className={`ni ${props.route === 'docs' ? 'on' : ''}`} href="#/docs/plans"><DocIcon />Docs</a>
       <a className={`ni ${props.route === 'history' ? 'on' : ''}`} href="#/history"><ClockIcon />History</a>
       <a className={`ni ${props.route === 'paused' ? 'on' : ''}`} href="#/paused"><PauseIcon />Paused<b>{props.paused || ''}</b></a>
       <a className={`ni ${props.route === 'settings' ? 'on' : ''}`} href="#/settings"><GearIcon />Settings</a>
@@ -579,6 +580,7 @@ export const TeamIcon = () => svg(<><circle cx="6" cy="5.5" r="2.3" stroke="curr
 export const ClockIcon = () => svg(<><circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="1.6" fill="none" /><path d="M8 4.5V8l2.5 1.5" stroke="currentColor" strokeWidth="1.6" fill="none" strokeLinecap="round" /></>)
 export const FlagIcon = () => svg(<path d="M4 14V2.5M4 3h8l-2 3 2 3H4" stroke="#ff3b30" strokeWidth="1.6" fill="none" strokeLinejoin="round" strokeLinecap="round" />)
 export const CheckIcon = () => svg(<path d="m3 8.5 3 3 7-7" stroke="currentColor" strokeWidth="1.8" fill="none" strokeLinecap="round" strokeLinejoin="round" />)
+export const DocIcon = () => svg(<path d="M4.5 2.5h5l2.5 2.5v8.5h-7.5zM9.5 2.5V5H12M6.5 8h3.5M6.5 10.5h3.5" stroke="currentColor" strokeWidth="1.3" fill="none" strokeLinejoin="round" />)
 export const LinesIcon = () => svg(<path d="M3 4h10M3 8h10M3 12h10" stroke="currentColor" strokeWidth="1.4" fill="none" strokeLinecap="round" />)
 export const InboxIcon = () => svg(<path d="M2 9.5 4 3h8l2 6.5V13H2zM2 9.5h3.5l1 1.5h3l1-1.5H14" stroke="currentColor" strokeWidth="1.4" fill="none" strokeLinejoin="round" />)
 export const SparkIcon = () => svg(<path d="M8 1.5 9.4 6.6 14.5 8 9.4 9.4 8 14.5 6.6 9.4 1.5 8l5.1-1.4z" fill="currentColor" />, 12)

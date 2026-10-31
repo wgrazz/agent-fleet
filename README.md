@@ -21,6 +21,8 @@ no account, no cloud relay, and the AI features use the subscriptions you alread
 - **Jarvis:** talk or type ("what needs me?", "tell api yes"). It reads freely and asks before it
   touches an agent.
 - **Ideas:** a checklist inbox where any idea can become an agent with one tap.
+- **Docs:** the notes your agents write, in one place: plans waiting to be done (start an agent on
+  one in a tap), what changed lately, folders, search, a map of linked notes, and hand edits.
 
 ## Install
 
@@ -123,6 +125,18 @@ sessions, folders and ideas live in `~/.fleet/` (readable only by you). None of 
   subscription is left, and offers an alternative.
 - **Interview me about an idea** starts a Claude agent that asks one question at a time, pushes
   back, then writes a spec to `docs/ideas/` and adds it to Priority.
+
+**Docs**
+- Pick folders of notes in Settings → Docs folders, and subfolders to leave out (a folder name,
+  or a path inside one). Hidden folders like `.agents/` count; agent tool config (`.claude`,
+  skills folders) doesn't.
+- **Plans** are notes in a `plans/pending/` (or `.plans/pending/`) folder. Open one and tap
+  **Start agent** to hand it to an agent, which deletes the plan file when it's finished.
+- **Recent**, **Folders** and **Search** (inside every note). A note shows the notes that link
+  to it, by path, relative link or a file name only one note has.
+- **Map**: dots for notes, lines for links, colored by top folder. Tap a dot to open the note.
+- **Edit** a note by hand. Saving refuses if an agent changed the file after you opened it, so
+  neither of you overwrites the other.
 
 **Ideas**
 - Checklist lists. Priority and Brain Dump are pinned; the rest are yours: rename, recolor,

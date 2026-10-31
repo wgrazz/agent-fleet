@@ -204,4 +204,5 @@ export type AiBudget = { weekly_pct: number | null; jarvis_pct: number; ai_pct: 
 export type Settings = {
   cwd: string; ai_model: string; jarvis_warn_pct: number; jarvis_max_pct: number
   voice_engine: 'kokoro' | 'mac' | 'device'; voice: string; voice_speed: number; kokoro: boolean
+  docs_folders: string[]; docs_skip: string[]; docs_missing: string[]
 }

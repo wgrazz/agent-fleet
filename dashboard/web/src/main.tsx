@@ -9,16 +9,17 @@ import {
 import { ConversationView, HistoryPane, Jarvis, Palette, speak, spokenAlerts } from './extras.tsx'
 import { AREAS, notePrompt } from './areas.ts'
 import { AllNotesPane, ChecklistsPane, IdeaDetail, IdeasPane, ImportNotes, PRIORITY, PriorityPane, QuickCapture, SortMode } from './ideas.tsx'
+import { DOC_VIEWS, docHash, DocsMap, DocsPane, NoteView, type DocView } from './docs.tsx'
 import { SettingsPage } from './settings.tsx'
 import { RoleView, ShareView, TeamPane } from './team.tsx'
 import { FullTerminal } from './terminal.tsx'
 import './styles.css'
 
-// #/ · #/folder/ID · #/agent/NAME (what pushes open) · #/paused · #/ideas/LIST · #/idea/ID · #/checklists · #/team[/NAME] · #/history[/TOOL/ID] · #/more
-type View = 'all' | 'folder' | 'agent' | 'paused' | 'ideas' | 'idea' | 'history' | 'more' | 'jarvis' | 'settings' | 'prioritized' | 'everything' | 'checklists' | 'team'
+// #/ · #/folder/ID · #/agent/NAME (what pushes open) · #/paused · #/ideas/LIST · #/idea/ID · #/checklists · #/team[/NAME] · #/history[/TOOL/ID] · #/docs/VIEW[/PATH] · #/more
+type View = 'all' | 'folder' | 'agent' | 'paused' | 'ideas' | 'idea' | 'history' | 'more' | 'jarvis' | 'settings' | 'prioritized' | 'everything' | 'checklists' | 'team' | 'docs'
 const parseRoute = () => {
   const [, view = '', a = '', b = ''] = location.hash.split('/')
-  const views: View[] = ['folder', 'agent', 'paused', 'ideas', 'idea', 'history', 'more', 'jarvis', 'settings', 'prioritized', 'everything', 'checklists', 'team']
+  const views: View[] = ['folder', 'agent', 'paused', 'ideas', 'idea', 'history', 'more', 'jarvis', 'settings', 'prioritized', 'everything', 'checklists', 'team', 'docs']
   return { view: (views.includes(view as View) ? view : 'all') as View, a: decodeURIComponent(a), b: decodeURIComponent(b) }
 }
 const go = (hash: string) => (location.hash = hash)
@@ -87,7 +88,7 @@ function App() {
     const on = () => {
       const r = parseRoute()
       setRoute(r)
-      if (['all', 'folder', 'paused', 'history', 'ideas', 'prioritized', 'everything', 'checklists'].includes(r.view) || (r.view === 'team' && !r.a)) lastListRoute.current = location.hash || '#/'
+      if (['all', 'folder', 'paused', 'history', 'ideas', 'prioritized', 'everything', 'checklists'].includes(r.view) || (r.view === 'team' && !r.a) || (r.view === 'docs' && !r.b)) lastListRoute.current = location.hash || '#/'
       if (r.view === 'ideas' || r.view === 'prioritized' || r.view === 'everything') remember.set('ideaFrom', r.view)
     }
     addEventListener('hashchange', on)
@@ -306,6 +307,7 @@ function App() {
   const conversation = route.view === 'history' && route.b ? history?.find(c => c.id === route.b) ?? null : null
   const sideRoute = route.view === 'folder' ? `folder/${route.a}` : route.view === 'ideas' ? `ideas/${route.a}` : route.view === 'idea' ? (fromPriority ? 'prioritized' : fromEverything ? 'everything' : `ideas/${currentListName}`) : route.view
   const listShown = allLists.find(l => l.name === currentListName)
+  const docView: DocView = DOC_VIEWS.includes(route.a as DocView) ? route.a as DocView : 'plans'
 
   // middle pane: when an agent is open it keeps showing the list it was opened from
   const middleView = route.view === 'agent' ? parseRouteOf(lastListRoute.current) : route
@@ -329,6 +331,8 @@ function App() {
       onHeaderMenu={(x, y) => listMenu(listShown, x, y)} />
   } else if (middleView.view === 'checklists') {
     middle = <ChecklistsPane lists={allLists} onNew={newChecklist} />
+  } else if (middleView.view === 'docs') {
+    middle = <DocsPane view={docView} selected={route.b} onError={fail} />
   } else if (middleView.view === 'team') {
     middle = <TeamPane roles={team.data ?? []} selected={route.a === 'shared' ? `shared/${route.b}` : route.a} />
   } else if (middleView.view === 'more') {
@@ -345,7 +349,12 @@ function App() {
   }
 
   let detail
-  if (route.view === 'settings') {
+  if (route.view === 'docs' && route.b) {
+    detail = <NoteView key={route.b} path={route.b} view={docView} onBack={() => go(docHash(docView))} onError={fail}
+      onStart={(cwd, prompt) => setModal({ kind: 'custom', title: 'Start an agent on this plan', initial: { cwd, prompt } })} />
+  } else if (route.view === 'docs' && docView === 'map') {
+    detail = <DocsMap onBack={() => go(docHash('plans'))} onError={fail} />
+  } else if (route.view === 'settings') {
     detail = <SettingsPage usage={usage.data ?? []} push={push} onBack={() => go(isPhone() ? '#/more' : lastListRoute.current)} onError={fail} />
   } else if (route.view === 'team' && route.a === 'shared' && route.b) {
     detail = <ShareView key={route.b} id={Number(route.b)} onBack={() => go('#/team')} onError={fail} onStart={s => api.get<{ prompt: string }>(`/api/shares/${s.id}/brief`)
@@ -370,12 +379,13 @@ function App() {
     const msg = route.view === 'agent' ? `${route.a} isn't running anymore.`
       : route.view === 'ideas' || route.view === 'idea' ? 'Pick an idea, or add one above. ⌘I adds one from anywhere.'
       : route.view === 'history' ? 'Pick a conversation to read it or pick up where you left off.'
+      : route.view === 'docs' ? 'Pick a note to read it. A plan can start an agent.'
       : needs ? `${needs} agent${needs > 1 ? 's' : ''} need${needs > 1 ? '' : 's'} you.` : 'Pick an agent to see what it’s doing.'
     detail = <main className="det placeholder"><div className="empty big">{msg}<div className="hint">⌘K to jump anywhere · N new agent · J Jarvis</div></div></main>
   }
 
-  const hasDetail = !!(agentFromRoute || (route.view === 'idea' && ideaItem) || conversation || route.view === 'settings' || route.view === 'jarvis' || (route.view === 'team' && route.a))
-  const tab = route.view === 'jarvis' ? 'jarvis' : onChecklist ? 'checklists' : ['ideas', 'idea', 'prioritized', 'everything'].includes(route.view) ? 'ideas' : ['more', 'settings', 'history', 'team'].includes(route.view) ? 'more' : 'agents'
+  const hasDetail = !!(agentFromRoute || (route.view === 'idea' && ideaItem) || conversation || route.view === 'settings' || route.view === 'jarvis' || (route.view === 'team' && route.a) || (route.view === 'docs' && (!!route.b || docView === 'map')))
+  const tab = route.view === 'jarvis' ? 'jarvis' : onChecklist ? 'checklists' : route.view === 'docs' ? 'docs' : ['ideas', 'idea', 'prioritized', 'everything'].includes(route.view) ? 'ideas' : ['more', 'settings', 'history', 'team'].includes(route.view) ? 'more' : 'agents'
   const brainDump = allLists.find(l => l.name === 'Brain Dump')
 
   return (
@@ -393,6 +403,7 @@ function App() {
         <a href={ideasTab()} className={tab === 'ideas' ? 'on' : ''}>Ideas{(brainDump?.unsorted ?? 0) > 0 && <span className="badge gray">{brainDump!.unsorted}</span>}</a>
         <button className="tab-mic" onClick={() => go('#/jarvis')} aria-label="Jarvis"><MicIcon /></button>
         <a href="#/checklists" className={tab === 'checklists' ? 'on' : ''}>Checklists</a>
+        <a href={docHash('plans')} className={tab === 'docs' ? 'on' : ''}>Docs</a>
         <a href="#/more" className={tab === 'more' ? 'on' : ''}>More{teamQuestions > 0 && <span className="badge">{teamQuestions}</span>}</a>
       </nav>
       {['ideas', 'idea', 'prioritized', 'everything'].includes(route.view) && <IdeasListPicker lists={allLists} checklists={onChecklist} onNewChecklist={newChecklist} current={route.view === 'prioritized' ? '★' : route.view === 'everything' ? '*' : currentListName}
