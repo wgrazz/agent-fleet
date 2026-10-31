@@ -1,6 +1,6 @@
 import { Fragment, useContext, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { api, remember, type Ask, type Conversation, type LeftMessage, type LiveAgent, type Message, type Paused, type RepoChanges } from './api.ts'
-import { activity, age, ago, Avatar, isPhone, openMenu, ORDER, PauseIcon, SendIcon, STATUS_LABEL, TermIcon, toolLabel, useHold } from './components.tsx'
+import { activity, age, ago, Avatar, isPhone, openMenu, ORDER, PauseIcon, PlusIcon, SendIcon, STATUS_LABEL, TermIcon, toolLabel, useHold } from './components.tsx'
 import { BARE, CodeOrFile, FileOpener, FilesHere, FilesView, PATH, PathRef } from './files.tsx'
 import { AddTodos } from './ideas.tsx'
 import { planSteps } from './steps.ts'
@@ -295,15 +295,16 @@ function Composer({ agent, send }: { agent: LiveAgent; send: (body: { text?: str
   const busy = agent.status === 'working'
   const [queuing, setQueuing] = useState<string[]>([]) // shown until the next poll lists them
   useEffect(() => setQueuing([]), [agent.queued.length])
-  // photos upload as soon as you pick them; the agent gets their paths on the Mac
-  const [photos, setPhotos] = useState<{ preview: string; path?: string; failed?: boolean }[]>([])
+  // photos and files upload as soon as you pick or drop them; the agent gets their paths on the Mac
+  const [photos, setPhotos] = useState<{ preview: string; name: string; image: boolean; path?: string; failed?: boolean }[]>([])
   const picker = useRef<HTMLInputElement>(null)
+  const [dragging, setDragging] = useState(false)
   const addPhotos = (files: FileList | null) => {
     for (const f of Array.from(files ?? [])) {
       const preview = URL.createObjectURL(f)
       const set = (patch: object) => setPhotos(p => p.map(x => (x.preview === preview ? { ...x, ...patch } : x)))
-      setPhotos(p => [...p, { preview }])
-      fetch('/api/uploads', { method: 'POST', body: f })
+      setPhotos(p => [...p, { preview, name: f.name, image: f.type.startsWith('image/') }])
+      fetch('/api/uploads', { method: 'POST', body: f, headers: { 'X-File-Name': encodeURIComponent(f.name) } })
         .then(async r => { if (!r.ok) throw new Error(); set({ path: (await r.json()).path }) })
         .catch(() => set({ failed: true }))
     }
@@ -313,7 +314,7 @@ function Composer({ agent, send }: { agent: LiveAgent; send: (body: { text?: str
   const ready = photos.filter(p => p.path)
   const submit = () => {
     if ((!text.trim() && !ready.length) || uploading) return
-    const t = [text.trim(), ...ready.map(p => `[Photo: ${p.path}]`)].filter(Boolean).join('\n\n')
+    const t = [text.trim(), ...ready.map(p => `[${p.image ? 'Photo' : 'File'}: ${p.path}]`)].filter(Boolean).join('\n\n')
     photos.forEach(p => URL.revokeObjectURL(p.preview))
     setPhotos([])
     keep('')
@@ -323,7 +324,10 @@ function Composer({ agent, send }: { agent: LiveAgent; send: (body: { text?: str
     } else send({ text: t }).catch(() => keep(t))
   }
   return (
-    <div className="comp">
+    <div className={`comp ${dragging ? 'dropping' : ''}`}
+      onDragOver={e => { if (e.dataTransfer.types.includes('Files')) { e.preventDefault(); setDragging(true) } }}
+      onDragLeave={e => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setDragging(false) }}
+      onDrop={e => { if (e.dataTransfer.files.length) { e.preventDefault(); addPhotos(e.dataTransfer.files) } setDragging(false) }}>
       {(agent.queued.length > 0 || queuing.length > 0) && (
         <div className="queued">
           <div className="queued-h">Queued · sends when {agent.name} finishes</div>
@@ -354,16 +358,16 @@ function Composer({ agent, send }: { agent: LiveAgent; send: (body: { text?: str
       {photos.length > 0 && (
         <div className="photos">
           {photos.map(p => (
-            <span key={p.preview} className={`photo ${p.path ? '' : p.failed ? 'failed' : 'busy'}`} title={p.failed ? "Couldn't upload this one" : undefined}>
-              <img src={p.preview} alt="" />
-              <button className="x" onClick={() => dropPhoto(p.preview)} aria-label="Remove photo">×</button>
+            <span key={p.preview} className={`photo ${p.path ? '' : p.failed ? 'failed' : 'busy'}`} title={p.failed ? "Couldn't upload this one" : p.name}>
+              {p.image ? <img src={p.preview} alt="" /> : <span className="file">{p.name}</span>}
+              <button className="x" onClick={() => dropPhoto(p.preview)} aria-label={`Remove ${p.name}`}>×</button>
             </span>
           ))}
         </div>
       )}
       <div className="row">
-        <button className="attach" onClick={() => picker.current?.click()} aria-label="Add a photo" title="Take a photo or pick one"><PhotoIcon /></button>
-        <input ref={picker} type="file" accept="image/*" multiple hidden onChange={e => { addPhotos(e.target.files); e.target.value = '' }} />
+        <button className="attach" onClick={() => picker.current?.click()} aria-label="Add a photo or file" title="Add a photo or file (or drop one here)"><PlusIcon /></button>
+        <input ref={picker} type="file" multiple hidden onChange={e => { addPhotos(e.target.files); e.target.value = '' }} />
         <textarea id="composer" rows={1} value={text} placeholder={busy ? `Queue a message for when ${agent.name} finishes…` : `Reply to ${agent.name}…`} enterKeyHint={busy ? 'done' : 'send'}
           onChange={e => keep(e.target.value)}
           onKeyDown={e => {
@@ -379,7 +383,6 @@ function Composer({ agent, send }: { agent: LiveAgent; send: (body: { text?: str
   )
 }
 
-const PhotoIcon = () => <svg width="18" height="18" viewBox="0 0 16 16" aria-hidden><rect x="1.8" y="3.8" width="12.4" height="9.4" rx="2" stroke="currentColor" strokeWidth="1.5" fill="none" /><circle cx="8" cy="8.5" r="2.4" stroke="currentColor" strokeWidth="1.5" fill="none" /><path d="M5.5 3.8 6.5 2.3h3l1 1.5" stroke="currentColor" strokeWidth="1.5" fill="none" strokeLinejoin="round" /></svg>
 // a photo sent from the composer, as it appears in the agent's log
 const PHOTO = /\[Photo: [^\]]*\/\.fleet\/uploads\/([\w-]+\.jpg)\]/g
 

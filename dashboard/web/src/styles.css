@@ -158,8 +158,10 @@ kbd { font: 600 10.5px var(--mono); opacity: .6; margin-right: 5px; }
 .photos { display: flex; gap: 8px; padding: 4px 4px 8px; overflow-x: auto; }
 .photo { position: relative; flex: 0 0 auto; }
 .photo img { width: 64px; height: 64px; object-fit: cover; border-radius: 9px; display: block; }
-.photo.busy img { opacity: .45; }
-.photo.failed img { opacity: .3; outline: 2px solid var(--bad, #ff3b30); }
+.photo .file { width: 64px; height: 64px; padding: 6px; border-radius: 9px; background: var(--chip); font-size: 10px; line-height: 1.25; overflow: hidden; word-break: break-all; display: block; }
+.photo.busy img, .photo.busy .file { opacity: .45; }
+.photo.failed img, .photo.failed .file { opacity: .3; outline: 2px solid var(--bad, #ff3b30); }
+.comp.dropping { outline: 2px dashed var(--accent, #0a84ff); outline-offset: -2px; border-radius: 12px; }
 .photo .x { position: absolute; top: -6px; right: -6px; width: 20px; height: 20px; border-radius: 50%; background: rgba(0,0,0,.65); color: #fff; font-size: 13px; line-height: 20px; text-align: center; }
 .bubble-photo { display: block; max-width: 220px; max-height: 260px; border-radius: 10px; margin-top: 6px; }
 .bubble.only-photos { background: none; padding: 0; }

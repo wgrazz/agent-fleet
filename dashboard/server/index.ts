@@ -874,17 +874,26 @@ function serveStatic(req: IncomingMessage, res: ServerResponse, path: string) {
 // Photos from the phone, kept on the Mac. sips (built into macOS) turns HEIC and huge camera shots into a JPEG at
 // most 2000 px wide, which every agent's image reader takes; the agent gets the file's path.
 const UPLOADS = join(FLEET_DIR, 'uploads')
+/** A photo becomes a JPEG the agent can read; any other file (a PDF, a spreadsheet…) is kept as it is, under its own name. */
 async function upload(req: IncomingMessage) {
   const chunks: Buffer[] = []
   let size = 0
   for await (const c of req) {
     size += c.length
-    if (size > 50 << 20) throw new HttpError(413, 'photo too large')
+    if (size > 50 << 20) throw new HttpError(413, 'file too large')
     chunks.push(c)
   }
-  if (!size) throw new HttpError(400, 'no photo')
+  if (!size) throw new HttpError(400, 'empty file')
   mkdirSync(UPLOADS, { recursive: true, mode: 0o700 })
   const name = `${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}-${randomBytes(3).toString('hex')}`
+  if (!String(req.headers['content-type'] ?? '').startsWith('image/')) {
+    let given = ''
+    try { given = decodeURIComponent(String(req.headers['x-file-name'] ?? '')) } catch {}
+    const safe = given.split(/[\\/]/).pop()!.replace(/[^\w.-]+/g, '-').replace(/^[.-]+/, '').slice(-80) || 'file'
+    const file = join(UPLOADS, `${name}-${safe}`)
+    writeFileSync(file, Buffer.concat(chunks), { mode: 0o600 })
+    return file
+  }
   const raw = join(UPLOADS, `${name}.in`)
   writeFileSync(raw, Buffer.concat(chunks), { mode: 0o600 })
   try {
