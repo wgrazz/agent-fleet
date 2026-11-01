@@ -664,6 +664,10 @@ html.holding, html.holding *, .it, .it *, .idea-body, .idea-body *, .chip-f, .ni
 .role-row .badge { grid-row: 1; grid-column: 3; }
 .role-row .tm, .role-row .nm { grid-column: 2; }
 .team .role-row { grid-template-columns: 0 minmax(0, 1fr) auto; column-gap: 0; }
+.team .share-row { grid-template-columns: 19px minmax(0, 1fr) auto; column-gap: 10px; }
+.share-row .check { grid-column: 1; grid-row: 1 / 4; }
+.share-row.is-done .nm, .share-row.is-done .pv { color: var(--faint); }
+.share-row.is-done .nm { text-decoration: line-through; }
 .role .set-sec { max-width: 720px; }
 .role .set-sec:last-child { border-bottom: 0; }
 .sec-head { display: flex; align-items: center; gap: 8px; justify-content: space-between; }

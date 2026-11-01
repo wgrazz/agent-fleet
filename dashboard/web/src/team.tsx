@@ -60,7 +60,10 @@ function SharedList({ selected }: { selected: string }) {
     <>
       <div className="lh"><h4>Shared</h4></div>
       {list.data.map(s => (
-        <a key={s.id} className={`it plain role-row ${selected === `shared/${s.id}` ? 'on' : ''}`} href={`#/team/shared/${s.id}`}>
+        <a key={s.id} className={`it plain role-row share-row ${s.done ? 'is-done' : ''} ${selected === `shared/${s.id}` ? 'on' : ''}`} href={`#/team/shared/${s.id}`}>
+          {/* same check-off as the Shared idea list; checked ones sink to the bottom */}
+          <button className={`check ${s.done ? 'checked' : ''}`} role="checkbox" aria-checked={!!s.done} aria-label="Done"
+            onClick={e => { e.preventDefault(); api.patch(`/api/ideas/${s.id}`, { done: !s.done }).then(list.refresh).catch(() => {}) }} />
           <span className="nm">{s.title || s.url.replace(/^https?:\/\/(www\.)?/, '').slice(0, 50)}</span>
           <span className="tm">{when(s.created_at)}</span>
           <span className="pv">{shareState(s)}</span>

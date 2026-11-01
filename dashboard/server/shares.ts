@@ -33,8 +33,8 @@ export const dir = (id: number) => join(FLEET_DIR, 'shares', String(id))
 export const video = (id: number) => join(dir(id), 'video.mp4')
 
 export const share = (id: number) => db.prepare('SELECT * FROM shares WHERE id = ?').get(id) as Share | undefined
-/** Shares whose note still exists, newest first. */
-export const shares = () => db.prepare('SELECT s.* FROM shares s JOIN ideas i ON i.id = s.id ORDER BY s.created_at DESC LIMIT 200').all() as Share[]
+/** Shares whose note still exists, newest first, checked-off ones last. */
+export const shares = () => db.prepare('SELECT s.*, i.done FROM shares s JOIN ideas i ON i.id = s.id ORDER BY i.done, s.created_at DESC LIMIT 200').all() as (Share & { done: number })[]
 export const page = (id: number) => {
   const s = share(id)
   return s && { share: { ...s, video: existsSync(video(id)), note: ideas.idea(id) ?? null }, messages: db.prepare('SELECT * FROM share_messages WHERE share_id = ? ORDER BY id').all(id) }
