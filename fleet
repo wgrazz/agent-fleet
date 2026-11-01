@@ -368,14 +368,12 @@ def kill(procs, target):
         for p in doomed:
             kill_tree(procs, p)
         return print(f'Sent SIGTERM to {len(doomed)}.')
-    if target.isdigit():
+    if target.isdigit() and (int(target) in agents or int(target) in waiters):
         pid = int(target)
-        if pid not in agents and pid not in waiters:
-            sys.exit(f'{pid} is not an agent or waiter (see `fleet`).')
         kill_tree(procs, pid)
         return print(f'Sent SIGTERM to {pid} and its children.')
     if subprocess.run(['tmux', 'kill-session', '-t', f'={target}'], capture_output=True).returncode:
-        sys.exit(f'No tmux session named {target}.')
+        sys.exit(f'{target} is not an agent PID, a waiter PID, or a session name (see `fleet`).')
     print(f'Killed tmux session {target}.')
 
 
