@@ -229,7 +229,10 @@ html.kb .term-keys { padding-bottom: 6px; }
 .usage:not(.compact) .usage-win { grid-template-columns: 60px 1fr 36px 90px; }
 .usage-pct { text-align: right; font-variant-numeric: tabular-nums; }
 .usage-reset { color: var(--faint); }
-.meter { height: 5px; border-radius: 9px; background: var(--line); overflow: hidden; }
+.meter { position: relative; height: 5px; border-radius: 9px; background: var(--line); overflow: hidden; }
+.meter .pace { position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px; background: var(--text); opacity: .55; }
+.usage-pace { color: var(--faint); font-size: .92em; }
+.usage-pace.ahead { color: var(--need); }
 .meter span { display: block; height: 100%; border-radius: 9px; background: var(--work); }
 .meter span.warm { background: var(--need); }
 .meter span.hot { background: var(--dead); }

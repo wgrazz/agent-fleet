@@ -8,7 +8,8 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { FLEET_DIR } from './store.ts'
 
-export type Window = { label: string; pct: number; resets_at: number | null }
+// pace: % of the window elapsed, i.e. where usage would be if spread evenly. today: points used since local midnight.
+export type Window = { label: string; pct: number; resets_at: number | null; pace?: number; today?: number }
 export type Usage = { tool: string; windows: Window[]; updated: number | null; note?: string }
 
 const json = (path: string) => {
@@ -29,8 +30,15 @@ const win = (label: string, pct: unknown, resets: unknown): Window | null => {
 function claude(): Usage {
   const d = json(join(FLEET_DIR, 'claude-usage.json'))
   const rl = d?.rate_limits
-  const windows = [win('5 hours', rl?.five_hour?.used_percentage, rl?.five_hour?.resets_at),
-    win('Week', rl?.seven_day?.used_percentage, rl?.seven_day?.resets_at)].filter(Boolean) as Window[]
+  const week = win('Week', rl?.seven_day?.used_percentage, rl?.seven_day?.resets_at)
+  if (week?.resets_at) {
+    const left = week.resets_at * 1000 - Date.now()
+    week.pace = left > 0 ? Math.round(100 - (100 * left) / (7 * 86_400_000)) : 0
+    // day.start: the weekly % at the status line's first reading today (local date, same as `date +%F`)
+    const today = new Date().toLocaleDateString('sv')
+    week.today = d.day?.date === today ? Math.max(0, week.pct - Math.round(d.day.start)) : 0
+  }
+  const windows = [win('5 hours', rl?.five_hour?.used_percentage, rl?.five_hour?.resets_at), week].filter(Boolean) as Window[]
   return { tool: 'claude', windows, updated: d?.at ? d.at * 1000 : null, note: windows.length ? undefined : 'shows up after Claude Code runs once' }
 }
 
