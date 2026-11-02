@@ -9,7 +9,8 @@ import { join } from 'node:path'
 import { FLEET_DIR } from './store.ts'
 
 // pace: % of the window elapsed, i.e. where usage would be if spread evenly. today: points used since local midnight.
-export type Window = { label: string; pct: number; resets_at: number | null; pace?: number; today?: number }
+// budget: points to spend today to land on 100% at the reset.
+export type Window = { label: string; pct: number; resets_at: number | null; pace?: number; today?: number; budget?: number }
 export type Usage = { tool: string; windows: Window[]; updated: number | null; note?: string }
 
 const json = (path: string) => {
@@ -32,11 +33,15 @@ function claude(): Usage {
   const rl = d?.rate_limits
   const week = win('Week', rl?.seven_day?.used_percentage, rl?.seven_day?.resets_at)
   if (week?.resets_at) {
-    const left = week.resets_at * 1000 - Date.now()
-    week.pace = left > 0 ? Math.round(100 - (100 * left) / (7 * 86_400_000)) : 0
-    // day.start: the weekly % at the status line's first reading today (local date, same as `date +%F`)
-    const today = new Date().toLocaleDateString('sv')
-    week.today = d.day?.date === today ? Math.max(0, week.pct - Math.round(d.day.start)) : 0
+    const DAY = 86_400_000, reset = week.resets_at * 1000, left = reset - Date.now()
+    week.pace = left > 0 ? Math.round(100 - (100 * left) / (7 * DAY)) : 0
+    // day.start: the weekly % at the status line's first reading today (local date, same as `date +%F`); none yet = now
+    const start = d.day?.date === new Date().toLocaleDateString('sv') ? Math.min(Math.round(d.day.start), week.pct) : week.pct
+    week.today = week.pct - start
+    // today's budget: what was left this morning, split over the days left counting today (the reset day partially),
+    // so over- or under-use earlier in the week moves it. Fixed for the day; never more than what's left.
+    const days = (reset - Math.max(new Date().setHours(0, 0, 0, 0), reset - 7 * DAY)) / DAY
+    week.budget = left > 0 ? Math.round(Math.min(100 - start, (100 - start) / days)) : Math.round(100 / 7)
   }
   const windows = [win('5 hours', rl?.five_hour?.used_percentage, rl?.five_hour?.resets_at), week].filter(Boolean) as Window[]
   return { tool: 'claude', windows, updated: d?.at ? d.at * 1000 : null, note: windows.length ? undefined : 'shows up after Claude Code runs once' }

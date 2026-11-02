@@ -176,7 +176,8 @@ shows what it needs, and `fleet role NAME answer N TEXT`, `tell TEXT` and `run` 
 **Usage.** 5-hour and weekly limits:
 - Claude: from Claude Code's status line. Its `statusline.sh` writes `~/.fleet/claude-usage.json`, with the
   weekly % at the day's first reading. The Week bar's tick is even pace (100% spread over 7 days), and under it:
-  today's use against the even daily share (14%), and when the week resets.
+  today's use against today's budget (weekly % left this morning ÷ days left counting today, so over- or
+  under-use earlier in the week moves it), and when the week resets.
 - Codex: from its session logs.
 - Copilot: from the plan counter it prints.
 - Cursor and Antigravity don't expose theirs.

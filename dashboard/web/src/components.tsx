@@ -363,8 +363,6 @@ function ListRow({ l, on, onMenu }: { l: List; on: boolean; onMenu: (x: number, 
   )
 }
 
-const DAILY = Math.round(100 / 7) // even share of a weekly limit per day
-
 export function UsageMeters({ usage, compact }: { usage: Usage[]; compact?: boolean }) {
   const known = usage.filter(u => u.windows.length)
   const unknown = usage.filter(u => !u.windows.length)
@@ -382,7 +380,7 @@ export function UsageMeters({ usage, compact }: { usage: Usage[]; compact?: bool
           {u.windows.map(w => (
             <Fragment key={w.label}>
               <div className="usage-win" title={[w.resets_at && `resets ${new Date(w.resets_at * 1000).toLocaleString()}`,
-                w.pace !== undefined && `even pace: ${w.pace}% by now · today ${w.today}% of ${DAILY}%`].filter(Boolean).join('\n')}>
+                w.pace !== undefined && `even pace: ${w.pace}% by now · today ${w.today}% of ${w.budget}% budget`].filter(Boolean).join('\n')}>
                 <span className="usage-label">{w.label}</span>
                 <span className="meter">
                   <span className={w.pct >= 85 ? 'hot' : w.pct >= 60 ? 'warm' : ''} style={{ width: `${Math.min(100, w.pct)}%` }} />
@@ -392,8 +390,8 @@ export function UsageMeters({ usage, compact }: { usage: Usage[]; compact?: bool
                 {!compact && w.resets_at && <span className="usage-reset">resets {resets(w.resets_at)}</span>}
               </div>
               {!compact && w.pace !== undefined && (
-                <div className={`usage-pace ${w.pct > w.pace ? 'ahead' : ''}`}>
-                  Today {w.today}% of {DAILY}% · {w.pct > w.pace ? `${w.pct - w.pace}% ahead of` : w.pct < w.pace ? `${w.pace - w.pct}% under` : 'on'} pace
+                <div className={`usage-pace ${w.today! > w.budget! ? 'ahead' : ''}`}>
+                  Today {w.today}% of {w.budget}% budget · {w.pct > w.pace ? `${w.pct - w.pace}% ahead of` : w.pct < w.pace ? `${w.pace - w.pct}% under` : 'on'} pace
                   {w.resets_at && ` · resets ${new Date(w.resets_at * 1000).toLocaleString([], { weekday: 'short', hour: 'numeric', minute: '2-digit' })}`}
                 </div>
               )}

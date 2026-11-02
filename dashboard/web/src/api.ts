@@ -38,7 +38,7 @@ export type Idea = {
 }
 export type Conversation = Placed & { tool: 'claude' | 'codex'; id: string; title: string; prompt: string; cwd: string; updated: number; running: string | null }
 export type Message = { role: 'user' | 'assistant' | 'tool'; text: string }
-export type Usage = { tool: string; windows: { label: string; pct: number; resets_at: number | null; pace?: number; today?: number }[]; updated: number | null; note?: string }
+export type Usage = { tool: string; windows: { label: string; pct: number; resets_at: number | null; pace?: number; today?: number; budget?: number }[]; updated: number | null; note?: string }
 export type RepoChanges = { repo: string; branch: string; files: { status: string; path: string }[]; commits: { hash: string; subject: string; pushed: boolean }[]; unpushed: number }
 export type Route = { tool: string; model: string; effort: string; why: string; alternative: { tool: string; model: string; why: string } }
 export type Improved = { prompt: string; changes: string[]; questions: string[] }
