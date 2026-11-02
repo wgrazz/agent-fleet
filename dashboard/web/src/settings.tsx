@@ -159,7 +159,7 @@ export function SettingsPage({ usage, push, onBack, onError }: { usage: Usage[];
           </div>
         </Section>
 
-        <Section title="Share to Fleet" hint="A share-sheet shortcut: in Instagram, TikTok, Safari or any app, tap Share → Save to Fleet and the link lands in Brain Dump. Run on its own, it saves your clipboard. It holds your access key, so keep it to yourself. Tailscale must be on.">
+        <Section title="Share to Fleet" hint="A share-sheet shortcut: in Instagram, TikTok, Safari or any app, tap Share → Save to Fleet and the link lands in Shared. Run on its own, it saves your clipboard. It goes through a Fleet Inbox list in Reminders, so it works offline or with the Mac asleep: Fleet picks it up once the Mac is awake.">
           <div className="set-row">
             <a className="btn primary" href="/api/share/shortcut" download="Save to Fleet.shortcut">Add the Save to Fleet shortcut</a>
           </div>

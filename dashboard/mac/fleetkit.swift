@@ -4,6 +4,8 @@
 //   fleetkit add-event TITLE START MINUTES [CALENDAR] [NOTES]
 //   fleetkit reminders [LIST]                        incomplete ones
 //   fleetkit add-reminder TITLE [DUE] [LIST] [NOTES]  DUE may be ""
+//   fleetkit inbox LIST                              open ones with ids; makes the list if it's missing
+//   fleetkit remove-reminders ID...
 import EventKit
 import Foundation
 
@@ -86,6 +88,27 @@ case "add-reminder":
     r.calendar = store.calendars(for: .reminder).first { $0.title == wanted } ?? store.defaultCalendarForNewReminders()
     if args.count > 4 { r.notes = args[4] }
     do { try store.save(r, commit: true); out(["ok": true, "list": r.calendar.title]) } catch { fail("\(error.localizedDescription)") }
+case "inbox":
+    // "Save to Fleet" on the phone drops shares here, so they wait in iCloud while the Mac is asleep or off the tailnet
+    access(.reminder)
+    guard args.count == 2 else { fail("usage: inbox LIST") }
+    var list = store.calendars(for: .reminder).first { $0.title == args[1] }
+    if list == nil {
+        let c = EKCalendar(for: .reminder, eventStore: store)
+        c.title = args[1]
+        c.source = store.defaultCalendarForNewReminders()?.source
+        do { try store.saveCalendar(c, commit: true) } catch { fail("\(error.localizedDescription)") }
+        list = c
+    }
+    let done = DispatchSemaphore(value: 0)
+    var found: [EKReminder] = []
+    store.fetchReminders(matching: store.predicateForIncompleteReminders(withDueDateStarting: nil, ending: nil, calendars: [list!])) { found = $0 ?? []; done.signal() }
+    done.wait()
+    out(found.map { ["id": $0.calendarItemIdentifier, "title": $0.title ?? "", "notes": $0.notes ?? ""] })
+case "remove-reminders":
+    access(.reminder)
+    for id in args.dropFirst() { if let r = store.calendarItem(withIdentifier: id) as? EKReminder { try? store.remove(r, commit: false) } }
+    do { try store.commit(); out(["ok": true]) } catch { fail("\(error.localizedDescription)") }
 default:
-    fail("commands: events, add-event, reminders, add-reminder")
+    fail("commands: events, add-event, reminders, add-reminder, inbox, remove-reminders")
 }

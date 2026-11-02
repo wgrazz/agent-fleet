@@ -1044,6 +1044,7 @@ def dash_app():
 # which asks you first for events, reminders and email drafts. First use of each asks macOS permission on the Mac.
 
 KIT = f'{FLEET_DIR}/bin/fleetkit'
+INBOX = 'Fleet Inbox'  # the Reminders list "Save to Fleet" fills on the phone; the dashboard empties it into Fleet
 # Jarvis runs lookups mid-conversation: an unanswered permission prompt shouldn't hold it for 20 s
 PROMPT_WAIT = 4 if os.environ.get('FLEET_NO_WAIT') else 20
 
@@ -1107,6 +1108,7 @@ def mac(args):
     c = sub.add_parser('calendar'); c.add_argument('when', nargs='?', default='today')
     e = sub.add_parser('event'); e.add_argument('title'); e.add_argument('--at', required=True); e.add_argument('--minutes', type=int, default=30); e.add_argument('--calendar', default=''); e.add_argument('--notes', default='')
     r = sub.add_parser('reminders'); r.add_argument('list', nargs='?', default='')
+    ib = sub.add_parser('inbox'); ib.add_argument('--done', nargs='+', default=[])
     rm = sub.add_parser('remind'); rm.add_argument('title'); rm.add_argument('--due', default=''); rm.add_argument('--list', default=''); rm.add_argument('--notes', default='')
     d = sub.add_parser('draft'); d.add_argument('--to', default=''); d.add_argument('--subject', default=''); d.add_argument('--body', default='')
     sub.add_parser('apps')
@@ -1157,6 +1159,8 @@ def mac(args):
         for it in items:
             print(f"{it['title']}{' (due ' + fmt_time(it['due']) + ')' if it['due'] else ''} [{it['list']}]")
         return
+    if a.cmd == 'inbox':  # JSON for the dashboard: what's waiting in the inbox list, or --done IDS to clear them
+        return print(json.dumps(kit('remove-reminders', *a.done) if a.done else kit('inbox', INBOX)))
     if a.cmd == 'remind':
         r = kit('add-reminder', a.title, a.due.replace(' ', 'T'), a.list, a.notes)
         return print(f"Reminder added to {r['list']}: {a.title}.")
@@ -1272,20 +1276,19 @@ def siri_shortcut(path, host=''):
     })
 
 
-def share_shortcut(path, host=''):
+def share_shortcut(path):
     """A signed "Save to Fleet" shortcut for the iPhone's share sheet: share a link (an Instagram reel, a TikTok, a page) or
     some text from any app and it lands in Fleet: links go to Shared, where an agent breaks each one down (what it is,
     is it worth doing, notes), and plain text goes to Brain Dump. Run on its own (widget, Action Button) it saves what's on the clipboard.
-    It holds your access key, so it's made on demand and never saved in the repo."""
-    host = host or ts_host()
-    if not host:
-        sys.exit('Sharing to Fleet needs the dashboard on your tailnet: install Tailscale, then fleet dash install.')
+    It adds a reminder to the Fleet Inbox list, not a call to the Mac, so it works offline, with the Mac asleep or off the
+    tailnet; iCloud carries it over and the dashboard picks it up within a minute of the Mac being awake."""
+    kit('inbox', INBOX)  # makes the list (and asks for Reminders access) so the phone has it to add to
     shared = sc_token({'Type': 'ExtensionInput'})
     sign_shortcut(path, {
         'WFWorkflowActions': [
-            sc_step('downloadurl', WFURL=f'https://{host}/api/ideas', WFHTTPMethod='POST', ShowHeaders=True,
-                    WFHTTPHeaders=sc_fields(('X-Fleet-Key', sc_text(config()['key']))), WFHTTPBodyType='JSON',
-                    WFJSONValues=sc_fields(('text', shared))),
+            # both spellings of the list: Shortcuts has used each in different versions
+            sc_step('addnewreminder', WFCalendarItemTitle=shared, WFCalendarItemCalendar=INBOX,
+                    WFCalendarDescriptor={'Title': INBOX, 'IsAllCalendar': False}),
             sc_step('notification', WFNotificationActionBody='Saved to Fleet', WFNotificationActionSound=False),
         ],
         'WFWorkflowIcon': {'WFWorkflowIconStartColor': 463140863, 'WFWorkflowIconGlyphNumber': 59446},
@@ -1518,7 +1521,7 @@ def main(args):
     if cmd == 'dash' and rest[:1] == ['siri'] and len(rest) <= 3:  # siri [FILE] [HOST]
         return siri_shortcut(rest[1] if len(rest) > 1 else os.path.expanduser('~/Desktop/Jarvis.shortcut'), rest[2] if len(rest) > 2 else '')
     if cmd == 'dash' and rest[:1] == ['share'] and len(rest) <= 3:  # share [FILE] [HOST]
-        return share_shortcut(rest[1] if len(rest) > 1 else os.path.expanduser('~/Desktop/Save to Fleet.shortcut'), rest[2] if len(rest) > 2 else '')
+        return share_shortcut(rest[1] if len(rest) > 1 else os.path.expanduser('~/Desktop/Save to Fleet.shortcut'))
     if cmd == 'tts' and rest == ['install']:
         return tts_install()
     if cmd == 'dash' and rest == ['uninstall']:

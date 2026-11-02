@@ -243,7 +243,9 @@ same memory, cost cap and actions, from any terminal or script. That makes it ea
   checked on the web) and gives its take: a verdict (worth doing, maybe, skip, just a note), what the post
   says and shows, and an answer to anything you typed with it. Its page has the video at the top and the
   conversation below, so you can keep asking it about that one post. A few cents a post. Run on its own it saves your
-  clipboard. Tailscale must be on.
+  clipboard. It doesn't call the Mac: it adds a reminder to a **Fleet Inbox** list, which iCloud carries over, so it
+  works offline, away from the tailnet or with the Mac asleep; the dashboard files it within 30 s of the Mac being awake.
+  Re-add the shortcut if yours is from before this (the old one posted straight to the Mac and failed when it was unreachable).
 
 **Keys:**
 

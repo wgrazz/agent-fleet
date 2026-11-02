@@ -74,6 +74,26 @@ const fleet = (args: string[], cwd?: string) =>
     throw new HttpError(400, (e.stderr || e.message || 'fleet failed').trim())
   })
 
+/** A note into its list; with no list, a link goes to Shared and gets broken down in the background, anything else to Brain Dump. */
+const file = (text: string, list = '', area?: string) => {
+  list ||= shares.link(text) ? shares.LIST : 'Brain Dump'
+  const id = ideas.addIdea(text, list, { area })
+  if (list === shares.LIST) shares.breakDown(id).catch(e => console.error(`share ${id}:`, e))
+  return id
+}
+
+// "Save to Fleet" on the phone adds to the Fleet Inbox reminders list (works with the Mac asleep or away); file what's there
+let inboxError = ''
+const emptyInbox = async () => {
+  const items = JSON.parse(await run(FLEET_BIN, ['mac', 'inbox'])) as { id: string; title: string; notes: string }[]
+  for (const r of items) {
+    const text = [r.title, r.notes].filter(Boolean).join('\n\n').trim()
+    if (text) file(text)
+  }
+  if (items.length) await run(FLEET_BIN, ['mac', 'inbox', '--done', ...items.map(r => r.id)])
+  inboxError = ''
+}
+
 const str = (v: unknown, max = 200) => (typeof v === 'string' && v.length <= max ? v : '')
 
 const agentOr404 = (name: string) => {
@@ -655,13 +675,7 @@ const routes: [string, RegExp, Route][] = [
     const b = await body(req)
     const text = str(b.text, 10_000).trim()
     if (!text) throw new HttpError(400, 'empty idea')
-    // a link sent to the inbox (the share sheet) goes to Shared and gets broken down in the background
-    const list = str(b.list, 60).trim() || (shares.link(text) ? shares.LIST : 'Brain Dump')
-    try {
-      const id = ideas.addIdea(text, list, { area: str(b.area, 40) || undefined })
-      if (list === shares.LIST) shares.breakDown(id).catch(e => console.error(`share ${id}:`, e))
-      return { id }
-    } catch (e) { throw new HttpError(400, (e as Error).message) }
+    try { return { id: file(text, str(b.list, 60).trim(), str(b.area, 40) || undefined) } } catch (e) { throw new HttpError(400, (e as Error).message) }
   }],
   // Team → Shared: one agent per shared link, each its own conversation
   ['GET', /^\/api\/shares$/, async () => shares.shares()],
@@ -1023,6 +1037,11 @@ if (import.meta.main) {
   startPolling()
   setInterval(() => resumeDue().catch(e => console.error('resume check failed:', e)), 30_000)
   setInterval(() => team.due(teamAgents), 60_000)
+  // the same error every 30 s (no Reminders access yet) only needs saying once
+  setInterval(() => emptyInbox().catch(e => {
+    const msg = String(e.stderr || e.message).trim()
+    if (msg !== inboxError) console.error('inbox check failed:', (inboxError = msg))
+  }), 30_000)
   setInterval(() => sendQueued().catch(e => console.error('queue check failed:', e)), 2000)
   // once a day (and a minute after starting): newer Claude Code / Codex? tell your phone once per new version
   const updateCheck = () => checkAll().then(({ tools }) => {
