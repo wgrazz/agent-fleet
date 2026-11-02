@@ -11,6 +11,7 @@ import { conversations, transcript } from './history.ts'
 import * as ideas from './ideas.ts'
 import * as team from './roles.ts'
 import * as desks from './desks.ts'
+import * as prep from './prep.ts'
 import * as shares from './shares.ts'
 import { notify, publicKey, pushAll, subscribe } from './push.ts'
 import { alerts, answerAsk, ingestHook, list, openAsk, poll, pollAsk, startPolling } from './state.ts'
@@ -772,8 +773,28 @@ const routes: [string, RegExp, Route][] = [
   ['POST', /^\/api\/role-items\/(\d+)\/act$/, async (req, [id]) => {
     const b = await body(req)
     try {
-      desks.act(int(id), str(b.action, 20), { text: typeof b.text === 'string' ? b.text.slice(0, 2000) : undefined, keep: typeof b.keep === 'number' ? b.keep : undefined, agent: str(b.agent, 80) || undefined })
+      desks.act(int(id), str(b.action, 20), { text: typeof b.text === 'string' ? b.text.slice(0, 2000) : undefined, keep: typeof b.keep === 'number' ? b.keep : undefined, agent: str(b.agent, 80) || undefined,
+        index: typeof b.index === 'number' ? b.index : undefined, answer: str(b.answer, 1000) || undefined })
     } catch (e) { throw new HttpError(400, (e as Error).message) }
+    return { ok: true }
+  }],
+  // Ready to start: the chief's prepped notes. Start resumes the prep's read-only conversation as a real agent.
+  ['GET', /^\/api\/preps$/, async () => prep.homeList()],
+  ['POST', /^\/api\/role-items\/(\d+)\/start$/, async (_req, [id]) => {
+    const it = db.prepare("SELECT status, data FROM role_items WHERE id = ? AND kind = 'proposal'").get(int(id)) as { status: string; data: string } | undefined
+    const p = it ? JSON.parse(it.data) as desks.Proposal : null
+    if (!it || p?.type !== 'prep' || !p.session_id || !p.cwd) throw new HttpError(404, 'no such prep')
+    if (it.status !== 'open') throw new HttpError(409, 'that one is already started')
+    const note = ideas.idea(p.ids[0])
+    const slug = (note?.text ?? '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 28)
+    const started = await startAgent({ tool: 'claude', name: slug || `prep-${p.ids[0]}`, cwd: p.cwd, resume: p.session_id, prompt: prep.startPrompt(p), folder_id: ideaFolder({}, note?.area ?? null) })
+    desks.act(int(id), 'started', { agent: started.name })
+    if (note) ideas.updateIdea(note.id, { agent: started.name })
+    return started
+  }],
+  ['POST', /^\/api\/ideas\/(\d+)\/prep$/, async (_req, [id]) => {
+    const item = ideaOr404(id)
+    prep.prepNow(item.id).catch(e => console.error(`prep ${item.id}:`, e.message))
     return { ok: true }
   }],
   ['POST', /^\/api\/roles\/([^/]+)\/board$/, async (req, [name]) => {

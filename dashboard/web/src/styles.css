@@ -699,6 +699,10 @@ html.holding, html.holding *, .it, .it *, .idea-body, .idea-body *, .chip-f, .ni
 textarea.role-prompt { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px; line-height: 1.5; }
 .prompt-peek { text-align: left; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; line-height: 1.5; color: var(--dim); padding: 8px 10px; border-radius: 8px; background: var(--chip);
   display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; white-space: pre-wrap; }
+.prep-summary { font-size: 15px; line-height: 1.45; font-weight: 500; }
+.prep-q { display: flex; flex-direction: column; gap: 6px; font-size: 13.5px; line-height: 1.4; }
+.prep-opts { display: flex; flex-wrap: wrap; gap: 6px; }
+.prep-plan { margin: 4px 0 0; padding-left: 20px; font-size: 13px; line-height: 1.5; color: var(--dim); }
 .handled { display: flex; gap: 8px; align-items: center; justify-content: space-between; font-size: 13px; color: var(--dim); }
 .role-text { min-width: 0; flex: 1; line-height: 1.4; }
 .role-task { display: flex; gap: 10px; align-items: flex-start; }

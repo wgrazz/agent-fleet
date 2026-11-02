@@ -8,6 +8,7 @@ import { join } from 'node:path'
 import { askFull } from './ai.ts'
 import { DESKS, notesFor } from './desks.ts'
 import { nextDue, REPEAT, suggestSorting } from './ideas.ts'
+import { mergeAndPick, prepAll } from './prep.ts'
 import { pushAll } from './push.ts'
 import { db } from './store.ts'
 
@@ -207,6 +208,9 @@ export async function runRole(name: string, agents: () => string = () => '') {
   const tools = r.tools.split(',').filter(Boolean).flatMap(t => TOOLS[t])
   try {
     if (r.see.split(',').includes('ideas') && !r.areas) await suggestSorting().catch(() => 0) // Fleet's Brain Dump sorter: suggestions only
+    // the chief merges duplicates and picks what to prep before it reads the notes, so it sees them merged
+    const picks = r.kind === 'chief' && r.see.split(',').includes('ideas')
+      ? await mergeAndPick(name, runId).catch(e => { console.error(`${name}: prep pick failed:`, e.message); return [] }) : []
     const a = await askFull<Out>(input(r, news, open, agents()), r.prompt + CONTRACT + DESKS[r.kind].contract, outSchema(r.kind), {
       tools, model: r.model, budgetUsd: r.budget, cwd: r.cwd || undefined, timeoutMs: 15 * 60_000, feature: `role:${name}`,
       allow: tools.map(t => (t === 'Write' || t === 'Edit') ? `${t}(${r.write_dir}/**)` : t),
@@ -230,6 +234,7 @@ export async function runRole(name: string, agents: () => string = () => '') {
     const cards = Array.isArray(out.today) ? out.today.length + out.tidy.length + out.handoffs.length : 0
     const counts = [[fresh(out.questions).length, 'question'], [fresh(out.tasks).length, 'task'], [cards, 'card']].filter(([n]) => n).map(([n, w]) => `${n} ${w}${n === 1 ? '' : 's'}`)
     await pushAll({ title: r.title, body: out.brief.slice(0, 600) + (counts.length ? `\n${counts.join(', ')} for you` : ''), url: `/#/team/${name}`, tag: `role-${name}` }).catch(() => {})
+    if (picks.length) await prepAll(name, runId, picks, r.model) // still "Working…" until the preps are in
   } catch (e) {
     const msg = (e as Error).message.slice(0, 500)
     db.prepare("UPDATE role_runs SET status = 'error', finished_at = ?, error = ? WHERE id = ?").run(now(), msg, runId)

@@ -33,8 +33,8 @@ function LeftMessages({ items, agents, onChange, onError, onNew }: {
   )
 }
 
-export function AgentList({ agents, selected, header, past, onMenu, empty, paused, left }: {
-  agents: LiveAgent[]; selected: string; header: ReactNode; past?: Conversation[]; empty?: ReactNode
+export function AgentList({ agents, selected, header, past, onMenu, empty, paused, left, top }: {
+  agents: LiveAgent[]; selected: string; header: ReactNode; past?: Conversation[]; empty?: ReactNode; top?: ReactNode
   onMenu: (a: LiveAgent, x: number, y: number) => void
   paused?: { items: Paused[]; onResume: (p: Paused) => void; onForget: (p: Paused) => void }
   left?: { items: LeftMessage[]; onChange: () => void; onError: (e: Error) => void; onNew: (text: string) => void }
@@ -48,6 +48,7 @@ export function AgentList({ agents, selected, header, past, onMenu, empty, pause
       {header}
       <div className="scroll">
         {left && left.items.length > 0 && <LeftMessages agents={agents} {...left} />}
+        {top}
         {ORDER.map(status => {
           const group = agents.filter(a => a.controllable && a.status === status)
           if (!group.length) return null

@@ -3,7 +3,7 @@
 // calendar, paperwork in flight, drafts, questions for a CPA or lawyer and what it knows. Every role reads what you
 // do here on its next run.
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { api, usePoll, type ClerkBoard, type Idea, type Proposal, type Role, type RoleItem, type RoleNote, type RoleRun, type Share, type ShareMessage } from './api.ts'
+import { api, usePoll, type ClerkBoard, type Idea, type PrepRow, type Proposal, type Role, type RoleItem, type RoleNote, type RoleRun, type Share, type ShareMessage } from './api.ts'
 import { Markdown } from './agents.tsx'
 import { AREAS } from './areas.ts'
 import { FileViewer } from './files.tsx'
@@ -244,11 +244,14 @@ function Note({ n, id }: { n?: RoleNote; id: number }) {
 function ChiefDesk(ctx: Ctx) {
   const cards = ctx.items.filter(i => i.kind === 'proposal' && i.status === 'open')
   const of = (t: Proposal['type'][]) => cards.filter(c => t.includes(data(c).type))
-  const today = of(['today']), tidy = of(['merge', 'close']), hand = of(['handoff'])
+  const today = of(['today']), tidy = of(['merge', 'close']), hand = of(['handoff']), ready = of(['prep'])
   const handled = ctx.items.filter(i => i.kind === 'proposal' && (i.status === 'done' || i.status === 'dismissed') && (i.closed_at ?? 0) > Date.now() / 1000 - 86400)
   const post = (c: RoleItem, body: object) => ctx.act(api.post(`/api/role-items/${c.id}/act`, body))
   return (
     <>
+      {ready.length > 0 && <Sec title={`Ready to start · ${ready.length}`} hint="Notes an agent has already read up on. Answer on the card if you like, then Start: the agent picks up knowing everything it found.">
+        {ready.map(c => <PrepCard key={c.id} c={c} ctx={ctx} />)}
+      </Sec>}
       <Sec title="Today" hint={today.length ? 'The chief\'s picks for today. Done checks the note off.' : undefined}>
         {today.map(c => (
           <div key={c.id} className="card pick">
@@ -284,7 +287,7 @@ function ChiefDesk(ctx: Ctx) {
           <div key={c.id} className="handled">
             <span>{c.status === 'done' ? '✓' : '–'} {c.text}{data(c).agent ? ` · ${data(c).agent}` : ''}</span>
             {data(c).agent ? <a className="btn small ghost" href={`#/agent/${enc(data(c).agent!)}`}>Open agent</a>
-              : <button className="btn small ghost" onClick={() => post(c, { action: 'undo' })}>Undo</button>}
+              : <button className="btn small ghost" onClick={() => post(c, { action: 'undo' })}>{data(c).auto ? 'Unmerge' : 'Undo'}</button>}
           </div>
         ))}
       </Sec>}
@@ -338,6 +341,57 @@ function HandoffCard({ c, ctx }: { c: RoleItem; ctx: Ctx }) {
         <button className="btn small ghost" onClick={() => ctx.act(api.post(`/api/role-items/${c.id}/act`, { action: 'reject' }))}>Not now</button>
         <button className="btn small primary" disabled={busy || !prompt.trim()} onClick={start}>{busy ? 'Starting…' : 'Start agent'}</button>
       </div>
+    </div>
+  )
+}
+
+function PrepCard({ c, ctx }: { c: RoleItem; ctx: Ctx }) {
+  const p = data(c), qs = p.questions ?? []
+  const [busy, setBusy] = useState(false)
+  const post = (body: object) => ctx.act(api.post(`/api/role-items/${c.id}/act`, body))
+  const start = () => {
+    setBusy(true)
+    api.post<{ name: string }>(`/api/role-items/${c.id}/start`).then(({ name }) => ctx.act(Promise.resolve()).then(() => { location.hash = `#/agent/${enc(name)}` }))
+      .catch(ctx.onError).finally(() => setBusy(false))
+  }
+  return (
+    <div className="card">
+      <div className="card-kicker">{qs.length ? `${qs.length} question${qs.length === 1 ? '' : 's'} first` : 'Plan ready'}{p.size ? ` · ${p.size}` : ''}</div>
+      <Note n={ctx.notes[p.ids[0]]} id={p.ids[0]} />
+      <div className="prep-summary">{c.detail}</div>
+      {qs.map((q, n) => (
+        <div key={n} className="prep-q">
+          <div>{q.text}</div>
+          <div className="prep-opts">{q.options.map((o, k) => (
+            <button key={k} className={`btn small ${p.answers?.[n] === o ? 'primary' : 'ghost'}`} title={k === q.recommended ? 'Recommended' : undefined}
+              onClick={() => post({ action: 'answer', index: n, answer: o })}>{o}{k === q.recommended ? ' ★' : ''}</button>
+          ))}</div>
+        </div>
+      ))}
+      {!!p.plan?.length && <details><summary className="hint">The plan · {p.plan.length} steps</summary><ol className="prep-plan">{p.plan.map((x, n) => <li key={n}>{x}</li>)}</ol></details>}
+      <div className="card-acts">
+        <button className="btn small ghost" onClick={() => post({ action: 'reject' })}>Not now</button>
+        <button className="btn small primary" disabled={busy} onClick={start}>{busy ? 'Starting…' : 'Start'}</button>
+      </div>
+    </div>
+  )
+}
+
+/** Home page: prepped notes waiting on you, and ones an agent finished lately with its receipt. */
+export function ReadyToStart({ onError }: { onError: (e: Error) => void }) {
+  const rows = usePoll<PrepRow[]>('/api/preps', 15_000, onError).data ?? []
+  if (!rows.length) return null
+  const waiting = rows.filter(r => r.status === 'open').length
+  return (
+    <div>
+      <div className="grp">Ready to start{waiting ? ` · ${waiting}` : ''}</div>
+      {rows.map(r => (
+        <a key={r.id} className="it plain role-row" href={r.status === 'open' ? `#/team/${enc(r.role)}` : `#/idea/${r.idea}`}>
+          <span className="nm">{r.status === 'open' ? '' : '✓ '}{r.text}</span>
+          <span className="tm">{r.status !== 'open' ? 'Done' : r.questions ? `${r.questions} question${r.questions === 1 ? '' : 's'}` : 'Plan ready'}</span>
+          <span className="pv">{r.receipt ?? r.summary}</span>
+        </a>
+      ))}
     </div>
   )
 }

@@ -10,7 +10,13 @@ const str = { type: 'string' }, int = { type: 'integer' }
 const obj = (properties: Record<string, unknown>) => ({ type: 'object', additionalProperties: false, required: Object.keys(properties), properties })
 const arr = (items: unknown) => ({ type: 'array', items })
 
-export type Proposal = { type: 'today' | 'merge' | 'close' | 'handoff'; ids: number[]; keep?: number; text?: string; why: string; prompt?: string; turn?: number; agent?: string }
+export type Proposal = {
+  type: 'today' | 'merge' | 'close' | 'handoff' | 'prep'; ids: number[]; keep?: number; text?: string; why: string; prompt?: string; turn?: number; agent?: string
+  auto?: boolean // a merge Fleet already made (prep.ts): Undo is Unmerge, and the group is never merged again
+  // prep: the kept read-only conversation Start resumes, what it found, your answers by question index, the agent's receipt
+  session_id?: string; cwd?: string; plan?: string[]; questions?: { text: string; options: string[]; recommended: number }[]
+  answers?: Record<number, string>; size?: string; receipt?: string
+}
 type Desk = { schema: Record<string, unknown>; contract: string; apply?: (role: string, runId: number, out: any) => void; board?: boolean }
 
 const CHIEF_CONTRACT = `
@@ -98,7 +104,7 @@ export function notesFor(items: { kind: string; data: string }[]) {
 }
 
 /** A button on a chief card. Changes to notes go through idea history, so Undo puts them back exactly. */
-export function act(itemId: number, action: string, o: { text?: string; keep?: number; agent?: string } = {}) {
+export function act(itemId: number, action: string, o: { text?: string; keep?: number; agent?: string; index?: number; answer?: string } = {}) {
   const it = db.prepare('SELECT * FROM role_items WHERE id = ?').get(itemId) as { status: string; data: string } | undefined
   if (!it?.data) throw new Error('no such card')
   const p = JSON.parse(it.data) as Proposal
@@ -106,11 +112,16 @@ export function act(itemId: number, action: string, o: { text?: string; keep?: n
     db.prepare('UPDATE role_items SET status = ?, seen = 0, closed_at = ?, data = ? WHERE id = ?').run(status, status === 'open' ? null : now(), JSON.stringify({ ...p, ...extra }), itemId)
   if (action === 'undo') {
     if (p.turn) ideas.undoTurn(p.turn)
-    return close('open', { turn: undefined, agent: undefined })
+    return close(p.auto ? 'dismissed' : 'open', { turn: undefined, agent: undefined })
   }
   if (it.status !== 'open') throw new Error('that card is already done')
   if (action === 'reject') return close('dismissed')
-  if (p.type === 'handoff' && action === 'started') return close('done', { agent: String(o.agent ?? '').slice(0, 80) })
+  if ((p.type === 'handoff' || p.type === 'prep') && action === 'started') return close('done', { agent: String(o.agent ?? '').slice(0, 80) })
+  if (p.type === 'prep' && action === 'answer') {
+    if (!p.questions?.[o.index ?? -1]) throw new Error('no such question')
+    p.answers = { ...p.answers, [o.index!]: String(o.answer ?? '').trim().slice(0, 1000) }
+    return db.prepare('UPDATE role_items SET data = ? WHERE id = ?').run(JSON.stringify(p), itemId)
+  }
   const turn = Date.now()
   const change = (id: number, patch: Parameters<typeof ideas.updateIdea>[1]) => {
     const before = ideas.idea(id)
