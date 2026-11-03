@@ -345,7 +345,7 @@ function App() {
       paused={fid === null ? { items: paused.data ?? [], onResume: p => act(api.post(`/api/paused/${p.id}/resume`), () => openAgent(p.name)), onForget: p => act(api.del(`/api/paused/${p.id}`)) } : undefined}
       left={fid === null ? { items: left.data ?? [], onChange: left.refresh, onError: fail, onNew: text => setModal({ kind: 'custom', initial: { prompt: text } }) } : undefined}
       header={listHeader(folder?.name ?? 'All agents', folder?.color)}
-      top={fid === null ? <ReadyToStart onError={fail} /> : undefined}
+      afterPaused={fid === null ? <ReadyToStart onError={fail} /> : undefined}
       past={fid !== null ? (history ?? []).filter(c => c.folder_id === fid && !c.running) : undefined}
       empty={fid !== null ? <div className="empty">Nothing in {folder?.name ?? 'this folder'} yet. Drag agents here, or hold one and pick Move to folder.</div> : undefined} />
   }
