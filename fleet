@@ -105,7 +105,8 @@ def out(*cmd):
 
 def snapshot():
     procs = {}
-    for line in out('ps', '-axo', 'pid=,ppid=,etime=,tty=,command=').splitlines():
+    # split('\n'), not splitlines(): a prompt holding U+2028 etc. would cut a ps row in half
+    for line in filter(None, out('ps', '-axo', 'pid=,ppid=,etime=,tty=,command=').split('\n')):
         pid, ppid, age, tty, cmd = line.split(None, 4)
         procs[int(pid)] = dict(pid=int(pid), ppid=int(ppid), age=age, tty=tty, cmd=cmd)
     return procs
