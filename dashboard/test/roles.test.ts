@@ -84,8 +84,10 @@ it('the chief desk turns ids into cards; merging and closing change notes, and U
   desks.act(merge.id, 'undo')
   expect([ideas.idea(b)!.text, ideas.idea(a)!.done]).toEqual(['Find out why Twilio rejected me', 0])
   desks.act(cards[2].id, 'reject')
-  await m.runRole('chief') // the same merge again isn't filed twice; yesterday's pick expires
+  desks.act(cards[0].id, 'reject') // Not today: just for today
+  await m.runRole('chief') // the same merge again isn't filed twice; yesterday's pick expires, and Not today can come back
   expect(inputs.at(-1)).toContain('- Undid: Merge 2 notes')
+  expect(inputs.at(-1)).toContain('- Not today (that day only')
   expect(inputs.at(-1)).toContain("- Rejected (don't suggest again): Close \"Old thing\"")
   const open = m.page('chief')!.items.filter(i => i.kind === 'proposal' && i.status === 'open').map(i => JSON.parse(i.data).type)
   expect(open.sort()).toEqual(['merge', 'today'])

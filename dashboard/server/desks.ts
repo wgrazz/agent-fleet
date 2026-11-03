@@ -68,8 +68,8 @@ const clip = (s: string, n = 70) => (s.length > n ? `${s.slice(0, n - 1)}…` : 
 function applyChief(role: string, runId: number, out: { today: { id: number; why: string }[]; tidy: { type: 'merge' | 'close'; ids: number[]; keep: number; text: string; why: string }[]; handoffs: { id: number; prompt: string; why: string }[] }) {
   // yesterday's picks give way to today's; that isn't news for the next run
   db.prepare("UPDATE role_items SET status = 'expired', closed_at = ?, seen = 1 WHERE role = ? AND kind = 'proposal' AND status = 'open' AND json_extract(data, '$.type') = 'today'").run(now(), role)
-  // a card you rejected stays gone for two weeks even if the chief suggests it again
-  const open = (db.prepare("SELECT data FROM role_items WHERE role = ? AND kind = 'proposal' AND (status = 'open' OR status = 'dismissed' AND closed_at > ?)")
+  // a card you rejected stays gone for two weeks even if the chief suggests it again; Not today on a pick is just that day
+  const open = (db.prepare("SELECT data FROM role_items WHERE role = ? AND kind = 'proposal' AND (status = 'open' OR status = 'dismissed' AND closed_at > ? AND json_extract(data, '$.type') != 'today')")
     .all(role, now() - 14 * 86400) as { data: string }[]).map(r => JSON.parse(r.data) as Proposal)
   const key = (p: Pick<Proposal, 'type' | 'ids'>) => `${p.type}:${[...p.ids].sort().join(',')}`
   const have = new Set(open.map(key))

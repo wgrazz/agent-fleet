@@ -10,7 +10,7 @@ import { DESKS, notesFor } from './desks.ts'
 import { nextDue, REPEAT, suggestSorting } from './ideas.ts'
 import { mergeAndPick, prepAll } from './prep.ts'
 import { pushAll } from './push.ts'
-import { db } from './store.ts'
+import { config, db } from './store.ts'
 
 export type Role = {
   name: string; title: string; prompt: string; schedule: string; at: string; model: string; budget: number
@@ -172,7 +172,7 @@ function fleetItems(areas: string) {
 
 function input(r: Role, news: Item[], open: Item[], agents: string) {
   const said = news.map(i => i.kind === 'message' ? `- Message: ${i.text}` : i.kind === 'question' ? `- Answer to "${i.text}": ${i.answer}`
-    : i.kind === 'proposal' ? `- ${i.status === 'done' ? 'Accepted' : i.status === 'dismissed' ? 'Rejected (don\'t suggest again)' : 'Undid'}: ${i.text}`
+    : i.kind === 'proposal' ? `- ${i.status === 'done' ? 'Accepted' : i.status === 'dismissed' ? (i.data && JSON.parse(i.data).type === 'today' ? 'Not today (that day only; pick it again on a later day if it still matters)' : 'Rejected (don\'t suggest again)') : 'Undid'}: ${i.text}`
     : `- ${i.status === 'done' ? 'Done' : i.status === 'dismissed' ? 'Dismissed (not wanted)' : 'Reopened'}: ${i.text}`)
   const see = r.see.split(',')
   return [
@@ -209,7 +209,7 @@ export async function runRole(name: string, agents: () => string = () => '') {
   try {
     if (r.see.split(',').includes('ideas') && !r.areas) await suggestSorting().catch(() => 0) // Fleet's Brain Dump sorter: suggestions only
     // the chief merges duplicates and picks what to prep before it reads the notes, so it sees them merged
-    const picks = r.kind === 'chief' && r.see.split(',').includes('ideas')
+    const picks = config.prep && r.kind === 'chief' && r.see.split(',').includes('ideas') // ponytail: off unless "prep": true in ~/.fleet/config.json
       ? await mergeAndPick(name, runId).catch(e => { console.error(`${name}: prep pick failed:`, e.message); return [] }) : []
     const a = await askFull<Out>(input(r, news, open, agents()), r.prompt + CONTRACT + DESKS[r.kind].contract, outSchema(r.kind), {
       tools, model: r.model, budgetUsd: r.budget, cwd: r.cwd || undefined, timeoutMs: 15 * 60_000, feature: `role:${name}`,
