@@ -9,6 +9,7 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
 import { askFull } from './ai.ts'
+import { AFTER_RESET, limitReset } from './detect.ts'
 import * as ideas from './ideas.ts'
 import { pushAll } from './push.ts'
 import { db, FLEET_DIR } from './store.ts'
@@ -127,6 +128,14 @@ export async function breakDown(id: number) {
     await pushAll({ title: `${LABEL[t.verdict]} ${t.title}`, body: t.why, url: `/#/team/shared/${id}`, tag: `share-${id}` }).catch(() => {})
   } catch (e) {
     set(id, { status: 'error', error: (e as Error).message.slice(0, 500) })
+  }
+}
+
+/** Shares whose first take stopped on a usage limit try again once it resets, after agents and Team (AFTER_RESET). */
+export function retryLimited() {
+  for (const s of db.prepare("SELECT id, error, updated_at FROM shares WHERE status = 'error'").all() as Share[]) {
+    const reset = limitReset(s.error, s.updated_at * 1000)
+    if (reset && Date.now() >= reset + AFTER_RESET.shares * 60_000) breakDown(s.id).catch(e => console.error(`share ${s.id}:`, e))
   }
 }
 

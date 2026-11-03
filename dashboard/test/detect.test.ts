@@ -1,7 +1,7 @@
 import { readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { detect, liveTail, mode, question, quickReplies, workingLine } from '../server/detect.ts'
+import { detect, limitReset, liveTail, mode, question, quickReplies, workingLine } from '../server/detect.ts'
 
 // fixtures/<tool>/<expected state>-<label>.txt, captured with `tmux capture-pane -p` from real sessions
 const root = join(import.meta.dirname, 'fixtures')
@@ -89,4 +89,36 @@ describe('liveTail', () => {
     expect(t.at(-1)).toMatch(/Catapulting/)
     expect(t.join('\n')).not.toMatch(/PONYTAIL|auto mode on/)
   })
+})
+
+describe('limitReset', () => {
+  const at = (s: string) => new Date(s).getTime()
+  const from = at('2026-11-01T16:10:00')
+
+  it("Claude's limit message, read off its screen", () => {
+    const screen = readFileSync(join(root, 'claude/done-limit.txt'), 'utf8')
+    expect(limitReset(liveTail(screen, 3).join('\n'), from)).toBe(at('2026-11-01T22:00:00'))
+  })
+
+  it("Codex's, wrapped over lines, with minutes", () => {
+    const text = '■ You’ve hit your usage limit. Upgrade to Pro (https://chatgpt.com/explore/pro), visit\nhttps://chatgpt.com/settings/usage to purchase more credits or try again at 8:56 PM.'
+    expect(limitReset(text, from)).toBe(at('2026-11-01T20:56:00'))
+  })
+
+  it('a time already past today is tomorrow; a date is that date', () => {
+    expect(limitReset("You've hit your 5-hour limit · resets 1am (America/New_York)", from)).toBe(at('2026-11-02T01:00:00'))
+    expect(limitReset("You've hit your weekly limit · resets Nov 5, 9am (America/New_York)", from)).toBe(at('2026-11-05T09:00:00'))
+    expect(limitReset('You’ve hit your usage limit. Try again at Nov 3rd, 2026 8:56 PM.', from)).toBe(at('2026-11-03T20:56:00'))
+  })
+
+  it("a time it can't read is 30 min on; anything else isn't a limit", () => {
+    expect(limitReset("You've hit your session limit · resets soon", from)).toBe(from + 30 * 60_000)
+    expect(limitReset('Prompt is too long', from)).toBeNull()
+    expect(limitReset('the docs say you may hit your limit when scraping', from)).toBeNull()
+  })
+})
+
+it('a limit message the agent has since answered past is not a limit any more', () => {
+  const screen = readFileSync(join(root, 'claude/done-limit.txt'), 'utf8').replace('     /upgrade to increase your usage limit.\n', '     /upgrade to increase your usage limit.\n\n❯ continue\n\n⏺ Picked up and finished the migration.\n\n✻ Worked for 9s · done 10:05 PM\n')
+  expect(limitReset(liveTail(screen, 3).join('\n'))).toBeNull()
 })

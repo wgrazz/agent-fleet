@@ -151,6 +151,11 @@ sessions, folders and ideas live in `~/.fleet/` (readable only by you). None of 
 - `fleet import-notes` (or Ideas ⋯ → Import from Apple Notes) copies your numbered checklist
   notes, with checked items in Done. macOS only allows this from an app with Full Disk Access.
 
+**Out of usage.** When Claude or Codex stops an agent with "You've hit your … limit", its card says when it
+picks up again, and once the limit resets Fleet types `continue` into it (trying again every 30 min if the limit
+is still there). Team runs and shared links that stopped on a limit run again too. Restart order, minutes after
+the reset: agents 2, Team 5, shared links 8, so the most important work gets the fresh limit first.
+
 **History.** Every past Claude and Codex conversation: search, read as chat, resume, file into
 folders.
 

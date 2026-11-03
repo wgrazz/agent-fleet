@@ -6,6 +6,7 @@ import { promisify } from 'node:util'
 import { readdirSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import { askFull } from './ai.ts'
+import { AFTER_RESET, limitReset } from './detect.ts'
 import { DESKS, notesFor } from './desks.ts'
 import { nextDue, REPEAT, suggestSorting } from './ideas.ts'
 import { pushAll } from './push.ts'
@@ -233,7 +234,12 @@ export async function runRole(name: string, agents: () => string = () => '') {
   } catch (e) {
     const msg = (e as Error).message.slice(0, 500)
     db.prepare("UPDATE role_runs SET status = 'error', finished_at = ?, error = ? WHERE id = ?").run(now(), msg, runId)
-    await pushAll({ title: `${r.title} didn't finish`, body: msg, url: `/#/team/${name}`, tag: `role-${name}` }).catch(() => {})
+    // out of usage: run again once it resets, after the agents have picked up (AFTER_RESET)
+    const reset = limitReset(msg)
+    const again = reset && Math.floor(reset / 1000) + AFTER_RESET.roles * 60
+    if (again) db.prepare('UPDATE roles SET next_run = ? WHERE name = ? AND enabled = 1').run(again, name)
+    const body = again ? `Out of usage. It runs again at ${new Date(again * 1000).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}.` : msg
+    await pushAll({ title: `${r.title} didn't finish`, body, url: `/#/team/${name}`, tag: `role-${name}` }).catch(() => {})
   } finally {
     running.delete(name)
   }

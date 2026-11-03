@@ -16,7 +16,7 @@ import { notify, publicKey, pushAll, subscribe } from './push.ts'
 import { alerts, answerAsk, ingestHook, list, openAsk, poll, pollAsk, startPolling } from './state.ts'
 import { config, dailyBackup, db, FLEET_BIN, FLEET_DIR, saveConfig } from './store.ts'
 import { capture, run, sendKey, sendText } from './tmux.ts'
-import { liveTail } from './detect.ts'
+import { AFTER_RESET, liveTail } from './detect.ts'
 import { aiBudget, usage } from './usage.ts'
 import { kokoroInstalled, speech, voices } from './tts.ts'
 import { readFileSync as readFile } from 'node:fs'
@@ -368,7 +368,24 @@ async function resumeDue() {
       db.prepare('UPDATE paused SET resume_at = NULL WHERE id = ?').run(p.id) // don't retry forever; it stays in Paused
     }
   }
+  await resumeLimited()
   if (due.length) await poll()
+}
+
+// Agents that stopped on a usage limit get "continue" once it resets (AFTER_RESET.agents later); if the limit is
+// still there, they try again every 30 min. Team runs and shares follow a few minutes after (roles.ts, shares.ts).
+const nudged = new Map<string, number>()
+async function resumeLimited() {
+  for (const a of list()) {
+    if (!a.limit_reset || !a.controllable || !IDLE.has(a.status)) continue
+    if (Date.now() < a.limit_reset + AFTER_RESET.agents * 60_000 || Date.now() - (nudged.get(a.name) ?? 0) < 30 * 60_000) continue
+    nudged.set(a.name, Date.now())
+    try {
+      await sendText(a.name, 'continue')
+      notify({ ...a, status: 'resumed', message: 'Its usage limit reset, so it picked up where it stopped' } as any).catch(() => {})
+    } catch (e) { console.error(`couldn't resume ${a.name} after its limit:`, (e as Error).message) }
+  }
+  shares.retryLimited()
 }
 
 const int = (v: string) => Number.parseInt(v, 10)

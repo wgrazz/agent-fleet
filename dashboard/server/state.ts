@@ -2,7 +2,7 @@
 // add the screen and the exit code; Claude Code hooks (via `fleet hook`) give exact status for Claude.
 import { randomUUID } from 'node:crypto'
 import { EventEmitter } from 'node:events'
-import { busy, detect, mode, question, quickReplies, workingLine, type QuickReply, type Status } from './detect.ts'
+import { AFTER_RESET, busy, detect, limitReset, liveTail, mode, question, quickReplies, workingLine, type QuickReply, type Status } from './detect.ts'
 import { FLEET_BIN, REPO } from './store.ts'
 import { capture, panes, run } from './tmux.ts'
 
@@ -24,6 +24,7 @@ export type Agent = {
   mode: string            // footer mode, e.g. "auto mode" (Shift+Tab cycles it)
   working_line: string    // spinner line while busy, e.g. "Catapulting… (4s · ↓ 24 tokens)"
   ask: Ask | null         // a question or plan Claude is waiting on, answerable as a form (see openAsk)
+  limit_reset: number     // epoch ms its subscription limit resets, from the limit message on screen; 0 = none
 }
 
 export type Question = { question: string; header?: string; multiSelect?: boolean; options: { label: string; description?: string }[] }
@@ -44,6 +45,18 @@ const lastAlert = new Map<string, number>()       // `${name}:${status}` -> time
 // An agent that appeared while we were watching (started, or a chat resumed into Fleet) is 'ready', not 'done',
 // until it does real work: its screen redraws while it opens, which alone would read as working and then done.
 const fresh = new Set<string>()
+const limits = new Map<string, { text: string; at: number }>() // session -> the limit message on its screen, and when it resets
+
+// Read once per message, so "+30 min" for a time it can't read counts from when the message appeared.
+function limitAt(name: string, screen: string, now: number) {
+  const text = liveTail(screen, 3).join('\n'), seen = limits.get(name) // the last thing it printed, not an old one scrolled up
+  if (seen?.text === text) return seen.at
+  const at = limitReset(text, now) ?? 0
+  if (at) limits.set(name, { text, at })
+  else limits.delete(name)
+  return at
+}
+const clock = (ms: number) => new Date(ms).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
 
 export const list = () => agents
 
@@ -183,14 +196,17 @@ async function refresh() {
     if (worked) fresh.delete(name) // answering a startup question (trust this folder?) isn't work
     if (status === 'done' && fresh.has(name)) status = 'ready'
     const ask = shownAsk(r.session_id, pane?.paneId ?? '')
+    const reset = r.session && status !== 'working' && status !== 'needs_you' ? limitAt(name, screen, now) : 0
+    const back = reset + AFTER_RESET.agents * 60_000
     if (ask) status = 'needs_you' // the plan prompt has no menu hint the screen check knows
     next.push({
       name, controllable: !!r.session, tool: r.tool, pid: r.pid, cwd: r.cwd, task: r.task, age_s: r.age_s,
       session_id: r.session_id, status, status_since: now, quick_replies: status === 'needs_you' ? quickReplies(screen) : [],
       last_line: lastLine(screen), exit: '',
-      message: ask ? (ask.kind === 'plan' ? 'Plan ready for your approval' : ask.questions[0]?.question ?? '') : status === 'needs_you' ? (hook?.message || question(screen)) : '',
+      message: ask ? (ask.kind === 'plan' ? 'Plan ready for your approval' : ask.questions[0]?.question ?? '') : status === 'needs_you' ? (hook?.message || question(screen))
+        : reset ? `Out of usage · ${back > now ? `picks up again at ${clock(back)}` : 'trying again'}` : '',
       mode: mode(screen), working_line: status === 'working' ? workingLine(r.tool, screen) : '',
-      ask,
+      ask, limit_reset: reset,
     })
   }
 
@@ -202,7 +218,7 @@ async function refresh() {
       name: p.session, controllable: true, tool: tools.get(p.session) ?? prev.get(p.session)?.tool ?? 'unknown', pid: null,
       cwd: prev.get(p.session)?.cwd ?? '', task: prev.get(p.session)?.task ?? '', age_s: 0, session_id: '',
       status: crashed ? 'crashed' : 'done', status_since: now, quick_replies: [], last_line: lastLine(screen),
-      message: '', exit: p.signal ? `killed by ${p.signal}` : `exit ${p.exitStatus ?? 0}`, mode: '', working_line: '', ask: null,
+      message: '', exit: p.signal ? `killed by ${p.signal}` : `exit ${p.exitStatus ?? 0}`, mode: '', working_line: '', ask: null, limit_reset: 0,
     })
   }
 
@@ -222,6 +238,7 @@ async function refresh() {
   }
   for (const name of screens.keys()) if (!next.some(a => a.name === name)) screens.delete(name)
   for (const name of fresh) if (!next.some(a => a.name === name)) fresh.delete(name)
+  for (const name of limits.keys()) if (!next.some(a => a.name === name)) limits.delete(name)
   agents = next
   polled = true
 }
