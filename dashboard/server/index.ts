@@ -5,7 +5,8 @@ import { createReadStream, existsSync, mkdirSync, statSync, unlinkSync, writeFil
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import { homedir } from 'node:os'
 import { basename, extname, join, normalize } from 'node:path'
-import { improvePrompt, interviewPrompt, jarvisBrain, recommend, type JarvisAction } from './ai.ts'
+import { aiOrder, aiStatus, improvePrompt, interviewPrompt, jarvisBrain, recommend, type JarvisAction } from './ai.ts'
+import { PROVIDERS } from './fallback.ts'
 import { changes } from './git.ts'
 import { conversations, transcript } from './history.ts'
 import * as ideas from './ideas.ts'
@@ -334,12 +335,14 @@ async function runJarvis(said: string, opts: JarvisOpts = {}) {
     return reply(`I've used about ${b.jarvis_pct.toFixed(1)} percent of your weekly Claude limit this week, past the ${b.max_pct} percent cap you set. Quick commands still work; tap Allow once to go past it.`, { blocked: said, mode: 'claude' })
   const project = config.cwd && existsSync(config.cwd) ? config.cwd : homedir()
   const context = jarvisContext()
+  // the thread so far, for Codex or Cursor answering a conversation Claude started
+  const history = J.messages(t.id).slice(-40).map(m => `${m.who}: ${m.text}`).join('\n\n')
   let answer
   try {
-    answer = await jarvisBrain(said, context, J.memory(), { cwd: project, resume: t.session_id ?? undefined })
+    answer = await jarvisBrain(said, context, J.memory(), { cwd: project, resume: t.session_id ?? undefined, history })
   } catch (e) {
     if (!t.session_id) throw e
-    answer = await jarvisBrain(said, context, J.memory(), { cwd: project }) // the old session is gone: carry on fresh
+    answer = await jarvisBrain(said, context, J.memory(), { cwd: project, history }) // the old session is gone: carry on fresh
   }
   if (answer.session_id) J.setThreadSession(t.id, answer.session_id)
 
@@ -349,6 +352,7 @@ async function runJarvis(said: string, opts: JarvisOpts = {}) {
     if (!J.needsApproval(a)) done.push(await doAction(a, turn).catch(e => `couldn't ${a.type}: ${(e as Error).message}`))
     else proposed.push(J.propose(t.id, a))
   }
+  if (answer.provider !== 'claude') done.push(`answered by ${answer.provider[0].toUpperCase()}${answer.provider.slice(1)}, Claude is out`)
   const after = await budget()
   return reply(answer.value.say, {
     mode: 'claude', proposals: proposed, end: answer.value.end,
@@ -562,7 +566,7 @@ const routes: [string, RegExp, Route][] = [
   ['GET', /^\/api\/usage$/, async () => usage()],
   ['GET', /^\/api\/settings$/, async () => {
     const { key, port, ...rest } = config
-    return { ...rest, cwd: config.cwd ?? '', ai_model: config.ai_model ?? 'sonnet', jarvis_warn_pct: config.jarvis_warn_pct ?? 5,
+    return { ...rest, cwd: config.cwd ?? '', ai_order: aiOrder(), ai_out: aiStatus(), ai_model: config.ai_model ?? 'sonnet', jarvis_warn_pct: config.jarvis_warn_pct ?? 5,
       jarvis_max_pct: config.jarvis_max_pct ?? 10, voice_engine: config.voice_engine ?? (kokoroInstalled() ? 'kokoro' : 'device'),
       voice: config.voice ?? 'bm_george', voice_speed: config.voice_speed ?? 1, kokoro: kokoroInstalled(),
       docs_folders: config.docs_folders ?? [], docs_skip: config.docs_skip ?? [], docs_missing: (config.docs_folders ?? []).filter(f => !existsSync(f)) }
@@ -574,6 +578,7 @@ const routes: [string, RegExp, Route][] = [
       if (b.cwd && (!existsSync(b.cwd) || !statSync(b.cwd).isDirectory())) throw new HttpError(400, `no such folder: ${b.cwd}`)
       patch.cwd = b.cwd || undefined
     }
+    if (Array.isArray(b.ai_order) && b.ai_order.every((p: unknown) => PROVIDERS.includes(p as any)) && new Set(b.ai_order).size === b.ai_order.length) patch.ai_order = b.ai_order
     if (['sonnet', 'haiku', 'opus'].includes(b.ai_model)) patch.ai_model = b.ai_model
     for (const k of ['jarvis_warn_pct', 'jarvis_max_pct'] as const) if (typeof b[k] === 'number' && b[k] > 0 && b[k] <= 100) patch[k] = b[k]
     if (['kokoro', 'mac', 'device'].includes(b.voice_engine)) patch.voice_engine = b.voice_engine

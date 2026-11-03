@@ -209,7 +209,7 @@ export async function runRole(name: string, agents: () => string = () => '') {
   try {
     if (r.see.split(',').includes('ideas') && !r.areas) await suggestSorting().catch(() => 0) // Fleet's Brain Dump sorter: suggestions only
     const a = await askFull<Out>(input(r, news, open, agents()), r.prompt + CONTRACT + DESKS[r.kind].contract, outSchema(r.kind), {
-      tools, model: r.model, budgetUsd: r.budget, cwd: r.cwd || undefined, timeoutMs: 15 * 60_000, feature: `role:${name}`,
+      tools, writeDir: r.write_dir || undefined, model: r.model, budgetUsd: r.budget, cwd: r.cwd || undefined, timeoutMs: 15 * 60_000, feature: `role:${name}`,
       allow: tools.map(t => (t === 'Write' || t === 'Edit') ? `${t}(${r.write_dir}/**)` : t),
       deny: tools.includes('Read') ? ['Read(**/.env*)'] : [],
     })

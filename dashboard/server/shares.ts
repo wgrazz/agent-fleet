@@ -103,7 +103,7 @@ Then give your take:
 const openNotes = () => (db.prepare(`SELECT list, text FROM ideas WHERE done = 0 AND list != ? AND text NOT LIKE '## %' ORDER BY priority DESC, id DESC LIMIT 60`).all(LIST) as { list: string; text: string }[])
   .map(n => `- [${n.list}] ${n.text.slice(0, 160).replace(/\n/g, ' ')}`).join('\n')
 const ask = <T,>(id: number, task: string, schema: Record<string, unknown>, resume = '') =>
-  askFull<T>(task, SYSTEM, schema, { tools: ['Read', 'WebSearch', 'WebFetch'], deny: ['Read(**/.env*)'], cwd: dir(id), model: MODEL, budgetUsd: 1, timeoutMs: 5 * 60_000, feature: 'share', persist: true, resume: resume || undefined })
+  askFull<T>(task, SYSTEM, schema, { tools: ['Read', 'WebSearch', 'WebFetch'], deny: ['Read(**/.env*)'], cwd: dir(id), model: MODEL, budgetUsd: 1, timeoutMs: 5 * 60_000, feature: 'share', persist: true, resume: resume || undefined, history: resume ? brief(id) : undefined })
 
 /** Watch a shared note's link and give a first take. Running it again starts the conversation over. */
 export async function breakDown(id: number) {

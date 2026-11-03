@@ -12,6 +12,7 @@ mkdirSync(FLEET_DIR, { recursive: true, mode: 0o700 })
 
 export type Config = {
   port: number; key: string; cwd?: string; jarvis_warn_pct?: number; jarvis_max_pct?: number
+  ai_order?: ('claude' | 'codex' | 'cursor')[] // Settings → AI order: who answers the smart features, first to last
   ai_model?: string; voice_engine?: 'kokoro' | 'mac' | 'device'; voice?: string; voice_speed?: number
   area_folders?: boolean // one folder per note area made once
   update_told?: Record<string, string> // tool → the newest version your phone has been told about

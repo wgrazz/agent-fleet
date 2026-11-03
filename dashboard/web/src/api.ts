@@ -201,8 +201,10 @@ export const remember = {
 }
 
 export type AiBudget = { weekly_pct: number | null; jarvis_pct: number; ai_pct: number; jarvis_usd: number; ai_usd: number; claude_usd: number; warn_pct: number; max_pct: number; since: number }
+export type Provider = 'claude' | 'codex' | 'cursor'
 export type Settings = {
   cwd: string; ai_model: string; jarvis_warn_pct: number; jarvis_max_pct: number
+  ai_order: Provider[]; ai_out: Partial<Record<Provider, { until: number; reason: string }>>
   voice_engine: 'kokoro' | 'mac' | 'device'; voice: string; voice_speed: number; kokoro: boolean
   docs_folders: string[]; docs_skip: string[]; docs_missing: string[]
 }

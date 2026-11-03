@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react'
-import { api, remember, type AiBudget, type Settings, type Usage } from './api.ts'
+import { api, remember, type AiBudget, type Provider, type Settings, type Usage } from './api.ts'
 import { UsageMeters } from './components.tsx'
 import { pickVoice, setVoiceSettings, speak, spokenAlerts, spokenReplies, unlockAudio, voices } from './extras.tsx'
 
@@ -10,6 +10,29 @@ const kokoroLabel = (id: string) => {
   return `${name[0].toUpperCase()}${name.slice(1)} · ${ACCENT[code[0]] ?? code[0]} ${code[1] === 'm' ? 'male' : 'female'}`
 }
 const SAMPLE = 'Good evening. Two agents are working and nothing needs you right now. Shall I start the next one?'
+
+const AI_NAMES: Record<Provider, string> = { claude: 'Claude', codex: 'Codex', cursor: 'Cursor' }
+
+function AiOrder({ s, save }: { s: Settings; save: (p: Partial<Settings>) => void }) {
+  const on = s.ai_order, off = (Object.keys(AI_NAMES) as Provider[]).filter(p => !on.includes(p))
+  const move = (i: number, by: number) => { const o = [...on]; [o[i], o[i + by]] = [o[i + by], o[i]]; save({ ai_order: o }) }
+  const out = (p: Provider) => s.ai_out[p] && `out until ${new Date(s.ai_out[p]!.until).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`
+  return (
+    <div className="form">
+      {[...on, ...off].map((p, i) => (
+        <div key={p} className="set-row">
+          <label className="check"><input type="checkbox" checked={on.includes(p)} disabled={on.length === 1 && on.includes(p)}
+            onChange={e => save({ ai_order: e.target.checked ? [...on, p] : on.filter(x => x !== p) })} /> {on.includes(p) ? `${i + 1}. ` : ''}{AI_NAMES[p]}</label>
+          {on.includes(p) && <>
+            <button className="btn small" aria-label={`Move ${AI_NAMES[p]} up`} disabled={i === 0} onClick={() => move(i, -1)}>↑</button>
+            <button className="btn small" aria-label={`Move ${AI_NAMES[p]} down`} disabled={i === on.length - 1} onClick={() => move(i, 1)}>↓</button>
+          </>}
+          {out(p) && <span className="hint" title={s.ai_out[p]!.reason}>{out(p)}</span>}
+        </div>
+      ))}
+    </div>
+  )
+}
 
 function Section({ title, children, hint }: { title: string; children: ReactNode; hint?: ReactNode }) {
   return (
@@ -173,6 +196,10 @@ export function SettingsPage({ usage, push, onBack, onError }: { usage: Usage[];
             <label>Warn at (%)<input type="number" min={1} max={100} value={s.jarvis_warn_pct} onChange={e => save({ jarvis_warn_pct: Number(e.target.value) })} /></label>
             <label>Stop at (%)<input type="number" min={1} max={100} value={s.jarvis_max_pct} onChange={e => save({ jarvis_max_pct: Number(e.target.value) })} /></label>
           </div>
+        </Section>
+
+        <Section title="AI order" hint="Who answers Jarvis, Team, shared links and the other smart features, top first. When one is out of usage, logged out or not installed, the next one answers until it's back. Coding agents keep their own tool and pick up again when their limit resets.">
+          <AiOrder s={s} save={save} />
         </Section>
 
         <Section title="Smart features model" hint="Used by Jarvis, Improve prompt, Suggest model and Brain Dump sorting. It runs on your Claude subscription.">

@@ -2,10 +2,13 @@
 // prompt improver, model recommender, Brain Dump sorter, interview prompt and Jarvis's brain.
 // Calls skip your plugins, MCP servers and unused tools (--strict-mcp-config --setting-sources project --tools …),
 // which measured ~14x cheaper than a default `claude -p`. Every call's cost is recorded in ai_usage.
+// Claude goes first by default; when it's out of usage, Codex then Cursor answer instead (fallback.ts, Settings → AI order).
 import { execFile } from 'node:child_process'
 import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { AREAS } from '../web/src/areas.ts'
+import { limitReset } from './detect.ts'
+import { PROVIDERS, runOther, Unavailable, unavailable, type Provider } from './fallback.ts'
 import { config, db, FLEET_DIR } from './store.ts'
 
 const AI_DIR = join(FLEET_DIR, 'ai')
@@ -13,10 +16,34 @@ mkdirSync(AI_DIR, { recursive: true })
 export const aiModel = () => process.env.FLEET_AI_MODEL ?? config.ai_model ?? 'sonnet'
 
 type Schema = Record<string, unknown>
-type AskOpts = { tools?: string[]; allow?: string[]; deny?: string[]; addDirs?: string[]; timeoutMs?: number; cwd?: string; feature?: string; resume?: string; persist?: boolean; model?: string; budgetUsd?: number }
-export type Answer<T> = { value: T; session_id: string; cost: number }
+// history: the conversation so far as text, for Codex or Cursor picking up a Claude conversation they can't resume
+// writeDir: where a Team role may write, for Fleet's tool bridge (Claude gets the same rule through `allow`)
+type AskOpts = { tools?: string[]; allow?: string[]; deny?: string[]; addDirs?: string[]; timeoutMs?: number; cwd?: string; feature?: string; resume?: string; persist?: boolean; model?: string; budgetUsd?: number; history?: string; writeDir?: string }
+export type Answer<T> = { value: T; session_id: string; cost: number; provider: Provider }
 
-export function askFull<T>(task: string, system: string, schema: Schema, opts: AskOpts = {}): Promise<Answer<T>> {
+// Settings → AI order: who answers, first to last. One that's out is skipped until its limit resets (5 min if it doesn't say).
+export const aiOrder = (): Provider[] => config.ai_order ?? PROVIDERS
+const out = new Map<Provider, { until: number; reason: string }>()
+export const aiStatus = () => Object.fromEntries([...out].filter(([, o]) => o.until > Date.now()))
+
+export async function askFull<T>(task: string, system: string, schema: Schema, opts: AskOpts = {}): Promise<Answer<T>> {
+  const reasons: string[] = []
+  for (const p of aiOrder()) {
+    const o = out.get(p)
+    if (o && o.until > Date.now()) { reasons.push(`${p}: ${o.reason}`); continue }
+    try {
+      if (p === 'claude') return { ...await askClaude<T>(task, system, schema, opts), provider: p }
+      return { value: await runOther<T>(p, task, system, schema, opts), session_id: '', cost: 0, provider: p }
+    } catch (e) {
+      if (!(e instanceof Unavailable)) throw e
+      out.set(p, { until: limitReset(e.message) ?? Date.now() + 5 * 60_000, reason: e.message.slice(0, 300) })
+      reasons.push(`${p}: ${e.message}`)
+    }
+  }
+  throw new Error(reasons.join('; ') || 'No AI is turned on in Settings → AI order')
+}
+
+function askClaude<T>(task: string, system: string, schema: Schema, opts: AskOpts): Promise<Omit<Answer<T>, 'provider'>> {
   const tools = opts.tools ?? []
   const args = ['-p', '--model', opts.model || aiModel(), '--output-format', 'json', '--strict-mcp-config', '--setting-sources', 'project',
     '--tools', tools.join(','), ...(tools.length ? ['--allowedTools', ...(opts.allow ?? tools)] : []),
@@ -27,14 +54,19 @@ export function askFull<T>(task: string, system: string, schema: Schema, opts: A
   return new Promise((resolve, reject) => {
     // FLEET_NO_WAIT: a `fleet mac` lookup Claude runs gives up fast on a permission prompt nobody has answered yet
     const child = execFile('claude', args, { cwd: opts.cwd ?? AI_DIR, timeout: opts.timeoutMs ?? 120_000, maxBuffer: 16 << 20, env: { ...process.env, FLEET_NO_WAIT: '1' } }, (err, stdout) => {
-      if (err && !stdout) return reject(new Error(err.killed ? 'Claude took too long' : `claude failed: ${err.message.split('\n')[0]}`))
+      if (err && !stdout) return reject((err as any).code === 'ENOENT' ? new Unavailable('claude is not installed') : new Error(err.killed ? 'Claude took too long' : `claude failed: ${err.message.split('\n')[0]}`))
       try {
         const out = JSON.parse(stdout)
         const u = out.usage ?? {}
         db.prepare('INSERT INTO ai_usage (at, feature, cost_usd, input_tokens, output_tokens, cache_read, cache_write, persisted) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
           .run(Math.floor(Date.now() / 1000), opts.feature ?? 'other', Number(out.total_cost_usd) || 0, u.input_tokens ?? 0, u.output_tokens ?? 0,
             u.cache_read_input_tokens ?? 0, u.cache_creation_input_tokens ?? 0, opts.persist ? 1 : 0)
-        if (out.is_error || !out.structured_output) return reject(new Error(out.result || 'Claude returned no answer'))
+        if (out.is_error || !out.structured_output) {
+          const msg = out.result || 'Claude returned no answer'
+          // a role that may have written files already isn't handed to another AI to do again
+          const fresh = !tools.some(t => t === 'Write' || t === 'Edit') || (!u.output_tokens && (out.num_turns ?? 0) <= 1)
+          return reject(unavailable(msg) && fresh ? new Unavailable(msg) : new Error(msg))
+        }
         resolve({ value: out.structured_output as T, session_id: out.session_id ?? '', cost: Number(out.total_cost_usd) || 0 })
       } catch {
         reject(new Error('could not read Claude’s answer'))
@@ -165,7 +197,7 @@ export type RoleAction = { name: string; do: 'answer' | 'tell' | 'run'; question
 export type JarvisAction = { type: 'reply' | 'key' | 'pause' | 'start' | 'idea' | 'idea_edit' | 'remember' | 'mac' | 'role'; agent: string; text: string; key: string; tool: string; model: string; effort: string; list: string; name: string; mac?: MacAction; edit?: IdeaEdit; role?: RoleAction }
 export type JarvisReply = { say: string; end?: boolean; actions: JarvisAction[] }
 
-export const jarvisBrain = (said: string, context: string, memory: string, opts: { cwd: string; resume?: string }) =>
+export const jarvisBrain = (said: string, context: string, memory: string, opts: { cwd: string; resume?: string; history?: string }) =>
   askFull<JarvisReply>(`${memory ? `What you remember about the developer and project:\n${memory}\n\n` : ''}What's going on right now:\n${context}\n\nThe developer said: "${said}"`, JARVIS_SYSTEM,
     obj({
       say: str,
@@ -187,5 +219,5 @@ export const jarvisBrain = (said: string, context: string, memory: string, opts:
       // Bash only for the read-only Mac and Fleet lookups; anything else is refused without asking
       allow: ['Read', 'Glob', 'Grep', 'WebSearch', 'WebFetch', 'Bash(fleet mac calendar:*)', 'Bash(fleet mac reminders:*)', 'Bash(fleet mac music now)', 'Bash(fleet mac apps)', 'Bash(fleet mac screen)', 'Bash(fleet read:*)', 'Bash(fleet peek:*)'],
       addDirs: [join(FLEET_DIR, 'screens')],
-      timeoutMs: 150_000, cwd: opts.cwd, resume: opts.resume, persist: true, feature: 'jarvis',
+      timeoutMs: 150_000, cwd: opts.cwd, resume: opts.resume, history: opts.history, persist: true, feature: 'jarvis',
     })

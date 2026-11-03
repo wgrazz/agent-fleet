@@ -156,6 +156,14 @@ picks up again, and once the limit resets Fleet types `continue` into it (trying
 is still there). Team runs and shared links that stopped on a limit run again too. Restart order, minutes after
 the reset: agents 2, Team 5, shared links 8, so the most important work gets the fresh limit first.
 
+**AI order.** Jarvis, Team, shared links and the other smart features run on Claude by default. When Claude is out of
+usage, logged out or not installed, Codex answers, then Cursor (Settings → AI order: reorder or turn any off). One
+that's out is skipped until its limit resets. Codex and Cursor run on your own CLI logins (never an API key) with
+their shell and file tools off; files and Fleet lookups go through Fleet's own permission-checked tools
+(`dashboard/server/ai-tools.ts`), and a Team run that may have written files is never handed to another AI. The
+background service needs a stored login: `cursor-agent login` once (a `CURSOR_API_KEY` in your shell profile doesn't
+reach it).
+
 **History.** Every past Claude and Codex conversation: search, read as chat, resume, file into
 folders.
 
