@@ -178,6 +178,18 @@ function App() {
     }) }] : []),
   ], a.name)
 
+  // one at a time: each call waits for fleet to finish and the list to refresh
+  const eachAgent = (list: LiveAgent[], path: (a: LiveAgent) => Promise<unknown>) => list.reduce((p, a) => p.then(() => path(a)), Promise.resolve<unknown>(null))
+  const bulk = (action: 'kill' | 'pause', list: LiveAgent[], done: () => void) => {
+    const leave = () => { done(); if (list.some(a => a.name === route.a)) go(lastListRoute.current) }
+    if (action === 'pause') return act(eachAgent(list.filter(a => a.controllable && a.pid !== null && a.session_id), a => api.post(`/api/agents/${enc(a.name)}/pause`)), done)
+    setModal({
+      kind: 'confirm', title: `Kill ${list.length} agent${list.length === 1 ? '' : 's'}?`, action: `Kill ${list.length}`,
+      text: `${list.map(a => a.name).join(', ')}. This stops them and closes their sessions. Pause instead if you want to come back to the conversations.`,
+      yes: () => act(eachAgent(list, a => api.del(`/api/agents/${enc(a.name)}`)), leave),
+    })
+  }
+
   const adopt = (a: LiveAgent) => setModal({
     kind: 'confirm', title: `Add ${a.name} to Fleet?`, action: 'Add to Fleet',
     text: `${a.status === 'working' ? 'It is in the middle of something, so this interrupts it. ' : ''}The agent in your terminal window stops, and the same conversation continues inside Fleet, where you can answer it from your phone. Its terminal window will say it exited.`,
@@ -340,7 +352,7 @@ function App() {
   } else {
     const fid = middleView.view === 'folder' ? Number(middleView.a) : null
     const folder = folderList.find(f => f.id === fid)
-    middle = <AgentList agents={fid !== null ? all.filter(a => a.folder_id === fid) : all} selected={route.a} onMenu={agentMenu}
+    middle = <AgentList agents={fid !== null ? all.filter(a => a.folder_id === fid) : all} selected={route.a} onMenu={agentMenu} onBulk={bulk}
       paused={fid === null ? { items: paused.data ?? [], onResume: p => act(api.post(`/api/paused/${p.id}/resume`), () => openAgent(p.name)), onForget: p => act(api.del(`/api/paused/${p.id}`)) } : undefined}
       left={fid === null ? { items: left.data ?? [], onChange: left.refresh, onError: fail, onNew: text => setModal({ kind: 'custom', initial: { prompt: text } }) } : undefined}
       header={listHeader(folder?.name ?? 'All agents', folder?.color)}

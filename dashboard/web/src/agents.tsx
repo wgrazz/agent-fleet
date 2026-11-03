@@ -33,9 +33,11 @@ function LeftMessages({ items, agents, onChange, onError, onNew }: {
   )
 }
 
-export function AgentList({ agents, selected, header, past, onMenu, empty, paused, left }: {
+export function AgentList({ agents, selected, header, past, onMenu, onBulk, empty, paused, left }: {
   agents: LiveAgent[]; selected: string; header: ReactNode; past?: Conversation[]; empty?: ReactNode
   onMenu: (a: LiveAgent, x: number, y: number) => void
+  /** act on several agents picked with ⌘/Ctrl-click (toggle) or Shift-click (range); `done` clears the pick */
+  onBulk?: (action: 'kill' | 'pause', agents: LiveAgent[], done: () => void) => void
   paused?: { items: Paused[]; onResume: (p: Paused) => void; onForget: (p: Paused) => void }
   left?: { items: LeftMessage[]; onChange: () => void; onError: (e: Error) => void; onNew: (text: string) => void }
 }) {
@@ -43,9 +45,41 @@ export function AgentList({ agents, selected, header, past, onMenu, empty, pause
   const togglePaused = () => { setShowPaused(!showPaused); remember.set('list.paused', showPaused ? 'hide' : '') }
   const [showPast, setShowPast] = useState(remember.get('list.past') !== 'hide')
   const togglePast = () => { setShowPast(!showPast); remember.set('list.past', showPast ? 'hide' : '') }
+  // rows in the order they're drawn, so a Shift-click range matches what's on screen
+  const order = [...ORDER.flatMap(s => agents.filter(a => a.controllable && a.status === s)), ...agents.filter(a => !a.controllable)]
+  const [picked, setPicked] = useState<string[]>([])
+  const anchor = useRef<string | null>(null)
+  const sel = order.filter(a => picked.includes(a.name)) // agents that ended drop out on their own
+  const clear = () => { setPicked([]); anchor.current = null }
+  const pick = onBulk && ((a: LiveAgent, range: boolean) => {
+    const i = order.findIndex(o => o.name === anchor.current)
+    if (range && i >= 0) {
+      const j = order.findIndex(o => o.name === a.name)
+      const span = order.slice(Math.min(i, j), Math.max(i, j) + 1).map(o => o.name)
+      setPicked([...new Set([...picked, ...span])])
+    } else {
+      setPicked(picked.includes(a.name) ? picked.filter(n => n !== a.name) : [...picked, a.name])
+      anchor.current = a.name
+    }
+  })
+  useEffect(() => {
+    if (!sel.length) return
+    const esc = (e: KeyboardEvent) => { if (e.key === 'Escape' && !document.querySelector('.menu-overlay, .overlay')) clear() }
+    addEventListener('keydown', esc)
+    return () => removeEventListener('keydown', esc)
+  }, [sel.length])
+  const row = (a: LiveAgent) => <AgentRow key={a.name} a={a} on={a.name === selected} picked={picked.includes(a.name)} onMenu={(x, y) => onMenu(a, x, y)} onPick={pick && (range => pick(a, range))} />
   return (
     <section className="list">
       {header}
+      {onBulk && sel.length > 0 && (
+        <div className="bulk">
+          <span>{sel.length} selected</span>
+          {sel.some(a => a.controllable && a.pid !== null && a.session_id) && <button className="btn small" onClick={() => onBulk('pause', sel, clear)}>Pause</button>}
+          <button className="btn small danger" onClick={() => onBulk('kill', sel, clear)}>Kill {sel.length}…</button>
+          <button className="x" onClick={clear} aria-label="Clear selection" title="Clear (Esc)">×</button>
+        </div>
+      )}
       <div className="scroll">
         {left && left.items.length > 0 && <LeftMessages agents={agents} {...left} />}
         {ORDER.map(status => {
@@ -54,7 +88,7 @@ export function AgentList({ agents, selected, header, past, onMenu, empty, pause
           return (
             <div key={status}>
               <div className="grp">{STATUS_LABEL[status]}</div>
-              {group.map(a => <AgentRow key={a.name} a={a} on={a.name === selected} onMenu={(x, y) => onMenu(a, x, y)} />)}
+              {group.map(row)}
             </div>
           )
         })}
@@ -69,7 +103,7 @@ export function AgentList({ agents, selected, header, past, onMenu, empty, pause
         {agents.some(a => !a.controllable) && (
           <div className="outside">
             <div className="grp">Outside Fleet<span className="grp-hint">plain terminal windows · hold one to add it</span></div>
-            {agents.filter(a => !a.controllable).map(a => <AgentRow key={a.name} a={a} on={a.name === selected} onMenu={(x, y) => onMenu(a, x, y)} />)}
+            {agents.filter(a => !a.controllable).map(row)}
           </div>
         )}
         {past && past.length > 0 && (
@@ -89,11 +123,15 @@ export function AgentList({ agents, selected, header, past, onMenu, empty, pause
 // drag-to-folder is a mouse thing; on a touch screen a draggable link fights the long-press menu
 const touch = matchMedia('(pointer: coarse)').matches
 
-function AgentRow({ a, on, onMenu }: { a: LiveAgent; on: boolean; onMenu: (x: number, y: number) => void }) {
+function AgentRow({ a, on, picked, onMenu, onPick }: { a: LiveAgent; on: boolean; picked: boolean; onMenu: (x: number, y: number) => void; onPick?: (range: boolean) => void }) {
   const hold = useHold(onMenu)
   return (
     <a href={`#/agent/${encodeURIComponent(a.name)}`} draggable={!touch} onDragStart={e => e.dataTransfer.setData('fleet/key', a.key)}
-      className={`it ${on ? 'on' : ''} ${a.status === 'needs_you' && a.controllable ? 'need' : ''} ${a.controllable ? '' : 'outside-row'}`} {...hold}>
+      className={`it ${on ? 'on' : ''} ${picked ? 'picked' : ''} ${a.status === 'needs_you' && a.controllable ? 'need' : ''} ${a.controllable ? '' : 'outside-row'}`} {...hold}
+      onMouseDown={e => { if (onPick && e.shiftKey) e.preventDefault() /* no text selection on Shift-click */ }}
+      onClick={e => { if (onPick && (e.shiftKey || e.metaKey || e.ctrlKey)) { e.preventDefault(); onPick(e.shiftKey) } }}
+      // on a Mac, Ctrl-click arrives as a right-click; a real right-click still opens the menu
+      onContextMenu={e => { if (onPick && e.ctrlKey && e.button === 0) { e.preventDefault(); onPick(false) } else hold.onContextMenu(e) }}>
       <Avatar tool={a.tool} status={a.status} />
       <span className="nm">{a.name}</span>
       <span className="tm">{age(a.age_s)}</span>
