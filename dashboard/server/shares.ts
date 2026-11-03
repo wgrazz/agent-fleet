@@ -4,9 +4,9 @@
 // doing, an answer to whatever you typed with it). That session stays open, so its page in Team → Shared is a
 // conversation about that one post, with the video at the top.
 import { execFile } from 'node:child_process'
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 import { promisify } from 'node:util'
 import { askFull } from './ai.ts'
 import { AFTER_RESET, limitReset } from './detect.ts'
@@ -154,6 +154,45 @@ export async function chat(id: number, text: string) {
     set(id, { status: s.session_id ? 'ready' : 'error', error: (e as Error).message.slice(0, 500) })
   }
 }
+
+const NOTE = { type: 'object', additionalProperties: false, required: ['file', 'note'], properties: { file: str, note: str } }
+const NOTE_TASK = `Save this post as a reference note, so they can come back later ("let's improve Jarvis, go through what I sent").
+Return Markdown in "note" and a file name in "file".
+- Keep what's actually in the post: every item of a list (songs, tools, steps, names, prices), on-screen text that matters, the
+  link, who posted it. Then a few lines on where it could fit what they're working on. Notes only, nothing approved.
+- If one of their notes below is on the same topic, put its file name in "file" and write one "## " section to append to it,
+  starting with a line like "Reference N, saved <date> from share <id>: <link>".
+- Otherwise pick a new short kebab-case file name ending in .md, and write the whole note: "# " title, then
+  "Written <date> from a reel the owner shared to Fleet (share <id>): <link>. Notes only; nothing here is approved or scheduled."`
+
+/** Save note: the share's agent writes up the post (lists and all) into the notes folder, appended to a note on the same
+ *  topic or as a new one, and commits just that file when the folder is in git. Returns where it went. */
+export async function saveNote(id: number, folder: string) {
+  const s = share(id)
+  if (!s) throw new Error('no such share')
+  if (s.status === 'watching' || s.status === 'thinking') throw new Error('it’s still working on the last one')
+  set(id, { status: 'thinking', error: '' })
+  try {
+    mkdirSync(folder, { recursive: true })
+    const mine = readdirSync(folder).filter(f => f.endsWith('.md'))
+      .map(f => `- ${f}: ${readFileSync(join(folder, f), 'utf8').slice(0, 2000).match(/^# +(.+)$/m)?.[1] ?? ''}`).join('\n')
+    const task = `${NOTE_TASK}\n\nToday is ${new Date().toISOString().slice(0, 10)}. Share ${id}: ${s.url}\n\nTheir notes:\n${mine || '(none yet)'}`
+    const a = await ask<{ file: string; note: string }>(id, task, NOTE, s.session_id)
+    const name = fileName(a.value.file), path = join(folder, name), note = a.value.note.trim()
+    if (existsSync(path)) appendFileSync(path, `\n\n${note}\n`)
+    else writeFileSync(path, `${note}\n`)
+    // only this file, so another agent's staged work stays out of the commit; no repo or nothing to commit is fine
+    await run('git', ['-C', folder, 'add', '--', name]).then(() => run('git', ['-C', folder, 'commit', '-q', '-m', `Idea note: ${s.title || name} (Save note, share ${id})`, '--', name])).catch(() => {})
+    say(id, 'bot', `📝 Saved to ${name}`)
+    set(id, { status: 'ready', session_id: a.session_id || s.session_id })
+    return name
+  } catch (e) {
+    set(id, { status: s.session_id ? 'ready' : 'error', error: (e as Error).message.slice(0, 500) })
+    throw e
+  }
+}
+/** The model's file name, kept inside the notes folder. */
+export const fileName = (f: string) => (basename(f).replace(/\.md$/i, '').replace(/[^\w-]+/g, '-').replace(/^-+|-+$/g, '') || 'shared') + '.md'
 
 /** Everything about a share for a new coding agent: what was sent, the post, and the whole conversation about it. */
 export function brief(id: number) {

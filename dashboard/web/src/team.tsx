@@ -94,6 +94,7 @@ export function ShareView({ id, onBack, onError, onStart }: { id: number; onBack
         <div className="dh-text"><div className="t">{s.title || 'Shared'}</div><div className="meta">{when(s.created_at)}</div></div>
         <a className="btn small" href={s.url} target="_blank" rel="noreferrer">Original</a>
         {s.note && <a className="btn small" href={`#/idea/${s.id}`}>Note</a>}
+        <button className="btn small" disabled={busy || s.status === 'error'} onClick={() => act(api.post(`/api/shares/${s.id}/note`))}>Save note</button>
         <button className="btn small" disabled={busy} onClick={() => onStart(s)}>Start agent</button>
       </header>
       <div className="set-scroll" ref={box}>

@@ -713,6 +713,13 @@ const routes: [string, RegExp, Route][] = [
     if (s.status === 'watching' || s.status === 'thinking') throw new HttpError(409, 'it’s still working on the last one')
     shares.chat(s.id, text).catch(e => console.error(`share ${id}:`, e))
   }],
+  // ponytail: notes go in <first Docs folder>/docs/ideas; a Settings field if another layout needs it
+  ['POST', /^\/api\/shares\/(\d+)\/note$/, async (_req, [id]) => {
+    const s = shares.share(int(id))
+    if (!s) throw new HttpError(404, 'no such share')
+    if (s.status === 'watching' || s.status === 'thinking') throw new HttpError(409, 'it’s still working on the last one')
+    shares.saveNote(s.id, join(config.docs_folders?.[0] ?? config.cwd ?? homedir(), 'docs', 'ideas')).catch(e => console.error(`share ${id}:`, e))
+  }],
   // steps picked out of an agent's reply ("Add to-dos" under a chat message)
   ['POST', /^\/api\/ideas\/many$/, async req => {
     const b = await body(req)
