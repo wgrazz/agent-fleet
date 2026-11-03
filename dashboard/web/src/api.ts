@@ -54,12 +54,7 @@ export type Role = {
 }
 export type Share = { id: number; url: string; status: 'watching' | 'thinking' | 'ready' | 'error'; error: string; title: string; verdict: string; created_at: number; updated_at: number; done?: number }
 export type ShareMessage = { id: number; who: 'you' | 'bot'; text: string; at: number }
-export type Proposal = {
-  type: 'today' | 'merge' | 'close' | 'handoff' | 'prep'; ids: number[]; keep?: number; text?: string; why: string; prompt?: string; turn?: number; agent?: string; auto?: boolean
-  plan?: string[]; questions?: { text: string; options: string[]; recommended: number }[]; answers?: Record<number, string>; size?: string; receipt?: string
-}
-/** A prepped note for the home page: waiting on you, or finished by its agent (receipt). */
-export type PrepRow = { id: number; idea: number; role: string; status: string; text: string; summary: string; questions: number; size?: string; agent?: string; receipt?: string }
+export type Proposal = { type: 'today' | 'merge' | 'close' | 'handoff'; ids: number[]; keep?: number; text?: string; why: string; prompt?: string; turn?: number; agent?: string }
 export type RoleNote = { id: number; text: string; notes: string; list: string; area: string | null; done: number }
 export type ClerkBoard = {
   deadlines: { title: string; due: string; form: string; source: string; status: 'upcoming' | 'needs_info' | 'done'; note: string }[]

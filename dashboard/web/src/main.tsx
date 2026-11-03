@@ -11,7 +11,7 @@ import { AREAS, notePrompt } from './areas.ts'
 import { AllNotesPane, ChecklistsPane, IdeaDetail, IdeasPane, ImportNotes, PRIORITY, PriorityPane, QuickCapture, SortMode } from './ideas.tsx'
 import { DOC_VIEWS, docHash, DocsMap, DocsPane, NoteView, type DocView } from './docs.tsx'
 import { SettingsPage } from './settings.tsx'
-import { ReadyToStart, RoleView, ShareView, TeamPane } from './team.tsx'
+import { RoleView, ShareView, TeamPane } from './team.tsx'
 import { FullTerminal } from './terminal.tsx'
 import './styles.css'
 
@@ -238,7 +238,6 @@ function App() {
     { label: 'Move to', items: allLists.filter(l => l.name !== i.list).map(l => ({ label: l.name, swatch: l.color, onClick: () => act(api.patch(`/api/ideas/${i.id}`, { list: l.name })) })) },
     { label: 'Start an agent on this', onClick: () => startFromIdea(i) },
     { label: 'Interview me about it', onClick: () => setModal({ kind: 'interview', topic: notePrompt(i), ideaId: i.id }) },
-    { label: 'Prep it for an agent', onClick: () => act(api.post(`/api/ideas/${i.id}/prep`), () => setToast('Prepping it. It shows up under Ready to start in a few minutes.')) },
     'sep',
     { label: 'Delete', danger: true, onClick: () => act(api.del(`/api/ideas/${i.id}`)) },
   ], i.text.slice(0, 40))
@@ -345,7 +344,6 @@ function App() {
       paused={fid === null ? { items: paused.data ?? [], onResume: p => act(api.post(`/api/paused/${p.id}/resume`), () => openAgent(p.name)), onForget: p => act(api.del(`/api/paused/${p.id}`)) } : undefined}
       left={fid === null ? { items: left.data ?? [], onChange: left.refresh, onError: fail, onNew: text => setModal({ kind: 'custom', initial: { prompt: text } }) } : undefined}
       header={listHeader(folder?.name ?? 'All agents', folder?.color)}
-      afterPaused={fid === null ? <ReadyToStart onError={fail} /> : undefined}
       past={fid !== null ? (history ?? []).filter(c => c.folder_id === fid && !c.running) : undefined}
       empty={fid !== null ? <div className="empty">Nothing in {folder?.name ?? 'this folder'} yet. Drag agents here, or hold one and pick Move to folder.</div> : undefined} />
   }

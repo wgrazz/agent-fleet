@@ -14,7 +14,6 @@ export type Config = {
   port: number; key: string; cwd?: string; jarvis_warn_pct?: number; jarvis_max_pct?: number
   ai_model?: string; voice_engine?: 'kokoro' | 'mac' | 'device'; voice?: string; voice_speed?: number
   area_folders?: boolean // one folder per note area made once
-  prep?: boolean // the chief's auto-merge and Ready to start preps; off by default
   update_told?: Record<string, string> // tool → the newest version your phone has been told about
   docs_folders?: string[]; docs_skip?: string[] // the Docs tab: folders of notes, and subfolders (names or paths) to leave out
 }

@@ -22,7 +22,6 @@ LATER
   fleet paused           list paused agents
   fleet unpause ID|NAME  bring a paused agent back in a new session with its conversation
   fleet idea [-l LIST] [-p low|medium|high] TEXT   jot an idea (lands in Brain Dump unless you name a list)
-  fleet done ID TEXT     check off note ID with a receipt (what was done, what's left); agents started from a prep run this
   fleet checklist TITLE < STEPS   a checklist for the owner from STEPS on stdin: one step per line, '## ' lines are headings
   fleet role [NAME]      your scheduled roles (the dashboard's Team tab), or what NAME needs from you
   fleet role NAME answer N TEXT | tell TEXT | run   answer its question N, tell it something, or run it now
@@ -656,29 +655,6 @@ def idea(args):
         else:
             con.execute('INSERT INTO ideas (list, text, created_at) VALUES (?, ?, ?)', (lst, text, int(time.time())))
     print(f'Added to {lst}' + (f', {[k for k, v in PRIORITIES.items() if v == prio][0]} priority.' if prio else '.'))
-
-
-def done(args):
-    """An agent finished a note: check it off, keep TEXT in its notes and on its prep card, and tell your phone."""
-    if len(args) < 2 or not args[0].isdigit():
-        sys.exit('fleet done ID TEXT')
-    note, text = int(args[0]), ' '.join(args[1:]).strip()
-    con = db()
-    with con:
-        row = con.execute('SELECT notes FROM ideas WHERE id = ?', (note,)).fetchone()
-        if not row:
-            sys.exit(f'No note {note}.')
-        notes = '\n\n'.join(x for x in (row['notes'], f'Done {time.strftime("%Y-%m-%d")}: {text}') if x)
-        con.execute('UPDATE ideas SET done = 1, done_at = ?, notes = ? WHERE id = ?', (int(time.time()), notes, note))
-        # a prep still waiting on its Start is done too: the note got finished another way
-        con.execute("UPDATE role_items SET data = json_set(data, '$.receipt', ?), closed_at = coalesce(closed_at, ?), status = 'done'"
-                    " WHERE kind = 'proposal' AND json_extract(data, '$.type') = 'prep' AND json_extract(data, '$.ids[0]') = ?"
-                    " AND status IN ('open', 'done')", (text, int(time.time()), note))
-    try:
-        api('POST', '/api/notify', {'title': 'Done', 'body': text[:2000]}, timeout=5)
-    except Exception:
-        pass  # no dashboard or no phone subscribed: the receipt is still on the note
-    print(f'Checked off note {note}.')
 
 
 def role(args):
@@ -1520,8 +1496,6 @@ def main(args):
         return idea(rest)
     if cmd == 'checklist':
         return checklist(rest)
-    if cmd == 'done':
-        return done(rest)
     if cmd == 'role':
         return role(rest)
     if cmd == 'restore' and len(rest) <= 1:
