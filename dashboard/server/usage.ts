@@ -50,21 +50,24 @@ function claude(): Usage {
 let codexCache: { file: string; size: number; usage: Usage } | null = null
 
 async function codex(): Promise<Usage> {
-  let newest = '', newestM = 0
-  for await (const f of glob(join(homedir(), '.codex', 'sessions', '*', '*', '*', 'rollout-*.jsonl'))) {
-    const m = statSync(f).mtimeMs
-    if (m > newestM) [newest, newestM] = [f, m]
-  }
-  if (!newest) return { tool: 'codex', windows: [], updated: null, note: 'no Codex sessions yet' }
+  const files: [string, number][] = []
+  for await (const f of glob(join(homedir(), '.codex', 'sessions', '*', '*', '*', 'rollout-*.jsonl'))) files.push([f, statSync(f).mtimeMs])
+  if (!files.length) return { tool: 'codex', windows: [], updated: null, note: 'no Codex sessions yet' }
+  files.sort((a, b) => b[1] - a[1])
+  const [newest, newestM] = files[0]
   const size = statSync(newest).size
   if (codexCache?.file === newest && codexCache.size === size) return codexCache.usage
+  // Once the limit is hit Codex keeps logging rate_limits with primary/secondary null, so walk back
+  // (into older sessions if need be) to the last entry that has real windows.
   let rl: any = null
-  for (const line of readFileSync(newest, 'utf8').split('\n').reverse()) {
-    if (!line.includes('"rate_limits"')) continue
-    try {
-      rl = JSON.parse(line).payload?.rate_limits
-      if (rl) break
-    } catch {}
+  find: for (const [f] of files.slice(0, 20)) {
+    for (const line of readFileSync(f, 'utf8').split('\n').reverse()) {
+      if (!line.includes('"rate_limits"')) continue
+      try {
+        const r = JSON.parse(line).payload?.rate_limits
+        if (r?.primary || r?.secondary) { rl = r; break find }
+      } catch {}
+    }
   }
   const usage: Usage = {
     tool: 'codex', updated: newestM,

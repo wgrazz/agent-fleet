@@ -41,3 +41,12 @@ it('paces the Claude week: even-pace mark, use since today\'s first reading, and
   expect(await week()).toMatchObject({ pct: 0, pace: 0, today: 0, budget: 14 })
   vi.useRealTimers()
 })
+
+it('keeps the last real Codex reading after the limit is hit (Codex then logs null windows)', async () => {
+  const dir = join(process.env.HOME!, '.codex', 'sessions', '2026', '11', '01')
+  mkdirSync(dir, { recursive: true })
+  const later = Date.now() / 1000 + 3600
+  const line = (primary: unknown, secondary: unknown) => `${JSON.stringify({ payload: { type: 'token_count', rate_limits: { primary, secondary } } })}\n`
+  writeFileSync(join(dir, 'rollout-a.jsonl'), line({ used_percent: 98, resets_at: later }, { used_percent: 15, resets_at: later }) + line(null, null))
+  expect((await usage())[1].windows.map(w => w.pct)).toEqual([98, 15])
+})
