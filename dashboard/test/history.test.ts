@@ -63,9 +63,10 @@ describe('backgroundJobs', () => {
       use('t2', 'Monitor', { command: 'tail -f x', description: 'Watch the upload' }), result('t2', { taskId: 'a2' }),
       use('t3', 'Bash', { command: 'make', description: 'Build it', run_in_background: true }), result('t3', { backgroundTaskId: 'a3' }),
       use('t4', 'Bash', { command: 'ls', description: 'not a job' }), result('t4', {}),
+      use('t6', 'Bash', { command: 'npm run build', description: 'Build the web app' }), result('t6', { backgroundTaskId: 'a6' }),
       { type: 'user', message: { content: '<task-notification>\n<task-id>a1</task-id>\n<status>completed</status>' } },
       use('t5', 'TaskStop', { task_id: 'a3' }),
     ].map(l => JSON.stringify(l)).join('\n'))
-    expect(backgroundJobs(f)).toEqual(['Watch the upload'])
+    expect(backgroundJobs(f)).toEqual(['Watch the upload', 'Build the web app'])
   })
 })

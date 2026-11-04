@@ -250,18 +250,19 @@ export function statusOf(tool: string, path: string): Status | null {
 }
 
 /** Claude's background jobs that haven't reported back yet, by their own descriptions ("Poll the EAS build every 2 min…"),
- * oldest first. A job is a Bash call with run_in_background or a Monitor; it's over once a <task-notification> names its
+ * oldest first. A job is any tool call whose result carries a background task id (run_in_background, a Monitor, or a
+ * long command Claude moved to the background itself); it's over once a <task-notification> names its
  * task id or a TaskStop/KillShell stops it. Jobs that died with a restart never report back: callers cap by the footer count. */
 export function backgroundJobs(path: string): string[] {
-  const started = new Map<string, string>() // tool-use id -> description, until the result gives its task id
+  const started = new Map<string, string>() // tool-use id -> description, in case its result gives a task id
   const jobs = new Map<string, string>()    // task id -> description
   for (const line of readFileSync(path, 'utf8').split('\n')) {
     for (const m of line.matchAll(/<task-id>(\w+)<\/task-id>/g)) jobs.delete(m[1])
-    if (!/"run_in_background":true|"name":"(Monitor|TaskStop|KillShell)"|"backgroundTaskId"|"taskId"/.test(line)) continue
+    if (!/"type":"tool_use"|"backgroundTaskId"|"taskId"/.test(line)) continue
     const d = parse(line)
     if (d?.isSidechain) continue
     for (const c of d?.message?.content ?? []) {
-      if (c.type === 'tool_use' && (c.input?.run_in_background || c.name === 'Monitor'))
+      if (c.type === 'tool_use' && /^(Bash|Monitor)$/.test(c.name))
         started.set(c.id, String(c.input.description || c.input.command || c.name).split('\n')[0].slice(0, 120))
       if (c.type === 'tool_use' && /TaskStop|KillShell/.test(c.name)) jobs.delete(c.input?.task_id ?? c.input?.shell_id)
       const task = d.toolUseResult?.backgroundTaskId ?? d.toolUseResult?.taskId
