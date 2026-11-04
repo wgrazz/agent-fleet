@@ -245,7 +245,7 @@ html.kb .term-keys { padding-bottom: 6px; }
 
 /* context menus */
 .menu-overlay { position: fixed; inset: 0; z-index: 70; }
-.menu.ctx { position: fixed; top: auto; min-width: 220px; max-height: 70vh; overflow-y: auto; }
+.menu.ctx { position: fixed; top: auto; min-width: 220px; max-height: 70vh; overflow-y: auto; overscroll-behavior: contain; }
 .menu.ctx button[role=menuitem] { display: flex; align-items: center; gap: 9px; width: 100%; padding: 7px 9px; border-radius: 6px; text-align: left; }
 .menu.ctx button[role=menuitem]:hover:not(:disabled) { background: var(--accent); color: #fff; }
 .menu.ctx button[role=menuitem].danger:hover { background: var(--dead); }

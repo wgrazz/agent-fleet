@@ -153,8 +153,9 @@ function anchored(from: HTMLElement, items: number) {
   const w = Math.min(260, innerWidth - 24)
   const h = Math.min(innerHeight * 0.6, 16 + items * 44)
   const left = Math.max(12, Math.min(r.left + 8, innerWidth - w - 12))
-  if (innerHeight - r.bottom - 12 >= h) return { rect: r, style: { left, top: r.bottom + 8, width: w, transformOrigin: 'top left' } }
-  if (r.top - 12 >= h) return { rect: r, style: { left, bottom: innerHeight - r.top + 8, width: w, transformOrigin: 'bottom left' } }
+  // h is a guess; maxHeight caps the real menu at the room on its side so a longer one scrolls instead of running off-screen
+  if (innerHeight - r.bottom - 12 >= h) return { rect: r, style: { left, top: r.bottom + 8, width: w, maxHeight: innerHeight - r.bottom - 20, transformOrigin: 'top left' } }
+  if (r.top - 12 >= h) return { rect: r, style: { left, bottom: innerHeight - r.top + 8, width: w, maxHeight: r.top - 20, transformOrigin: 'bottom left' } }
   return null // a tall menu on a small screen: use the bottom sheet
 }
 
@@ -208,7 +209,7 @@ export function MenuHost() {
   }, [root, pop])
   if (!top) return null
   const sheet = isPhone() && !pop
-  const style = pop ? pop.style : sheet ? {} : { left: Math.min(top.x, innerWidth - 240), top: Math.min(top.y, innerHeight - 40 - top.items.length * 34) }
+  const style = pop ? pop.style : sheet ? {} : { left: Math.min(top.x, innerWidth - 240), top: Math.max(8, Math.min(top.y, innerHeight - 40 - top.items.length * 34)) }
   return (
     <div className={`menu-overlay ${pop ? 'lifted' : ''}`} onMouseDown={dismiss} onTouchEnd={dismiss}
       onTouchStart={e => { if (onBackdrop(e)) { began.current = true; e.stopPropagation() } }}>
