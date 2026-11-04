@@ -207,7 +207,7 @@ function usageText(u: Awaited<ReturnType<typeof usage>>) {
 const teamAgents = () => list().map(a => `- ${a.name} (${a.tool}, ${a.status.replace('_', ' ')})${a.task ? `: ${a.task.replace(/^\[[a-z]+\]\s*/, '')}` : ''}`).join('\n')
 
 function jarvisContext() {
-  const agents = list().map(a => `- ${a.name} (${a.tool}, ${a.status === 'waiting' ? 'turn done, waiting on its own background job, not on you' : a.status.replace('_', ' ')})${a.message ? `: asking "${a.message}"` : a.task ? `: ${a.task.replace(/^\[[a-z]+\]\s*/, '')}` : ''}${a.quick_replies.length ? ` options: ${a.quick_replies.map(q => `${q.key}=${q.label}`).join(', ')}` : ''}${a.controllable ? '' : ' (read-only)'}`)
+  const agents = list().map(a => `- ${a.name} (${a.tool}, ${a.status === 'waiting' ? `turn done, waiting on its own background job (${a.working_line || 'unknown'}), not on you` : a.status.replace('_', ' ')})${a.message ? `: asking "${a.message}"` : a.task ? `: ${a.task.replace(/^\[[a-z]+\]\s*/, '')}` : ''}${a.quick_replies.length ? ` options: ${a.quick_replies.map(q => `${q.key}=${q.label}`).join(', ')}` : ''}${a.controllable ? '' : ' (read-only)'}`)
   const lists = ideas.lists().map(l => `${l.name} (${l.open} open)`).join(', ')
   const roles = team.roles().map(r => {
     const qs = (team.page(r.name)?.items ?? []).filter(i => i.kind === 'question' && i.status === 'open')

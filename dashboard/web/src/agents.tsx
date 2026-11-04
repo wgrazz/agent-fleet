@@ -238,7 +238,7 @@ export function AgentView({ agent, onBack, onTerminal, onPause, onMenu, onAdopt,
       {!agent.controllable ? (
         chat ? (
           <>
-            <ChatView tool={agent.tool} id={agent.session_id} agent={agent.name} live working={agent.status === 'working' ? agent.working_line || 'Working…' : agent.status === 'waiting' ? 'Waiting on a background job, it picks up again when that finishes' : ''} />
+            <ChatView tool={agent.tool} id={agent.session_id} agent={agent.name} live working={agent.status === 'working' ? agent.working_line || 'Working…' : agent.status === 'waiting' ? agent.working_line || 'Waiting on a background job, it picks up again when that finishes' : ''} />
             <div className="ended">This one runs in a plain terminal window, so it's read-only here. <b>Add to Fleet</b> moves it into Fleet with the same conversation, so you can answer it from anywhere.</div>
           </>
         ) : (
@@ -249,7 +249,7 @@ export function AgentView({ agent, onBack, onTerminal, onPause, onMenu, onAdopt,
         )
       ) : shown === 'chat' ? (
         <ChatView tool={agent.tool} id={agent.session_id} agent={agent.name} live waiting={agent.status === 'needs_you' && !agent.ask ? agent.message : ''}
-          working={agent.status === 'working' ? agent.working_line || 'Working…' : agent.status === 'waiting' ? 'Waiting on a background job, it picks up again when that finishes' : ''} pending={pending} onSeen={() => setPending('')} peek={agent.name} />
+          working={agent.status === 'working' ? agent.working_line || 'Working…' : agent.status === 'waiting' ? agent.working_line || 'Waiting on a background job, it picks up again when that finishes' : ''} pending={pending} onSeen={() => setPending('')} peek={agent.name} />
       ) : shown === 'changes' ? (
         <ChangesView name={agent.name} />
       ) : shown === 'files' ? (

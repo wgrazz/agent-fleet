@@ -26,6 +26,10 @@ const WORKING: Record<string, RegExp[]> = {
 // "⏵⏵ auto mode on · 1 shell" while an `until …; do sleep 300; done` poll runs.
 const BACKGROUND = /·\s*\d+\s+(shells?|background tasks?|monitors?)\b/i
 
+/** How many background jobs the footer counts ("· 2 shells · 1 monitor" -> 3). */
+export const backgroundCount = (screen: string) =>
+  [...tail(screen, 4).matchAll(new RegExp(BACKGROUND, 'gi'))].reduce((n, m) => n + Number(m[0].match(/\d+/)![0]), 0)
+
 const tail = (screen: string, n = 15) => screen.split('\n').filter(l => l.trim()).slice(-n).join('\n')
 
 /** The tool's own busy marker is on screen (a spinner, "esc to interrupt"): real work, not just a redraw. */

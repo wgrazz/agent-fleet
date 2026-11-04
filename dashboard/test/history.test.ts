@@ -2,7 +2,7 @@ import { mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { answered, asked, claudeMessages, statusOf } from '../server/history.ts'
+import { answered, asked, backgroundJobs, claudeMessages, statusOf } from '../server/history.ts'
 
 describe('asked', () => {
   it('shows a question with numbered options and a plan in full', () => {
@@ -50,5 +50,22 @@ describe('claudeMessages', () => {
       { role: 'user', text: '/x' },
       { role: 'tool', text: 'Not sent: Claude Code has no /x command, so it dropped this message' },
     ])
+  })
+})
+
+describe('backgroundJobs', () => {
+  it('lists background jobs until they report back or are stopped', () => {
+    const f = join(mkdtempSync(join(tmpdir(), 'bg-')), 'x.jsonl')
+    const use = (id: string, name: string, input: object) => ({ type: 'assistant', message: { content: [{ type: 'tool_use', id, name, input }] } })
+    const result = (id: string, r: object) => ({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: id }] }, toolUseResult: r })
+    writeFileSync(f, [
+      use('t1', 'Bash', { command: 'sleep 9', description: 'Poll the EAS build', run_in_background: true }), result('t1', { backgroundTaskId: 'a1' }),
+      use('t2', 'Monitor', { command: 'tail -f x', description: 'Watch the upload' }), result('t2', { taskId: 'a2' }),
+      use('t3', 'Bash', { command: 'make', description: 'Build it', run_in_background: true }), result('t3', { backgroundTaskId: 'a3' }),
+      use('t4', 'Bash', { command: 'ls', description: 'not a job' }), result('t4', {}),
+      { type: 'user', message: { content: '<task-notification>\n<task-id>a1</task-id>\n<status>completed</status>' } },
+      use('t5', 'TaskStop', { task_id: 'a3' }),
+    ].map(l => JSON.stringify(l)).join('\n'))
+    expect(backgroundJobs(f)).toEqual(['Watch the upload'])
   })
 })

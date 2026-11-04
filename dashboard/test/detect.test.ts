@@ -1,7 +1,7 @@
 import { readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { detect, limitReset, liveTail, mode, question, quickReplies, workingLine } from '../server/detect.ts'
+import { backgroundCount, detect, limitReset, liveTail, mode, question, quickReplies, workingLine } from '../server/detect.ts'
 
 // fixtures/<tool>/<expected state>-<label>.txt, captured with `tmux capture-pane -p` from real sessions
 const root = join(import.meta.dirname, 'fixtures')
@@ -121,4 +121,11 @@ describe('limitReset', () => {
 it('a limit message the agent has since answered past is not a limit any more', () => {
   const screen = readFileSync(join(root, 'claude/done-limit.txt'), 'utf8').replace('     /upgrade to increase your usage limit.\n', '     /upgrade to increase your usage limit.\n\n❯ continue\n\n⏺ Picked up and finished the migration.\n\n✻ Worked for 9s · done 10:05 PM\n')
   expect(limitReset(liveTail(screen, 3).join('\n'))).toBeNull()
+})
+
+describe('backgroundCount', () => {
+  it('adds up every job kind in the footer', () => {
+    expect(backgroundCount('> \n⏵⏵ auto mode on · 2 shells · 1 monitor')).toBe(3)
+    expect(backgroundCount('> \n⏵⏵ auto mode on')).toBe(0)
+  })
 })

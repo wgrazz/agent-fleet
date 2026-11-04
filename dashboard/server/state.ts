@@ -2,7 +2,8 @@
 // add the screen and the exit code; Claude Code hooks (via `fleet hook`) give exact status for Claude.
 import { randomUUID } from 'node:crypto'
 import { EventEmitter } from 'node:events'
-import { AFTER_RESET, busy, detect, limitReset, liveTail, mode, question, quickReplies, workingLine, type QuickReply, type Status } from './detect.ts'
+import { AFTER_RESET, backgroundCount, busy, detect, limitReset, liveTail, mode, question, quickReplies, workingLine, type QuickReply, type Status } from './detect.ts'
+import { transcript } from './history.ts'
 import { FLEET_BIN, REPO } from './store.ts'
 import { capture, panes, run } from './tmux.ts'
 
@@ -199,13 +200,14 @@ async function refresh() {
     const reset = r.session && status !== 'working' && status !== 'needs_you' ? limitAt(name, screen, now) : 0
     const back = reset + AFTER_RESET.agents * 60_000
     if (ask) status = 'needs_you' // the plan prompt has no menu hint the screen check knows
+    const jobs = status === 'waiting' ? ((await transcript(r.tool, r.session_id).catch(() => null))?.jobs ?? []).slice(-backgroundCount(screen)) : []
     next.push({
       name, controllable: !!r.session, tool: r.tool, pid: r.pid, cwd: r.cwd, task: r.task, age_s: r.age_s,
       session_id: r.session_id, status, status_since: now, quick_replies: status === 'needs_you' ? quickReplies(screen) : [],
       last_line: lastLine(screen), exit: '',
       message: ask ? (ask.kind === 'plan' ? 'Plan ready for your approval' : ask.questions[0]?.question ?? '') : status === 'needs_you' ? (hook?.message || question(screen))
         : reset ? `Out of usage · ${back > now ? `picks up again at ${clock(back)}` : 'trying again'}` : '',
-      mode: mode(screen), working_line: status === 'working' ? workingLine(r.tool, screen) : '',
+      mode: mode(screen), working_line: status === 'working' ? workingLine(r.tool, screen) : jobs.length ? `Waiting on: ${jobs.join('; ')}` : '',
       ask, limit_reset: reset,
     })
   }

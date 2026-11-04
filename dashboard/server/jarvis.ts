@@ -159,7 +159,7 @@ export function summary(agents: Agent[]): string {
   if (needs.length === 0) parts.push(asks.length ? 'No agent needs you.' : 'Nothing needs you right now.')
   else parts.push(`${needs.length === 1 ? 'One agent needs' : `${needs.length} agents need`} you: ${needs.map(a => `${a.name}${a.message ? `, asking ${a.message.replace(/[?.]+$/, '')}` : ''}`).join('; ')}.`)
   if (working.length) parts.push(`${working.length} working${working.length <= 3 ? `: ${working.map(a => a.name).join(', ')}` : ''}.`)
-  if (waiting.length) parts.push(`${waiting.map(a => a.name).join(' and ')} ${waiting.length === 1 ? 'is' : 'are'} waiting on a background job.`)
+  if (waiting.length) parts.push(`${waiting.map(a => `${a.name} is ${a.working_line ? a.working_line.replace(/^Waiting on:/, 'waiting on') : 'waiting on a background job'}`).join('; ')}.`)
   if (crashed.length) parts.push(`${crashed.map(a => a.name).join(' and ')} crashed.`)
   if (asks.length) parts.push(`${asks.map(q => `${q.title} has ${q.n === 1 ? 'a question' : `${q.n} questions`}`).join(' and ')} for you.`)
   return parts.join(' ')
