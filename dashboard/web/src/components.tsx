@@ -151,7 +151,7 @@ export function useHold(onHold: (x: number, y: number) => void) {
 function anchored(from: HTMLElement, items: number) {
   const r = from.getBoundingClientRect()
   const w = Math.min(260, innerWidth - 24)
-  const h = Math.min(innerHeight * 0.6, 16 + items * 44)
+  const h = 16 + items * 44 // a menu that doesn't fit beside the row goes to the bottom sheet, which has the whole screen
   const left = Math.max(12, Math.min(r.left + 8, innerWidth - w - 12))
   // h is a guess; maxHeight caps the real menu at the room on its side so a longer one scrolls instead of running off-screen
   if (innerHeight - r.bottom - 12 >= h) return { rect: r, style: { left, top: r.bottom + 8, width: w, maxHeight: innerHeight - r.bottom - 20, transformOrigin: 'top left' } }
